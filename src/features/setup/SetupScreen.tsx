@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useNavigate } from 'react-router'
+import { Link, useNavigate } from 'react-router'
 import { useLiveQuery } from 'dexie-react-hooks'
 import '../../engine/games'
 import { listEngines } from '../../engine/catalog'
@@ -134,6 +134,9 @@ export function SetupScreen() {
               </button>
             ))}
           </div>
+          <Link to="/courses" className="text-sm text-felt-400">
+            Manage courses →
+          </Link>
 
           {course && (
             <>

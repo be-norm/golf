@@ -88,9 +88,14 @@ export function HomeScreen() {
             e.target.value = ''
           }}
         />
-        <button className="text-sm text-stone-500" onClick={() => fileRef.current?.click()}>
-          Import round
-        </button>
+        <div className="flex items-center justify-center gap-4">
+          <Link to="/courses" className="text-sm text-stone-500">
+            Courses
+          </Link>
+          <button className="text-sm text-stone-500" onClick={() => fileRef.current?.click()}>
+            Import round
+          </button>
+        </div>
         {importError && <p className="mt-1 text-sm text-flag-500">That file isn't a golf round export.</p>}
       </footer>
     </main>
