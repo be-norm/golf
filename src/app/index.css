@@ -1,0 +1,32 @@
+@import 'tailwindcss';
+
+@theme {
+  /* Felt greens — the app's core palette */
+  --color-felt-50: #f0fdf4;
+  --color-felt-100: #dcfce7;
+  --color-felt-200: #bbf7d0;
+  --color-felt-300: #86efac;
+  --color-felt-400: #4ade80;
+  --color-felt-500: #22c55e;
+  --color-felt-600: #16a34a;
+  --color-felt-700: #15803d;
+  --color-felt-800: #14532d;
+  --color-felt-900: #0b3d20;
+  --color-felt-950: #052e16;
+
+  /* Accent — flag red */
+  --color-flag-500: #ef4444;
+  --color-flag-600: #dc2626;
+
+  --font-display: 'system-ui', -apple-system, 'Segoe UI', sans-serif;
+}
+
+html {
+  overscroll-behavior: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  margin: 0;
+  touch-action: manipulation;
+}
