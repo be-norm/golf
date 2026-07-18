@@ -21,6 +21,8 @@ export interface InputRequest {
   gameId: Uuid
   hole: number
   prompt: string
+  /** optional inputs render as chips but never block play (e.g. press offers) */
+  optional?: boolean
   options: { value: string; label: string }[]
   /** the game event kind to append with data { hole, choice } */
   eventKind: string

@@ -16,6 +16,7 @@ function arbitraryRoundAndEvents() {
       handicaps: fc.array(fc.integer({ min: -3, max: 24 }), { minLength: 4, maxLength: 4 }),
       net: fc.boolean(),
       carryover: fc.boolean(),
+      autoPress: fc.boolean(),
       // per hole per player: gross score or null (unscored)
       scores: fc.array(
         fc.array(fc.option(fc.integer({ min: 1, max: 12 }), { nil: null }), {
@@ -24,24 +25,48 @@ function arbitraryRoundAndEvents() {
         }),
         { minLength: 1, maxLength: 18 },
       ),
+      // wolf pick seed per hole: 0-2 partner index, 3 lone, 4 blind, 5 no pick yet
+      pickSeeds: fc.array(fc.integer({ min: 0, max: 5 }), { minLength: 18, maxLength: 18 }),
     })
-    .map(({ playerCount, handicaps, net, carryover, scores }) => {
+    .map(({ playerCount, handicaps, net, carryover, autoPress, scores, pickSeeds }) => {
       const players = makePlayers(
         playerNames.slice(0, playerCount).map((name, i) => ({ name, ch: handicaps[i]! })),
       )
-      const round = makeRound({
-        players,
-        holes: 'full18',
-        games: [
-          {
-            type: 'skins',
-            config: { stakeCents: 100, carryover },
-            handicap: net
-              ? { mode: 'net', allowancePct: 100, reference: 'offLow' }
-              : { mode: 'gross', allowancePct: 100, reference: 'absolute' },
+      const ids = players.map((p) => p.playerId)
+      const handicap = net
+        ? ({ mode: 'net', allowancePct: 100, reference: 'offLow' } as const)
+        : ({ mode: 'gross', allowancePct: 100, reference: 'absolute' } as const)
+
+      const games: Parameters<typeof makeRound>[0]['games'] = [
+        { type: 'skins', config: { stakeCents: 100, carryover }, handicap },
+      ]
+      if (playerCount === 2 || playerCount === 4) {
+        games.push({
+          type: 'nassau',
+          config: {
+            stakeCents: 500,
+            teams: playerCount === 4 ? { a: [ids[0]!, ids[1]!], b: [ids[2]!, ids[3]!] } : null,
+            autoPress,
           },
-        ],
-      })
+          handicap,
+        })
+      }
+      if (playerCount === 4) {
+        games.push({
+          type: 'vegas',
+          config: {
+            pointCents: 10,
+            teams: { a: [ids[0]!, ids[2]!], b: [ids[1]!, ids[3]!] },
+            birdieFlip: true,
+            eagleDouble: true,
+          },
+          handicap,
+        })
+        games.push({ type: 'wolf', config: { pointCents: 100, rotation: [...ids] }, handicap })
+      }
+
+      const round = makeRound({ players, holes: 'full18', games })
+      const wolfGameId = round.games.find((g) => g.type === 'wolf')?.gameId
       const log = new EventLog()
       scores.forEach((byPlayer, holeIdx) => {
         players.forEach((p, pi) => {
@@ -50,6 +75,20 @@ function arbitraryRoundAndEvents() {
             log.append({ type: 'score/set', playerId: p.playerId, hole: holeIdx + 1, gross })
           }
         })
+        if (wolfGameId) {
+          const seed = pickSeeds[holeIdx]!
+          if (seed < 5) {
+            const wolfId = ids[holeIdx % 4]!
+            const others = ids.filter((id) => id !== wolfId)
+            const choice = seed < 3 ? others[seed]! : seed === 3 ? 'lone' : 'blind'
+            log.append({
+              type: 'game/event',
+              gameId: wolfGameId,
+              kind: 'wolf/pick',
+              data: { hole: holeIdx + 1, choice },
+            })
+          }
+        }
       })
       return { round, log }
     })
