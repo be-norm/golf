@@ -1,9 +1,13 @@
+import { useRef, useState } from 'react'
 import { Link } from 'react-router'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { roundRepo } from '../../db/repos'
 import { holesForRange } from '../../engine/core/context'
+import { importRound } from '../settle/exportRound'
 
 export function HomeScreen() {
+  const fileRef = useRef<HTMLInputElement>(null)
+  const [importError, setImportError] = useState(false)
   const liveRound = useLiveQuery(() => roundRepo.liveRound())
   const recent = useLiveQuery(() => roundRepo.listRecent(8))
   const completed = recent?.filter((r) => r.status === 'completed') ?? []
@@ -66,6 +70,29 @@ export function HomeScreen() {
           </ul>
         </section>
       )}
+
+      <footer className="mt-auto pb-2 text-center">
+        <input
+          ref={fileRef}
+          type="file"
+          accept="application/json"
+          className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0]
+            if (!file) return
+            void file
+              .text()
+              .then(importRound)
+              .then(() => setImportError(false))
+              .catch(() => setImportError(true))
+            e.target.value = ''
+          }}
+        />
+        <button className="text-sm text-stone-500" onClick={() => fileRef.current?.click()}>
+          Import round
+        </button>
+        {importError && <p className="mt-1 text-sm text-flag-500">That file isn't a golf round export.</p>}
+      </footer>
     </main>
   )
 }
