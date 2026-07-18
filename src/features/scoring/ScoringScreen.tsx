@@ -88,7 +88,7 @@ export function ScoringScreen() {
   }
 
   return (
-    <main className="flex min-h-dvh flex-col pb-40">
+    <main className="flex min-h-dvh select-none flex-col pb-40">
       <header className="flex items-center justify-between py-4">
         <Link to="/" className="px-1 text-stone-400" aria-label="home">
           ⌂

@@ -4,6 +4,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { roundRepo } from '../../db/repos'
 import { holesForRange } from '../../engine/core/context'
 import { importRound } from '../settle/exportRound'
+import { InstallHint } from '../../pwa/InstallHint'
 
 export function HomeScreen() {
   const fileRef = useRef<HTMLInputElement>(null)
@@ -47,6 +48,8 @@ export function HomeScreen() {
       >
         <span className="text-lg font-semibold">New round</span>
       </Link>
+
+      <InstallHint />
 
       {completed.length > 0 && (
         <section>
@@ -95,6 +98,9 @@ export function HomeScreen() {
           <button className="text-sm text-stone-500" onClick={() => fileRef.current?.click()}>
             Import round
           </button>
+          <Link to="/diagnostics" className="text-sm text-stone-600">
+            ⚙
+          </Link>
         </div>
         {importError && <p className="mt-1 text-sm text-flag-500">That file isn't a golf round export.</p>}
       </footer>

@@ -7,6 +7,7 @@ import { ScorecardScreen } from '../features/scoring/ScorecardScreen'
 import { SettleScreen } from '../features/settle/SettleScreen'
 import { CourseListScreen } from '../features/courses/CourseListScreen'
 import { CourseEditorScreen } from '../features/courses/CourseEditorScreen'
+import { DiagnosticsScreen } from '../features/diagnostics/DiagnosticsScreen'
 
 export const routes: RouteObject[] = [
   {
@@ -15,6 +16,7 @@ export const routes: RouteObject[] = [
       { path: '/', element: <HomeScreen /> },
       { path: '/setup', element: <SetupScreen /> },
       { path: '/courses', element: <CourseListScreen /> },
+      { path: '/diagnostics', element: <DiagnosticsScreen /> },
       { path: '/courses/new', element: <CourseEditorScreen /> },
       { path: '/courses/:courseId/edit', element: <CourseEditorScreen /> },
       { path: '/round/:roundId', element: <ScoringScreen /> },
