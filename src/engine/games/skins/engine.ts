@@ -134,6 +134,10 @@ export const skinsEngine: GameEngine<SkinsConfig> = {
     maxPlayers: 8,
   },
   configSchema: skinsConfigSchema,
+  configFields: [
+    { key: 'stakeCents', kind: 'money', label: 'Skin value' },
+    { key: 'carryover', kind: 'boolean', label: 'Carryovers', hint: 'Tied holes roll over' },
+  ],
   defaultConfig: () => ({ stakeCents: 100, carryover: true }),
   defaultHandicap: (): HandicapSettings => ({
     mode: 'net',

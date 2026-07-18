@@ -35,6 +35,18 @@ export interface GameDerivation {
   settlement: Settlement
 }
 
+/**
+ * Declarative config form fields — the setup wizard renders these generically,
+ * so no game ever ships custom setup UI. 'teams' and 'rotation' are the
+ * first-class participant-assignment field types (Vegas teams, Wolf order).
+ */
+export type ConfigFieldSpec =
+  | { key: string; kind: 'money'; label: string; hint?: string }
+  | { key: string; kind: 'boolean'; label: string; hint?: string }
+  | { key: string; kind: 'select'; label: string; options: { value: string; label: string }[] }
+  | { key: string; kind: 'teams'; label: string }
+  | { key: string; kind: 'rotation'; label: string }
+
 export interface GameEngine<C = unknown> {
   type: string
   meta: {
@@ -44,6 +56,7 @@ export interface GameEngine<C = unknown> {
     maxPlayers: number
   }
   configSchema: z.ZodType<C>
+  configFields: ConfigFieldSpec[]
   defaultConfig(players: readonly RoundPlayer[]): C
   defaultHandicap(): HandicapSettings
   /** [] = valid; otherwise human-readable problems shown in setup */

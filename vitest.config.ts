@@ -11,6 +11,12 @@ export default defineConfig({
         },
       },
       {
+        resolve: {
+          alias: {
+            'virtual:pwa-register/react': new URL('./src/test/pwa-register-stub.ts', import.meta.url)
+              .pathname,
+          },
+        },
         test: {
           name: 'app',
           environment: 'jsdom',
