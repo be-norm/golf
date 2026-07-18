@@ -7,6 +7,7 @@ import { effectiveEvents } from '../../engine/core/replay'
 import { formatCentsSigned } from '../../engine/core/money'
 import type { InputRequest } from '../../engine/catalog'
 import { Sheet } from '../../components/Sheet'
+import { enqueueRoundArchive } from '../../remote/outbox'
 import { useRound } from './useRound'
 import { ScoreRow } from './ScoreRow'
 
@@ -84,6 +85,7 @@ export function ScoringScreen() {
   const finish = async () => {
     await eventStore.append(round.id, [{ type: 'round/completed' }])
     await roundRepo.put({ ...round, status: 'completed' })
+    void enqueueRoundArchive({ ...round, status: 'completed' })
     navigate(`/round/${round.id}/settle`)
   }
 
