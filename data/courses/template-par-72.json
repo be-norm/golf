@@ -1,0 +1,34 @@
+{
+  "id": "0198a000-0000-7000-8000-000000000001",
+  "name": "Template — Par 72",
+  "location": "Anywhere",
+  "holeCount": 18,
+  "holes": [
+    { "number": 1, "par": 4, "strokeIndex": 5 },
+    { "number": 2, "par": 4, "strokeIndex": 13 },
+    { "number": 3, "par": 5, "strokeIndex": 1 },
+    { "number": 4, "par": 3, "strokeIndex": 9 },
+    { "number": 5, "par": 4, "strokeIndex": 17 },
+    { "number": 6, "par": 4, "strokeIndex": 3 },
+    { "number": 7, "par": 3, "strokeIndex": 11 },
+    { "number": 8, "par": 5, "strokeIndex": 7 },
+    { "number": 9, "par": 4, "strokeIndex": 15 },
+    { "number": 10, "par": 4, "strokeIndex": 6 },
+    { "number": 11, "par": 5, "strokeIndex": 2 },
+    { "number": 12, "par": 3, "strokeIndex": 16 },
+    { "number": 13, "par": 4, "strokeIndex": 10 },
+    { "number": 14, "par": 4, "strokeIndex": 4 },
+    { "number": 15, "par": 5, "strokeIndex": 8 },
+    { "number": 16, "par": 3, "strokeIndex": 18 },
+    { "number": 17, "par": 4, "strokeIndex": 12 },
+    { "number": 18, "par": 4, "strokeIndex": 14 }
+  ],
+  "teeSets": [
+    { "id": "tee-blue", "name": "Blue", "color": "#3b82f6", "rating": 71.2, "slope": 125 },
+    { "id": "tee-white", "name": "White", "color": "#e7e5e4", "rating": 69.8, "slope": 121 },
+    { "id": "tee-red", "name": "Red", "color": "#ef4444", "rating": 67.9, "slope": 117 }
+  ],
+  "source": "seed",
+  "updatedAt": "2026-07-18T00:00:00.000Z",
+  "revision": 1
+}
