@@ -1,0 +1,238 @@
+{
+  "id": "884dac4d-c3df-4327-99c4-bb4fa935426b",
+  "name": "Broadmoor Country Club",
+  "location": "Indianapolis, IN",
+  "holeCount": 18,
+  "holes": [
+    {
+      "number": 1,
+      "par": 4,
+      "strokeIndex": 17
+    },
+    {
+      "number": 2,
+      "par": 4,
+      "strokeIndex": 7
+    },
+    {
+      "number": 3,
+      "par": 4,
+      "strokeIndex": 3
+    },
+    {
+      "number": 4,
+      "par": 3,
+      "strokeIndex": 11
+    },
+    {
+      "number": 5,
+      "par": 4,
+      "strokeIndex": 9
+    },
+    {
+      "number": 6,
+      "par": 4,
+      "strokeIndex": 1
+    },
+    {
+      "number": 7,
+      "par": 4,
+      "strokeIndex": 5
+    },
+    {
+      "number": 8,
+      "par": 3,
+      "strokeIndex": 15
+    },
+    {
+      "number": 9,
+      "par": 5,
+      "strokeIndex": 13
+    },
+    {
+      "number": 10,
+      "par": 4,
+      "strokeIndex": 12
+    },
+    {
+      "number": 11,
+      "par": 3,
+      "strokeIndex": 6
+    },
+    {
+      "number": 12,
+      "par": 5,
+      "strokeIndex": 10
+    },
+    {
+      "number": 13,
+      "par": 4,
+      "strokeIndex": 8
+    },
+    {
+      "number": 14,
+      "par": 4,
+      "strokeIndex": 2
+    },
+    {
+      "number": 15,
+      "par": 3,
+      "strokeIndex": 18
+    },
+    {
+      "number": 16,
+      "par": 4,
+      "strokeIndex": 14
+    },
+    {
+      "number": 17,
+      "par": 5,
+      "strokeIndex": 16
+    },
+    {
+      "number": 18,
+      "par": 5,
+      "strokeIndex": 4
+    }
+  ],
+  "teeSets": [
+    {
+      "id": "tee-ross",
+      "name": "Ross",
+      "color": "#1e3a8a",
+      "rating": 72.1,
+      "slope": 132,
+      "yardages": [
+        422,
+        414,
+        391,
+        142,
+        413,
+        422,
+        343,
+        165,
+        536,
+        402,
+        205,
+        487,
+        391,
+        396,
+        163,
+        360,
+        547,
+        509
+      ]
+    },
+    {
+      "id": "tee-blue",
+      "name": "Blue",
+      "color": "#3b82f6",
+      "rating": 71.3,
+      "slope": 130,
+      "yardages": [
+        422,
+        401,
+        374,
+        142,
+        413,
+        393,
+        336,
+        165,
+        507,
+        402,
+        189,
+        487,
+        374,
+        396,
+        150,
+        360,
+        547,
+        477
+      ]
+    },
+    {
+      "id": "tee-white",
+      "name": "White",
+      "color": "#e7e5e4",
+      "rating": 68.1,
+      "slope": 123,
+      "yardages": [
+        377,
+        347,
+        338,
+        132,
+        321,
+        354,
+        329,
+        148,
+        480,
+        352,
+        178,
+        476,
+        342,
+        336,
+        114,
+        337,
+        499,
+        451
+      ]
+    },
+    {
+      "id": "tee-green",
+      "name": "Green",
+      "color": "#22c55e",
+      "rating": 71.8,
+      "slope": 126,
+      "yardages": [
+        370,
+        323,
+        312,
+        122,
+        314,
+        346,
+        323,
+        117,
+        423,
+        313,
+        161,
+        463,
+        335,
+        336,
+        108,
+        274,
+        440,
+        348
+      ]
+    },
+    {
+      "id": "tee-green-red",
+      "name": "Green/Red",
+      "color": "#dc2626",
+      "rating": 69.7,
+      "slope": 121,
+      "yardages": [
+        370,
+        323,
+        312,
+        122,
+        314,
+        346,
+        323,
+        117,
+        423,
+        313,
+        161,
+        463,
+        335,
+        336,
+        108,
+        274,
+        440,
+        348
+      ]
+    }
+  ],
+  "source": "seed",
+  "updatedAt": "2026-07-18T23:59:21.273Z",
+  "revision": 1
+}
