@@ -210,6 +210,31 @@ export const wolfEngine: GameEngine<WolfConfig> = {
     blurb: 'Rotating Wolf picks a partner off the tee — or goes lone for double.',
     minPlayers: 4,
     maxPlayers: 4,
+    rules: {
+      tagline: 'A rotating captain picks a partner off the tee — or goes it alone for more.',
+      howToPlay: [
+        'The Wolf rotates each hole in your setup order — everyone takes a turn every four holes.',
+        'Watching the tee shots, the Wolf picks a partner for the hole — or declares Lone Wolf and plays 1 against 3. Declaring Blind Wolf (before anyone swings) raises the stakes further.',
+        'Best net ball of each side decides the hole. A tie halves it — nobody scores.',
+        'When the rotation runs out (holes 17–18, or the 9th of a nine), the player with the fewest points is the Wolf.',
+      ],
+      scoring: [
+        'Wolf & partner win: 2 points each. The other pair win: 3 points each — beating the side that had the pick pays better.',
+        'Lone Wolf wins: 4 points. Lone Wolf loses: each of the other three takes 1.',
+        'Blind Wolf wins: 6 points. Blind Wolf loses: each of the others takes 2.',
+        'Money settles on point differences at the per-point stake — the gap between you and each player changes hands.',
+      ],
+      terms: [
+        { term: 'Wolf', def: "The hole's captain: tees last, watches the drives, makes the pick." },
+        { term: 'Lone Wolf', def: 'The Wolf declining all partners to play 1 v 3 at double reward.' },
+        {
+          term: 'Blind Wolf',
+          def: 'Going lone before anyone has hit — triple reward, maximum swagger.',
+        },
+        { term: 'The pack', def: 'Everyone not on the Wolf side of a hole.' },
+        { term: 'Best ball', def: "A side's lowest net score — the only one that counts." },
+      ],
+    },
   },
   configSchema: wolfConfigSchema,
   configFields: [

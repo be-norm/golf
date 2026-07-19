@@ -9,6 +9,7 @@ import { courseRepo, playerRepo, roundRepo } from '../../db/repos'
 import { newId } from '../../db/ids'
 import { BigButton } from '../../components/BigButton'
 import { CourseSearch } from '../courses/CourseSearch'
+import { RulesSheet } from '../games/RulesSheet'
 import { GameConfigCard, type GameDraft } from './GameConfigCard'
 
 interface PlayerDraft {
@@ -40,6 +41,7 @@ export function SetupScreen() {
   const [players, setPlayers] = useState<PlayerDraft[]>([])
   const [nameInput, setNameInput] = useState('')
   const [games, setGames] = useState<GameDraft[]>([])
+  const [rulesFor, setRulesFor] = useState<string>()
 
   const course = courses?.find((c) => c.id === courseId)
 
@@ -357,6 +359,7 @@ export function SetupScreen() {
                     ])
                 }}
                 onChange={(next) => setGames(games.map((g) => (g.type === engine.type ? next : g)))}
+                onRules={() => setRulesFor(engine.type)}
               />
             )
           })}
@@ -385,6 +388,8 @@ export function SetupScreen() {
           </BigButton>
         )}
       </div>
+
+      <RulesSheet type={rulesFor} onClose={() => setRulesFor(undefined)} />
     </main>
   )
 }

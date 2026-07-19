@@ -16,9 +16,10 @@ interface Props {
   draft: GameDraft | undefined
   onToggle: () => void
   onChange: (draft: GameDraft) => void
+  onRules: () => void
 }
 
-export function GameConfigCard({ engine, playable, players, draft, onToggle, onChange }: Props) {
+export function GameConfigCard({ engine, playable, players, draft, onToggle, onChange, onRules }: Props) {
   const config = (draft?.config ?? {}) as Record<string, unknown>
 
   const setConfigValue = (key: string, value: unknown) => {
@@ -32,27 +33,36 @@ export function GameConfigCard({ engine, playable, players, draft, onToggle, onC
         draft ? 'border-felt-500 bg-felt-900/60' : 'border-stone-700 bg-stone-900/70'
       } ${playable ? '' : 'opacity-40'}`}
     >
-      <button
-        className="flex w-full items-center justify-between px-4 py-4 text-left"
-        disabled={!playable}
-        onClick={onToggle}
-      >
-        <div>
-          <span className="text-lg font-bold">{engine.meta.name}</span>
-          <p className="text-sm text-stone-400">
-            {playable
-              ? engine.meta.blurb
-              : `Needs ${engine.meta.minPlayers}${engine.meta.maxPlayers > engine.meta.minPlayers ? `–${engine.meta.maxPlayers}` : ''} players`}
-          </p>
-        </div>
-        <div
-          className={`flex size-7 items-center justify-center rounded-full text-sm font-bold ${
-            draft ? 'bg-felt-500 text-felt-950' : 'bg-stone-800 text-stone-500'
-          }`}
+      <div className="flex items-stretch">
+        <button
+          className="flex flex-1 items-center justify-between px-4 py-4 text-left"
+          disabled={!playable}
+          onClick={onToggle}
         >
-          {draft ? '✓' : '+'}
-        </div>
-      </button>
+          <div>
+            <span className="text-lg font-bold">{engine.meta.name}</span>
+            <p className="text-sm text-stone-400">
+              {playable
+                ? engine.meta.blurb
+                : `Needs ${engine.meta.minPlayers}${engine.meta.maxPlayers > engine.meta.minPlayers ? `–${engine.meta.maxPlayers}` : ''} players`}
+            </p>
+          </div>
+          <div
+            className={`flex size-7 items-center justify-center text-sm font-bold ${
+              draft ? 'bg-felt-500 text-felt-950' : 'bg-stone-800 text-stone-500'
+            }`}
+          >
+            {draft ? '✓' : '+'}
+          </div>
+        </button>
+        <button
+          aria-label={`${engine.meta.name} rules`}
+          onClick={onRules}
+          className="font-display border-l-2 border-stone-800 px-3 text-[10px] uppercase text-felt-400"
+        >
+          Rules
+        </button>
+      </div>
 
       {draft && (
         <div className="space-y-4 border-t border-felt-800/60 px-4 py-4">

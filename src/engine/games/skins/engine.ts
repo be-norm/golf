@@ -132,6 +132,31 @@ export const skinsEngine: GameEngine<SkinsConfig> = {
     blurb: 'Win the hole outright, win the skin. Ties carry over.',
     minPlayers: 2,
     maxPlayers: 8,
+    rules: {
+      tagline: 'Every hole is worth money. Win it outright or nobody does.',
+      howToPlay: [
+        'Each hole is worth one skin. The lowest score wins it — but only outright. Any tie for low and the skin goes unwon.',
+        'With carryovers on, an unwon skin rolls onto the next hole. Holes stack until someone wins one outright and banks the whole pile.',
+        'Playing net, handicap strokes land on the hardest holes (by stroke index) and the lowest net score takes the skin.',
+      ],
+      scoring: [
+        'A skin collects the skin value from every other player. Win a 3-skin carry in a foursome at $1 and you collect $3 from each — a $9 swing.',
+        'If the final hole ties, the carried pile dies unwon.',
+      ],
+      terms: [
+        { term: 'Skin', def: 'The prize for winning a hole outright — no ties allowed.' },
+        { term: 'Carryover', def: "A tied hole's skin rolling forward, making the next hole worth more." },
+        { term: 'Net / Gross', def: 'Net is your score minus handicap strokes; gross is raw strokes.' },
+        {
+          term: 'Stroke index',
+          def: 'The 1–18 hole difficulty ranking that decides where handicap strokes land.',
+        },
+        {
+          term: 'Off low',
+          def: "Everyone's handicap is reduced by the lowest player's, so the best player plays at zero.",
+        },
+      ],
+    },
   },
   configSchema: skinsConfigSchema,
   configFields: [

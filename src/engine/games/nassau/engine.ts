@@ -236,6 +236,30 @@ export const nassauEngine: GameEngine<NassauConfig> = {
     blurb: 'Three match-play bets: front nine, back nine, overall. Press when down.',
     minPlayers: 2,
     maxPlayers: 4,
+    rules: {
+      tagline: 'Three bets in one round: the front nine, the back nine, and the overall.',
+      howToPlay: [
+        'Match play: each hole is won, lost, or halved. Lowest net score takes the hole — in 2v2, only the better ball of each team counts.',
+        'The front nine, back nine, and full 18 run as three separate bets at the same stake. A hole feeds its nine AND the overall.',
+        'Fall 2 down on any bet and a press starts (automatic if auto-press is on): a fresh bet at the same stake from the next hole to the end of that segment. Presses can themselves be pressed.',
+        'A 9-hole round collapses to a single overall bet.',
+      ],
+      scoring: [
+        'When a bet runs out of holes, whoever is up wins its stake; a tied bet pushes.',
+        'Every player pays or collects the stake — a $5 bet swings $5 per player, in singles or 2v2.',
+      ],
+      terms: [
+        {
+          term: 'Press',
+          def: "A new same-stake bet started when a side is 2 down, running from the next hole to the end of the original bet's stretch.",
+        },
+        { term: 'Auto-press', def: 'A press that starts itself the moment any live bet hits 2 down.' },
+        { term: 'Halve', def: 'A tied hole — nobody gains ground on any bet.' },
+        { term: 'All square (AS)', def: 'A bet where neither side is up.' },
+        { term: 'Push', def: 'A bet that ends tied — no money moves.' },
+        { term: 'Best ball', def: "In 2v2, each team counts only its lower score on a hole." },
+      ],
+    },
   },
   configSchema: nassauConfigSchema,
   configFields: [

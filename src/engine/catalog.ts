@@ -49,6 +49,15 @@ export type ConfigFieldSpec =
   | { key: string; kind: 'teams'; label: string }
   | { key: string; kind: 'rotation'; label: string }
 
+/** Player-facing rules, rendered generically by the rules sheet. Must describe
+ *  THIS implementation (our point tables, our press conventions), not folklore. */
+export interface GameRules {
+  tagline: string
+  howToPlay: string[]
+  scoring: string[]
+  terms: { term: string; def: string }[]
+}
+
 export interface GameEngine<C = unknown> {
   type: string
   meta: {
@@ -56,6 +65,7 @@ export interface GameEngine<C = unknown> {
     blurb: string
     minPlayers: number
     maxPlayers: number
+    rules: GameRules
   }
   configSchema: z.ZodType<C>
   configFields: ConfigFieldSpec[]

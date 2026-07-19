@@ -162,6 +162,28 @@ export const vegasEngine: GameEngine<VegasConfig> = {
     blurb: 'Pair up. Team scores combine into one number — birdies flip the other side.',
     minPlayers: 4,
     maxPlayers: 4,
+    rules: {
+      tagline: "Two teams, one number each. Birdies flip the other side's digits.",
+      howToPlay: [
+        "2 v 2. Each hole, teammates' scores pair into one number, low digit first: a 4 and a 5 make 45.",
+        'Low team number wins the difference in points: 45 vs 62 is 17 points.',
+        "A natural birdie flips the OPPONENTS' number high-digit-first — their 47 becomes 74. If both teams birdie, the flips cancel.",
+        'An eagle also doubles the points on the hole. A score of 10+ goes in front (a 4 and a 10 make 104) to soften the blowup.',
+      ],
+      scoring: [
+        'Every decided hole moves points × the per-point stake for each player; equal numbers push.',
+        'Net vegas applies handicap strokes before pairing — but flips still key off natural (gross) birdies.',
+      ],
+      terms: [
+        { term: 'Team number', def: "Both teammates' scores glued into one number, low digit first." },
+        {
+          term: 'Flip the bird',
+          def: "A natural birdie reversing the opponents' digits to high-first — the punishment for getting birdied.",
+        },
+        { term: 'Natural', def: 'A gross score — before any handicap strokes.' },
+        { term: 'Push', def: 'Equal team numbers — no points move.' },
+      ],
+    },
   },
   configSchema: vegasConfigSchema,
   configFields: [

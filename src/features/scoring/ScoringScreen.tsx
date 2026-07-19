@@ -8,6 +8,7 @@ import { formatCentsSigned } from '../../engine/core/money'
 import type { InputRequest } from '../../engine/catalog'
 import { Sheet } from '../../components/Sheet'
 import { enqueueRoundArchive } from '../../remote/outbox'
+import { RulesSheet } from '../games/RulesSheet'
 import { useRound } from './useRound'
 import { ScoreRow } from './ScoreRow'
 
@@ -18,6 +19,7 @@ export function ScoringScreen() {
   const view = useRound(roundId)
   const [hole, setHole] = useState<number>()
   const [standingsOpen, setStandingsOpen] = useState(false)
+  const [rulesFor, setRulesFor] = useState<string>()
 
   // Initial hole, captured ONCE when the view first loads: ?hole= deep link
   // (scorecard tap), else first not-fully-scored hole, else the last hole.
@@ -211,9 +213,18 @@ export function ScoringScreen() {
             if (!d) return null
             return (
               <div key={g.gameId}>
-                <h3 className="font-display mb-2.5 text-xs uppercase text-felt-300">
-                  {gameName(g.type)}
-                </h3>
+                <div className="mb-2.5 flex items-baseline justify-between">
+                  <h3 className="font-display text-xs uppercase text-felt-300">
+                    {gameName(g.type)}
+                  </h3>
+                  <button
+                    aria-label={`${g.type} rules`}
+                    className="font-display text-[10px] uppercase text-felt-400"
+                    onClick={() => setRulesFor(g.type)}
+                  >
+                    Rules ?
+                  </button>
+                </div>
                 <ul className="space-y-2">
                   {d.standings.map((line) => (
                     <motion.li
@@ -249,6 +260,8 @@ export function ScoringScreen() {
           })}
         </div>
       </Sheet>
+
+      <RulesSheet type={rulesFor} onClose={() => setRulesFor(undefined)} />
     </main>
   )
 }
