@@ -2,12 +2,7 @@ import { z } from 'zod'
 import type { GameEngine, GameDerivation, StandingLine } from '../../catalog'
 import type { RoundContext } from '../../core/context'
 import type { GameScopedEvent } from '../../core/events'
-import {
-  addLine,
-  emptySettlement,
-  formatCentsSigned,
-  type Settlement,
-} from '../../core/money'
+import { addLine, emptySettlement, type Settlement } from '../../core/money'
 import type { GameConfig, HandicapSettings, RoundPlayer, Uuid } from '../../core/types'
 
 export const skinsConfigSchema = z.object({
@@ -92,14 +87,26 @@ function derive(
     }))
     .sort((a, b) => b.amountCents - a.amountCents)
 
-  const leader = standings[0]
-  const summaryParts: string[] = []
-  if (leader && leader.amountCents > 0) {
-    summaryParts.push(`${leader.label} ${formatCentsSigned(leader.amountCents)}`)
+  // The bar recaps the LATEST decided hole — what just happened, not the
+  // aggregate (that lives in the sheet standings): "H4 · Rob wins 2 skins".
+  const lastDecided = [...holeResults]
+    .reverse()
+    .find((r) => r.kind === 'won' || r.kind === 'tied')
+  const summaryParts: { label: string; value: string }[] = []
+  if (!lastDecided) {
+    summaryParts.push({ label: '', value: 'no skins yet' })
+  } else if (lastDecided.kind === 'won') {
+    summaryParts.push({
+      label: `H${lastDecided.hole}`,
+      value: `${nameOf.get(lastDecided.winnerId)} wins ${lastDecided.skins} skin${lastDecided.skins > 1 ? 's' : ''}`,
+    })
   } else {
-    summaryParts.push('all square')
+    summaryParts.push({
+      label: `H${lastDecided.hole}`,
+      value:
+        lastDecided.carryAfter > 0 ? `tied · ${lastDecided.carryAfter} carried` : 'tied — no skin',
+    })
   }
-  if (carry > 0) summaryParts.push(`${carry} carried`)
 
   const holeSummary = (hole: number): string[] => {
     const r = holeResults.find((h) => h.hole === hole)
@@ -117,7 +124,10 @@ function derive(
 
   return {
     standings,
-    summary: summaryParts.join(' · '),
+    summary: summaryParts
+      .map((p) => (p.label ? `${p.label}: ${p.value}` : p.value))
+      .join(' · '),
+    summaryParts,
     holeSummary,
     requiredInputs: () => [],
     settlement,

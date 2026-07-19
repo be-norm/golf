@@ -51,6 +51,8 @@ describe('skins — golden fixtures (hand-verified)', () => {
     ])
     expect(skins.carrying).toBe(1) // hole 9 tie dies carried
     expect(skins.standings[0]).toMatchObject({ label: 'A', amountCents: 800, detail: '4 skins' })
+    // bar recaps the latest decided hole, not the aggregate
+    expect(skins.summaryParts).toEqual([{ label: 'H9', value: 'tied · 1 carried' }])
   })
 
   /**
@@ -217,5 +219,6 @@ describe('skins — golden fixtures (hand-verified)', () => {
     const skins = skinsOf(round, log)
     expect(skins.settlement.perPlayerCents).toEqual({ 'p-a': 100, 'p-b': -100 })
     expect(skins.carrying).toBe(0)
+    expect(skins.summaryParts).toEqual([{ label: 'H2', value: 'A wins 1 skin' }])
   })
 })
