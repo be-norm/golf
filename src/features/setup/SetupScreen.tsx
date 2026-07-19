@@ -23,6 +23,11 @@ function computeCourseHandicap(index: number, course: Course | undefined, tee: T
   return courseHandicap(index, tee.slope, tee.rating, par)
 }
 
+/** tapping a numeric field selects its contents so typing replaces, not appends */
+export function selectOnFocus(e: React.FocusEvent<HTMLInputElement>): void {
+  e.currentTarget.select()
+}
+
 export function SetupScreen() {
   const navigate = useNavigate()
   const courses = useLiveQuery(() => courseRepo.list())
@@ -285,6 +290,7 @@ export function SetupScreen() {
                       min={-10}
                       max={54}
                       value={p.handicapIndex}
+                      onFocus={selectOnFocus}
                       aria-label={`${p.name} handicap index`}
                       onChange={(e) =>
                         setPlayers(

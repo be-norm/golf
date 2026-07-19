@@ -127,6 +127,7 @@ export function CourseEditorScreen() {
                   type="number"
                   inputMode="decimal"
                   step="0.1"
+                  onFocus={(e) => e.currentTarget.select()}
                   value={tee.rating}
                   onChange={(e) => updateTee(i, { rating: Number(e.target.value) })}
                   className="min-h-10 w-16 rounded-lg bg-stone-800 px-2 text-sm text-stone-100 ring-1 ring-stone-700 focus:outline-none"
@@ -137,6 +138,7 @@ export function CourseEditorScreen() {
                 <input
                   type="number"
                   inputMode="numeric"
+                  onFocus={(e) => e.currentTarget.select()}
                   value={tee.slope}
                   onChange={(e) => updateTee(i, { slope: Number(e.target.value) })}
                   className="min-h-10 w-14 rounded-lg bg-stone-800 px-2 text-sm text-stone-100 ring-1 ring-stone-700 focus:outline-none"
@@ -210,6 +212,7 @@ export function CourseEditorScreen() {
                     <input
                       type="number"
                       inputMode="numeric"
+                      onFocus={(e) => e.currentTarget.select()}
                       min={1}
                       max={course.holeCount}
                       value={hole.strokeIndex}
