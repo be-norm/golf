@@ -39,9 +39,14 @@ export class PlayerRepo {
     return player
   }
 
-  /** Remember the handicap a player teed off with — next setup defaults to it. */
-  async rememberHandicap(playerId: string, courseHandicap: number): Promise<void> {
+  /** Remember what a player teed off with — next setup recomputes from their index. */
+  async rememberHandicap(
+    playerId: string,
+    handicapIndex: number,
+    courseHandicap: number,
+  ): Promise<void> {
     await this.db.players.update(playerId, {
+      handicapIndex,
       lastCourseHandicap: courseHandicap,
       updatedAt: new Date().toISOString(),
     })

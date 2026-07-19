@@ -3,17 +3,24 @@ import { Link, useNavigate } from 'react-router'
 import { useLiveQuery } from 'dexie-react-hooks'
 import '../../engine/games'
 import { listEngines } from '../../engine/catalog'
-import type { Course, GameConfig, RoundHoles } from '../../engine/core/types'
+import { courseHandicap } from '../../engine/core/handicap'
+import type { Course, GameConfig, RoundHoles, TeeSet } from '../../engine/core/types'
 import { courseRepo, playerRepo, roundRepo } from '../../db/repos'
 import { newId } from '../../db/ids'
 import { BigButton } from '../../components/BigButton'
-import { Stepper } from '../../components/Stepper'
 import { CourseSearch } from '../courses/CourseSearch'
 import { GameConfigCard, type GameDraft } from './GameConfigCard'
 
 interface PlayerDraft {
   name: string
-  courseHandicap: number
+  /** WHS index; course handicap is derived from the selected course + tee */
+  handicapIndex: number
+}
+
+function computeCourseHandicap(index: number, course: Course | undefined, tee: TeeSet | undefined): number {
+  if (!course || !tee) return Math.round(index)
+  const par = course.holes.reduce((a, h) => a + h.par, 0)
+  return courseHandicap(index, tee.slope, tee.rating, par)
 }
 
 export function SetupScreen() {
@@ -34,9 +41,12 @@ export function SetupScreen() {
   const addPlayer = (name: string) => {
     const trimmed = name.trim()
     if (!trimmed || players.some((p) => p.name.toLowerCase() === trimmed.toLowerCase())) return
-    // returning players default to the handicap they used last time
+    // returning players default to their stored index (or legacy course handicap)
     const known = roster?.find((r) => r.name.toLowerCase() === trimmed.toLowerCase())
-    setPlayers([...players, { name: trimmed, courseHandicap: known?.lastCourseHandicap ?? 0 }])
+    setPlayers([
+      ...players,
+      { name: trimmed, handicapIndex: known?.handicapIndex ?? known?.lastCourseHandicap ?? 0 },
+    ])
     setNameInput('')
   }
 
@@ -51,7 +61,11 @@ export function SetupScreen() {
           const roundPlayers = players.map((p, i) => ({
             playerId: `draft-${i}`,
             name: p.name,
-            courseHandicap: p.courseHandicap,
+            courseHandicap: computeCourseHandicap(
+              p.handicapIndex,
+              course,
+              course?.teeSets.find((t) => t.id === teeSetId),
+            ),
           }))
           return engine.validateSetup(
             { gameId: 'draft', type: g.type, handicap: g.handicap, config: g.config },
@@ -62,14 +76,17 @@ export function SetupScreen() {
 
   const teeOff = async () => {
     if (!course || !teeSetId) return
+    const tee = course.teeSets.find((t) => t.id === teeSetId)
     const roundPlayers = await Promise.all(
       players.map(async (p) => {
         const player = await playerRepo.upsertByName(p.name)
-        await playerRepo.rememberHandicap(player.id, p.courseHandicap)
+        const ch = computeCourseHandicap(p.handicapIndex, course, tee)
+        await playerRepo.rememberHandicap(player.id, p.handicapIndex, ch)
         return {
           playerId: player.id,
           name: player.name,
-          courseHandicap: p.courseHandicap,
+          handicapIndex: p.handicapIndex,
+          courseHandicap: ch,
           teeSetId,
         }
       }),
@@ -258,16 +275,35 @@ export function SetupScreen() {
                   </button>
                   <span className="font-semibold">{p.name}</span>
                 </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs uppercase tracking-wide text-stone-500">Hcp</span>
-                  <Stepper
-                    value={p.courseHandicap}
-                    min={-10}
-                    max={54}
-                    onChange={(v) =>
-                      setPlayers(players.map((pl, j) => (j === i ? { ...pl, courseHandicap: v } : pl)))
-                    }
-                  />
+                <div className="flex items-center gap-2.5">
+                  <label className="flex items-center gap-1.5 text-xs uppercase text-stone-500">
+                    Index
+                    <input
+                      type="number"
+                      inputMode="decimal"
+                      step="0.1"
+                      min={-10}
+                      max={54}
+                      value={p.handicapIndex}
+                      aria-label={`${p.name} handicap index`}
+                      onChange={(e) =>
+                        setPlayers(
+                          players.map((pl, j) =>
+                            j === i ? { ...pl, handicapIndex: Number(e.target.value) || 0 } : pl,
+                          ),
+                        )
+                      }
+                      className="min-h-11 w-20 border-2 border-stone-700 bg-stone-800 px-2 text-center text-lg text-stone-100 focus:border-felt-500 focus:outline-none"
+                    />
+                  </label>
+                  <span className="font-display min-w-16 text-center text-[10px] text-felt-300">
+                    HCP{' '}
+                    {computeCourseHandicap(
+                      p.handicapIndex,
+                      course,
+                      course?.teeSets.find((t) => t.id === teeSetId),
+                    )}
+                  </span>
                 </div>
               </li>
             ))}
@@ -304,7 +340,11 @@ export function SetupScreen() {
                           players.map((p, i) => ({
                             playerId: `draft-${i}`,
                             name: p.name,
-                            courseHandicap: p.courseHandicap,
+                            courseHandicap: computeCourseHandicap(
+                              p.handicapIndex,
+                              course,
+                              course?.teeSets.find((t) => t.id === teeSetId),
+                            ),
                           })),
                         ),
                       },

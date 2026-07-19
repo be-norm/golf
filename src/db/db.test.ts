@@ -99,16 +99,17 @@ describe('EventStore', () => {
 })
 
 describe('PlayerRepo', () => {
-  it('remembers the last handicap a player teed off with', async () => {
+  it('remembers index + course handicap a player teed off with', async () => {
     const db = freshDb()
     const { PlayerRepo } = await import('./repos')
     const repo = new PlayerRepo(db)
     const ben = await repo.upsertByName('Ben')
-    await repo.rememberHandicap(ben.id, 7)
+    await repo.rememberHandicap(ben.id, 7.4, 8)
 
     const again = await repo.upsertByName('Ben')
     expect(again.id).toBe(ben.id)
-    expect(again.lastCourseHandicap).toBe(7)
+    expect(again.handicapIndex).toBe(7.4)
+    expect(again.lastCourseHandicap).toBe(8)
   })
 })
 

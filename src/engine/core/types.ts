@@ -32,7 +32,9 @@ export interface Course {
 export interface Player {
   id: Uuid
   name: string
-  /** convenience default for round setup — the handicap they used last time */
+  /** WHS handicap index — course handicap is computed per course/tee from this */
+  handicapIndex?: number
+  /** legacy fallback default from before indexes were stored */
   lastCourseHandicap?: number
   updatedAt: string
 }
