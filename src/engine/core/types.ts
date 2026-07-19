@@ -32,6 +32,8 @@ export interface Course {
 export interface Player {
   id: Uuid
   name: string
+  /** convenience default for round setup — the handicap they used last time */
+  lastCourseHandicap?: number
   updatedAt: string
 }
 

@@ -38,6 +38,14 @@ export class PlayerRepo {
     await this.db.players.put(player)
     return player
   }
+
+  /** Remember the handicap a player teed off with — next setup defaults to it. */
+  async rememberHandicap(playerId: string, courseHandicap: number): Promise<void> {
+    await this.db.players.update(playerId, {
+      lastCourseHandicap: courseHandicap,
+      updatedAt: new Date().toISOString(),
+    })
+  }
 }
 
 export class RoundRepo {

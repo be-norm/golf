@@ -98,6 +98,20 @@ describe('EventStore', () => {
   })
 })
 
+describe('PlayerRepo', () => {
+  it('remembers the last handicap a player teed off with', async () => {
+    const db = freshDb()
+    const { PlayerRepo } = await import('./repos')
+    const repo = new PlayerRepo(db)
+    const ben = await repo.upsertByName('Ben')
+    await repo.rememberHandicap(ben.id, 7)
+
+    const again = await repo.upsertByName('Ben')
+    expect(again.id).toBe(ben.id)
+    expect(again.lastCourseHandicap).toBe(7)
+  })
+})
+
 describe('seedCourses', () => {
   it('is idempotent and never clobbers user edits', async () => {
     const db = freshDb()

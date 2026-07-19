@@ -34,7 +34,9 @@ export function SetupScreen() {
   const addPlayer = (name: string) => {
     const trimmed = name.trim()
     if (!trimmed || players.some((p) => p.name.toLowerCase() === trimmed.toLowerCase())) return
-    setPlayers([...players, { name: trimmed, courseHandicap: 0 }])
+    // returning players default to the handicap they used last time
+    const known = roster?.find((r) => r.name.toLowerCase() === trimmed.toLowerCase())
+    setPlayers([...players, { name: trimmed, courseHandicap: known?.lastCourseHandicap ?? 0 }])
     setNameInput('')
   }
 
@@ -63,6 +65,7 @@ export function SetupScreen() {
     const roundPlayers = await Promise.all(
       players.map(async (p) => {
         const player = await playerRepo.upsertByName(p.name)
+        await playerRepo.rememberHandicap(player.id, p.courseHandicap)
         return {
           playerId: player.id,
           name: player.name,
