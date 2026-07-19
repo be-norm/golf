@@ -22,10 +22,12 @@ export async function searchCourses(query: string): Promise<CourseSearchHit[]> {
 
   const librarySearch = async (): Promise<{ id: string; name: string; location: string | null }[]> => {
     try {
+      // match name OR city/state — "broadmoor", "westfield", "carmel in" all work
+      const pattern = `%${q.replace(/[%_]/g, '')}%`
       const { data } = await supabase
         .from('courses')
         .select('id, name, location')
-        .ilike('name', `%${q}%`)
+        .or(`name.ilike.${pattern},location.ilike.${pattern}`)
         .limit(12)
       return data ?? []
     } catch {

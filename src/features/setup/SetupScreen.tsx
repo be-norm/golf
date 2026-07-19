@@ -8,6 +8,7 @@ import { courseRepo, playerRepo, roundRepo } from '../../db/repos'
 import { newId } from '../../db/ids'
 import { BigButton } from '../../components/BigButton'
 import { Stepper } from '../../components/Stepper'
+import { CourseSearch } from '../courses/CourseSearch'
 import { GameConfigCard, type GameDraft } from './GameConfigCard'
 
 interface PlayerDraft {
@@ -114,6 +115,15 @@ export function SetupScreen() {
       {step === 0 && (
         <section className="flex flex-col gap-4">
           <h1 className="font-display text-sm uppercase text-felt-300">Where are you playing?</h1>
+          <CourseSearch
+            localIds={new Set(courses?.map((c) => c.id))}
+            placeholder="Search any course…"
+            onImported={(c) => {
+              setCourseId(c.id)
+              setTeeSetId(c.teeSets[0]?.id)
+              if (c.holeCount === 9) setHoles('front9')
+            }}
+          />
           <div className="space-y-2">
             {courses?.map((c: Course) => (
               <button
