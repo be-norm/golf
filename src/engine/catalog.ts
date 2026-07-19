@@ -32,6 +32,12 @@ export interface GameDerivation {
   standings: StandingLine[]
   /** one-liner for the pinned mini-bar, e.g. "Ben +$3 · 2 carried" */
   summary: string
+  /**
+   * Optional structured form of the summary for UIs that can style it:
+   * label = small metadata chip (e.g. "F9"), value = the status itself.
+   * Falls back to `summary` when absent.
+   */
+  summaryParts?: { label: string; value: string }[]
   holeSummary(hole: number): string[]
   requiredInputs(): InputRequest[]
   settlement: Settlement

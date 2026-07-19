@@ -7,6 +7,7 @@ import { effectiveEvents } from '../../engine/core/replay'
 import { formatCentsSigned } from '../../engine/core/money'
 import type { InputRequest } from '../../engine/catalog'
 import { Sheet } from '../../components/Sheet'
+import { GameSummary } from '../../components/GameSummary'
 import { enqueueRoundArchive } from '../../remote/outbox'
 import { RulesSheet } from '../games/RulesSheet'
 import { useRound } from './useRound'
@@ -190,11 +191,11 @@ export function ScoringScreen() {
                 const d = derivations.get(g.gameId)
                 if (!d) return null
                 return (
-                  <div key={g.gameId} className="flex items-baseline justify-between py-0.5">
+                  <div key={g.gameId} className="flex items-baseline justify-between gap-3 py-0.5">
                     <span className="font-display text-[10px] uppercase text-felt-300">
                       {gameName(g.type)}
                     </span>
-                    <span className="text-lg text-stone-300">{d.summary}</span>
+                    <GameSummary derivation={d} />
                   </div>
                 )
               })}

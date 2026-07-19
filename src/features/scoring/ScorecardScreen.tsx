@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
 import { buildHoleLedger } from '../../engine/ledger'
 import { formatCentsSigned } from '../../engine/core/money'
+import { GameSummary } from '../../components/GameSummary'
 import { useRound } from './useRound'
 
 /**
@@ -146,11 +147,11 @@ export function ScorecardScreen() {
           )}
 
           {activeDerivation && (
-            <p className="mb-3 text-lg text-stone-300">
-              <span className="font-display mr-2 text-[10px] uppercase text-felt-300">
+            <p className="mb-3 flex flex-wrap items-baseline gap-x-2">
+              <span className="font-display text-[10px] uppercase text-felt-300">
                 {activeGame!.type}
               </span>
-              {activeDerivation.summary}
+              <GameSummary derivation={activeDerivation} />
             </p>
           )}
 

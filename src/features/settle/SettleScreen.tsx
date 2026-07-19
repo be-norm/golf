@@ -6,6 +6,7 @@ import { eventStore } from '../../db/eventStore'
 import { roundRepo } from '../../db/repos'
 import { useRound } from '../scoring/useRound'
 import { BigButton } from '../../components/BigButton'
+import { GameSummary } from '../../components/GameSummary'
 import { buildExport, downloadExport } from './exportRound'
 
 export function SettleScreen() {
@@ -123,7 +124,9 @@ export function SettleScreen() {
                 onClick={() => setExpanded(open ? undefined : g.gameId)}
               >
                 <span className="font-display text-[10px] uppercase text-felt-300">{g.type}</span>
-                <span className="text-lg text-stone-400">{d.summary} {open ? '▼' : '▶'}</span>
+                <span className="flex items-baseline gap-2 text-lg text-stone-400">
+                  <GameSummary derivation={d} /> {open ? '▼' : '▶'}
+                </span>
               </button>
               {open && (
                 <div className="border-t-2 border-stone-800 px-4 py-3">

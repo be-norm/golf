@@ -169,7 +169,7 @@ function derive(
       .filter((b) => b.depth === 0)
       .map((b) => {
         const d = side === 'a' ? b.diff : -b.diff
-        const seg = b.segment === 'overall' ? 'O' : b.segment === 'front' ? 'F' : 'B'
+        const seg = b.segment === 'overall' ? '18' : b.segment === 'front' ? 'F9' : 'B9'
         return `${seg} ${d > 0 ? `${d}↑` : d < 0 ? `${-d}↓` : 'AS'}`
       })
       .join(' · ')
@@ -188,21 +188,29 @@ function derive(
   const firstName = (id: Uuid) => (nameOf.get(id) ?? '').split(' ')[0]
   const sideShort = (side: 'a' | 'b') =>
     (side === 'a' ? sideA : sideB).map(firstName).join(' & ')
-  const betStatus = (b: Bet, withSeg: boolean): string => {
-    const seg = b.segment === 'overall' ? 'O' : b.segment === 'front' ? 'F' : 'B'
-    const prefix = withSeg ? `${seg}: ` : ''
-    if (b.diff === 0) return `${prefix}AS`
-    return `${prefix}${sideShort(b.diff > 0 ? 'a' : 'b')} ${Math.abs(b.diff)}↑`
+  const segLabel = (seg: Segment): string =>
+    seg === 'overall' ? '18' : seg === 'front' ? 'F9' : 'B9'
+  const betStatus = (b: Bet): string => {
+    if (b.diff === 0) return 'AS'
+    return `${sideShort(b.diff > 0 ? 'a' : 'b')} ${Math.abs(b.diff)}↑`
   }
   const parentBets = bets.filter((b) => b.depth === 0)
-  let summary: string
+  const summaryParts: { label: string; value: string }[] = []
   if (parentBets.length === 1) {
     const b = parentBets[0]!
-    summary = `${betStatus(b, false)} · ${b.holesRemaining === 0 ? 'final' : `${b.holesRemaining} to play`}`
+    // a collapsed 9-hole nassau is the nine that was played
+    const label = ctx.round.holes === 'back9' ? 'B9' : 'F9'
+    summaryParts.push({
+      label,
+      value: `${betStatus(b)} · ${b.holesRemaining === 0 ? 'final' : `${b.holesRemaining} to play`}`,
+    })
   } else {
-    summary = parentBets.map((b) => betStatus(b, true)).join(' · ')
+    for (const b of parentBets) summaryParts.push({ label: segLabel(b.segment), value: betStatus(b) })
   }
-  if (pressCount) summary += ` · ${pressCount} press${pressCount > 1 ? 'es' : ''}`
+  if (pressCount) summaryParts.push({ label: '', value: `${pressCount} press${pressCount > 1 ? 'es' : ''}` })
+  const summary = summaryParts
+    .map((p) => (p.label ? `${p.label}: ${p.value}` : p.value))
+    .join(' · ')
 
   // Manual-press affordance: on the active frontier hole, a side that is down
   // in a live bet may press (optional chip — never blocks scoring).
@@ -244,6 +252,7 @@ function derive(
   return {
     standings,
     summary,
+    summaryParts,
     holeSummary,
     requiredInputs,
     settlement,
