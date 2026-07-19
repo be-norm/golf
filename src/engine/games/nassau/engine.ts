@@ -149,14 +149,17 @@ function derive(
     bet.holesRemaining = span.filter((h) => (holeResult.get(h) ?? null) === null).length
   }
 
-  // Money as if the round ended now: each decided bet pays per player on the losing side.
+  // Money is LOCKED-ONLY: a bet pays when its holes run out (holesRemaining 0
+  // — round completion finalizes empty holes, so finishing closes everything).
+  // Mid-round a flipped lead moves no money, matching how golfers think.
+  const isClosed = (b: Bet) => b.holesRemaining === 0
   const settlement: Settlement = emptySettlement(playerIds)
   for (const bet of bets) {
-    if (bet.diff === 0) continue
+    if (!isClosed(bet) || bet.diff === 0) continue
     const winners = bet.diff > 0 ? sideA : sideB
     const losers = bet.diff > 0 ? sideB : sideA
     addLine(settlement, {
-      label: `${bet.label} — ${winners.map((id) => nameOf.get(id)).join(' & ')} ${Math.abs(bet.diff)}↑`,
+      label: `${bet.label} — ${winners.map((id) => nameOf.get(id)).join(' & ')} win ↑${Math.abs(bet.diff)}`,
       perPlayerCents: Object.fromEntries([
         ...winners.map((id) => [id, stakeCents] as const),
         ...losers.map((id) => [id, -stakeCents] as const),
@@ -270,14 +273,53 @@ function derive(
     ]
   }
 
+  // Per-hole narration for the money ledger: who won the hole, how the bet
+  // scores moved, presses starting, bets closing. Money only rides on closes.
+  const holeNotes = new Map<number, string[]>()
+  const note = (h: number, s: string) => {
+    if (!holeNotes.has(h)) holeNotes.set(h, [])
+    holeNotes.get(h)!.push(s)
+  }
+  {
+    const running = new Map<string, number>()
+    for (const h of ctx.holesPlayed) {
+      for (const b of bets) {
+        if (b.depth > 0 && b.startHole === h) note(h, `${betLabel(b)} starts`)
+      }
+      const r = holeResult.get(h)
+      if (r === null || r === undefined || r === 0) continue
+      const states: string[] = []
+      for (const b of ordered) {
+        const span = segmentHoles(b.segment, ctx.holesPlayed)
+        if (!span.includes(h) || h < b.startHole) continue
+        const d = (running.get(b.id) ?? 0) + r
+        running.set(b.id, d)
+        if (b.depth === 0) {
+          states.push(`${betLabel(b)} ${d === 0 ? 'AS' : `${sideShort(d > 0 ? 'a' : 'b')} ↑${Math.abs(d)}`}`)
+        }
+      }
+      if (states.length > 0) note(h, states.join(' · '))
+    }
+    for (const b of ordered) {
+      if (!isClosed(b)) continue
+      const span = segmentHoles(b.segment, ctx.holesPlayed).filter((x) => x >= b.startHole)
+      const closeAt = span[span.length - 1]
+      if (closeAt !== undefined) note(closeAt, `${betLabel(b)} closes — ${betValue(b)}`)
+    }
+  }
+
   const holeSummary = (hole: number): string[] => {
     const r = holeResult.get(hole)
     if (r === null || r === undefined) return []
-    if (r === 0) return ['Halved']
-    const side = r === 1 ? sideA : sideB
-    return [
-      `${side.map((id) => nameOf.get(id)).join(' & ')} ${side.length > 1 ? 'win' : 'wins'} the hole`,
-    ]
+    const notes = holeNotes.get(hole) ?? []
+    // an unplayed hole finalized by round completion carries only its notes
+    const played = playerIds.some((id) => ctx.gross.get(id)?.get(hole) !== undefined)
+    if (!played) return notes
+    const side = r === 1 ? sideA : r === -1 ? sideB : null
+    const winnerLine = side
+      ? `${side.map((id) => nameOf.get(id)).join(' & ')} ${side.length > 1 ? 'win' : 'wins'} the hole`
+      : 'Halved'
+    return [winnerLine, ...notes]
   }
 
   return {

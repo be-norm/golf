@@ -28,28 +28,36 @@ describe('buildHoleLedger', () => {
     expect(skins[2]!.runningCents).toEqual({ 'p-a': 300, 'p-b': -300 })
   })
 
-  it('shows nassau money moving only when a bet flips', () => {
+  it('nassau money moves only when a bet closes; holes narrate the bet scores', () => {
     const round = makeRound({
       players: makePlayers([{ name: 'A' }, { name: 'B' }]),
+      holes: 'front9',
       games: [
         { type: 'nassau', config: { stakeCents: 500, teams: null, autoPress: false } },
       ],
     })
     const log = new EventLog()
-    // h1: A wins (front+overall flip to A: +$10) · h2: halved (no move) ·
-    // h3: A wins again (still up: no money move)
+    // h1: A wins · h2: halved · h3: A wins — nothing locks mid-round
     log.scoreByHole(round, { A: [4, 4, 4], B: [5, 4, 5] }, [1, 2, 3])
-    const { ctx, derivations } = deriveRound(round, log.events)
-    const ledger = buildHoleLedger(round, log.events, ctx.holesPlayed, derivations)
-    const nassau = ledger.get('game-1')!
+    const mid = deriveRound(round, log.events)
+    const midLedger = buildHoleLedger(round, log.events, mid.ctx.holesPlayed, mid.derivations)
+    const midRows = midLedger.get('game-1')!
+    expect(midRows[0]!.summary[0]).toBe('A wins the hole')
+    expect(midRows[0]!.summary[1]).toContain('F9 A ↑1')
+    expect(midRows.every((r) => r.deltas.length === 0)).toBe(true)
 
-    expect(nassau[0]!.deltas).toEqual([
-      { playerId: 'p-a', cents: 1000 },
-      { playerId: 'p-b', cents: -1000 },
+    // finishing the round closes the bet — money lands on the final hole row
+    log.append({ type: 'round/completed' })
+    const done = deriveRound(round, log.events)
+    const ledger = buildHoleLedger(round, log.events, done.ctx.holesPlayed, done.derivations)
+    const rows = ledger.get('game-1')!
+    const closing = rows[rows.length - 1]!
+    expect(closing.hole).toBe(9)
+    expect(closing.summary.some((s) => s.includes('closes'))).toBe(true)
+    expect(closing.deltas).toEqual([
+      { playerId: 'p-a', cents: 500 },
+      { playerId: 'p-b', cents: -500 },
     ])
-    expect(nassau[1]!.summary[0]).toBe('Halved')
-    expect(nassau[1]!.deltas).toEqual([])
-    expect(nassau[2]!.deltas).toEqual([])
   })
 
   it('wolf: silent before any scores, attributes point-money on decided holes', () => {
