@@ -77,6 +77,8 @@ describe('nassau — golden fixtures (hand-verified)', () => {
     expect(d.detailLines!.filter((l) => l.depth === 1)).toHaveLength(4)
     expect(d.detailLines![0]).toEqual({ label: 'F9', value: 'A wins ↑2', depth: 0 })
     expect(d.detailLines![1]).toEqual({ label: 'Press @3', value: 'push', depth: 1 })
+    // bar stays compact: parents only (no live presses at final)
+    expect(d.summary).toBe('F9: A wins ↑2 · B9: B wins ↑2 · 18: push')
   })
 
   /**
@@ -121,6 +123,22 @@ describe('nassau — golden fixtures (hand-verified)', () => {
     })
     d = deriveRound(round2, log2.events).derivations.get('game-1')!
     expect(d.detailLines![0]!.value).toBe('A ↑2 · dormie')
+  })
+
+  /**
+   * N7: mid-round bar stays compact — parents only + live-press count;
+   * the full ledger (incl. per-press status) lives in detailLines.
+   */
+  it('N7: compact bar with live-press chip mid-round', () => {
+    const players = makePlayers([{ name: 'A' }, { name: 'B' }])
+    const round = makeRound({ players, games: [game({ autoPress: true })] })
+    const log = new EventLog()
+    // A wins h1,h2 → F and O hit 2 → auto-presses @3 on both; h3 ties
+    log.scoreByHole(round, { A: [4, 4, 4], B: [5, 5, 4] }, [1, 2, 3])
+    const d = deriveRound(round, log.events).derivations.get('game-1')!
+    expect(d.summary).toBe('F9: A ↑2 · B9: AS · 18: A ↑2 · 2 presses')
+    expect(d.detailLines).toHaveLength(5)
+    expect(d.detailLines![1]).toEqual({ label: 'Press @3', value: 'AS · 6 to play', depth: 1 })
   })
 
   /**

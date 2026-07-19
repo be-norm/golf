@@ -223,13 +223,25 @@ function derive(
     depth: b.depth > 0 ? 1 : 0,
   }))
 
-  // pinned bar: live bets only — settled nines are history, the sheet has them
-  const liveBets = ordered.filter((b) => b.holesRemaining > 0)
-  const summaryParts = (liveBets.length > 0 ? liveBets : ordered).map((b) => ({
-    label: betLabel(b),
-    value: betValue(b),
-  }))
-  const summary = summaryParts.map((p) => `${p.label}: ${p.value}`).join(' · ')
+  // Pinned bar has a hard height budget: parent bets in compact form plus a
+  // live-press count chip. The full ledger (to play / dormie / presses) is
+  // one tap away in the sheet — glanceability beats completeness here.
+  const compactValue = (b: Bet): string => {
+    const n = Math.abs(b.diff)
+    const leader = b.diff === 0 ? null : sideShort(b.diff > 0 ? 'a' : 'b')
+    if (b.holesRemaining === 0) return leader ? `${leader} wins ↑${n}` : 'push'
+    return leader ? `${leader} ↑${n}` : 'AS'
+  }
+  const parents = ordered.filter((b) => b.depth === 0)
+  const livePresses = ordered.filter((b) => b.depth > 0 && b.holesRemaining > 0).length
+  const summaryParts =
+    parents.length === 1
+      ? parents.map((b) => ({ label: betLabel(b), value: betValue(b) }))
+      : parents.map((b) => ({ label: betLabel(b), value: compactValue(b) }))
+  if (livePresses > 0) summaryParts.push({ label: 'presses', value: String(livePresses) })
+  const summary = summaryParts
+    .map((p) => (p.label === 'presses' ? `${p.value} press${p.value === '1' ? '' : 'es'}` : `${p.label}: ${p.value}`))
+    .join(' · ')
 
   // Manual-press affordance: on the active frontier hole, a side that is down
   // in a live bet may press (optional chip — never blocks scoring).
