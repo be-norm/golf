@@ -20,13 +20,13 @@ export function Sheet({ open, onClose, children }: SheetProps) {
             onClick={onClose}
           />
           <motion.div
-            className="fixed inset-x-0 bottom-0 z-50 max-h-[85dvh] overflow-y-auto rounded-t-3xl bg-stone-900 p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] shadow-2xl ring-1 ring-stone-700"
+            className="fixed inset-x-0 bottom-0 z-50 max-h-[85dvh] overflow-y-auto border-t-4 border-felt-500 bg-stone-900 p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))]"
             initial={{ y: '100%' }}
             animate={{ y: 0 }}
             exit={{ y: '100%' }}
-            transition={{ type: 'spring', damping: 32, stiffness: 380 }}
+            transition={{ duration: 0.22, ease: (t: number) => Math.ceil(t * 5) / 5 }}
           >
-            <div className="mx-auto mb-4 h-1.5 w-10 rounded-full bg-stone-700" />
+            <div className="mx-auto mb-4 h-1.5 w-12 bg-felt-500" />
             {children}
           </motion.div>
         </>

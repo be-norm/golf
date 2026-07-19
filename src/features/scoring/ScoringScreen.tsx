@@ -112,16 +112,18 @@ export function ScoringScreen() {
         <AnimatePresence mode="popLayout" initial={false}>
           <motion.div
             key={currentHole}
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -8 }}
-            transition={{ duration: 0.15 }}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.08 }}
             className="text-center"
           >
-            <p className="text-sm font-medium uppercase tracking-widest text-felt-300">Hole</p>
-            <p className="text-6xl font-extrabold tabular-nums">{currentHole}</p>
-            <p className="mt-1 text-sm text-stone-400">
-              Par {ctx.par(currentHole)} · SI {ctx.strokeIndex(currentHole)}
+            <p className="font-display text-[10px] uppercase text-felt-300">Hole</p>
+            <p className="font-display animate-stamp text-5xl text-white [text-shadow:4px_4px_0_rgb(0_0_0/0.6)]">
+              {currentHole}
+            </p>
+            <p className="mt-2 text-lg text-stone-400">
+              par {ctx.par(currentHole)} · si {ctx.strokeIndex(currentHole)}
             </p>
           </motion.div>
         </AnimatePresence>
@@ -133,16 +135,18 @@ export function ScoringScreen() {
       </section>
 
       {holeInputs.length > 0 && (
-        <section className="mb-2 space-y-2">
+        <section className="mb-2 space-y-2.5">
           {holeInputs.map((input) => (
-            <div key={input.id} className="rounded-2xl bg-amber-500/10 p-3 ring-1 ring-amber-500/40">
-              <p className="mb-2 text-sm font-semibold text-amber-400">{input.prompt}</p>
-              <div className="flex flex-wrap gap-2">
+            <div key={input.id} className="pixel border-coin-500 bg-coin-500/10 p-3">
+              <p className="mb-2 text-lg text-coin-400">
+                <span className="animate-blink">▶</span> {input.prompt}
+              </p>
+              <div className="flex flex-wrap gap-2.5">
                 {input.options.map((o) => (
                   <button
                     key={o.value}
                     onClick={() => answerInput(input, o.value)}
-                    className="rounded-xl bg-stone-800 px-4 py-2.5 text-sm font-semibold ring-1 ring-stone-600 active:bg-stone-700"
+                    className="pixel-press border-stone-600 bg-stone-800 px-4 py-2.5 text-lg"
                   >
                     {o.label}
                   </button>
@@ -166,14 +170,14 @@ export function ScoringScreen() {
         ))}
       </section>
 
-      <div className="fixed inset-x-0 bottom-0 z-30 border-t border-stone-800 bg-stone-950/95 px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 backdrop-blur">
+      <div className="fixed inset-x-0 bottom-0 z-30 border-t-4 border-felt-600 bg-stone-950/95 px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 backdrop-blur">
         <div className="mx-auto max-w-md">
           {allScored ? (
             <button
               onClick={() => void finish()}
-              className="mb-1 w-full rounded-2xl bg-felt-600 py-3.5 text-lg font-bold active:bg-felt-500"
+              className="pixel-press font-display mb-1 w-full border-felt-300 bg-felt-600 py-4 text-sm uppercase"
             >
-              Finish round 🏁
+              🏁 Finish round
             </button>
           ) : (
             <button className="w-full text-left" onClick={() => setStandingsOpen(true)}>
@@ -182,10 +186,10 @@ export function ScoringScreen() {
                 if (!d) return null
                 return (
                   <div key={g.gameId} className="flex items-baseline justify-between py-0.5">
-                    <span className="text-sm font-semibold text-felt-300">
+                    <span className="font-display text-[10px] uppercase text-felt-300">
                       {gameName(g.type)}
                     </span>
-                    <span className="text-sm text-stone-300">{d.summary}</span>
+                    <span className="text-lg text-stone-300">{d.summary}</span>
                   </div>
                 )
               })}
@@ -201,21 +205,23 @@ export function ScoringScreen() {
             if (!d) return null
             return (
               <div key={g.gameId}>
-                <h3 className="mb-2 text-lg font-bold">{gameName(g.type)}</h3>
-                <ul className="space-y-1.5">
+                <h3 className="font-display mb-2.5 text-xs uppercase text-felt-300">
+                  {gameName(g.type)}
+                </h3>
+                <ul className="space-y-2">
                   {d.standings.map((line) => (
                     <motion.li
                       layout
                       key={line.id}
-                      className="flex items-center justify-between rounded-xl bg-stone-800/60 px-3.5 py-2.5"
+                      className="pixel flex items-center justify-between border-stone-700 bg-stone-800/70 px-3.5 py-2.5"
                     >
-                      <span className="font-medium">{line.label}</span>
+                      <span className="text-lg font-medium">{line.label}</span>
                       <span className="flex items-baseline gap-2.5">
-                        {line.detail && <span className="text-xs text-stone-400">{line.detail}</span>}
+                        {line.detail && <span className="text-stone-400">{line.detail}</span>}
                         <span
-                          className={`font-bold tabular-nums ${
+                          className={`font-display text-xs ${
                             line.amountCents > 0
-                              ? 'text-felt-400'
+                              ? 'text-felt-300'
                               : line.amountCents < 0
                                 ? 'text-flag-500'
                                 : 'text-stone-400'
@@ -228,7 +234,7 @@ export function ScoringScreen() {
                   ))}
                 </ul>
                 {d.holeSummary(currentHole).map((s) => (
-                  <p key={s} className="mt-1.5 text-sm text-stone-400">
+                  <p key={s} className="mt-2 text-lg text-stone-400">
                     {s}
                   </p>
                 ))}
@@ -255,9 +261,9 @@ function HoleArrow({
       aria-label={dir === 'prev' ? 'previous hole' : 'next hole'}
       disabled={disabled}
       onClick={onClick}
-      className="flex size-14 items-center justify-center rounded-2xl bg-stone-900 text-2xl text-stone-300 ring-1 ring-stone-800 active:bg-stone-800 disabled:opacity-25"
+      className="pixel-press font-display flex size-14 items-center justify-center border-stone-700 bg-stone-900 text-sm text-felt-300 disabled:opacity-25"
     >
-      {dir === 'prev' ? '‹' : '›'}
+      {dir === 'prev' ? '◀' : '▶'}
     </button>
   )
 }

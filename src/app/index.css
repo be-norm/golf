@@ -1,11 +1,27 @@
 @import 'tailwindcss';
 
+/* Self-hosted retro fonts (OFL) — bundled + precached, zero network on-course */
+@font-face {
+  font-family: 'VT323';
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  src: url('../assets/fonts/VT323-latin.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Press Start 2P';
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  src: url('../assets/fonts/PressStart2P-latin.woff2') format('woff2');
+}
+
 @theme {
-  /* Felt greens — the app's core palette */
-  --color-felt-50: #f0fdf4;
-  --color-felt-100: #dcfce7;
-  --color-felt-200: #bbf7d0;
-  --color-felt-300: #86efac;
+  /* Felt greens — arcade-punched */
+  --color-felt-50: #eaffe6;
+  --color-felt-100: #d3ffcc;
+  --color-felt-200: #a8ff99;
+  --color-felt-300: #7dff66;
   --color-felt-400: #4ade80;
   --color-felt-500: #22c55e;
   --color-felt-600: #16a34a;
@@ -15,18 +31,103 @@
   --color-felt-950: #052e16;
 
   /* Accent — flag red */
-  --color-flag-500: #ef4444;
+  --color-flag-500: #ff4444;
   --color-flag-600: #dc2626;
 
-  --font-display: 'system-ui', -apple-system, 'Segoe UI', sans-serif;
+  /* Arcade extras */
+  --color-coin-400: #ffd23e;
+  --color-coin-500: #f5b800;
+
+  --font-body: 'VT323', 'Courier New', monospace;
+  --font-display: 'Press Start 2P', 'VT323', monospace;
 }
+
+/* ── Retro base ─────────────────────────────────────────── */
 
 html {
   overscroll-behavior: none;
   -webkit-tap-highlight-color: transparent;
+  font-size: 19px; /* VT323 is thin — run the whole scale larger */
 }
 
 body {
   margin: 0;
   touch-action: manipulation;
+  font-family: var(--font-body);
+  letter-spacing: 0.02em;
+  image-rendering: pixelated;
+}
+
+/* The theme rule: retro squares everything. Radius utilities become inert. */
+* {
+  border-radius: 0 !important;
+}
+
+::selection {
+  background: var(--color-felt-500);
+  color: var(--color-felt-950);
+}
+
+/* ── Utilities ──────────────────────────────────────────── */
+
+/* chunky pixel panel: hard 2px border + hard offset shadow */
+@utility pixel {
+  border-width: 2px;
+  box-shadow: 4px 4px 0 rgb(0 0 0 / 0.6);
+}
+
+/* pressable: shadow collapses and the element drops into it */
+@utility pixel-press {
+  border-width: 2px;
+  box-shadow: 4px 4px 0 rgb(0 0 0 / 0.6);
+  transition: none;
+  &:active {
+    transform: translate(4px, 4px);
+    box-shadow: 0 0 0 rgb(0 0 0 / 0.6);
+  }
+}
+
+@utility font-display {
+  font-family: var(--font-display);
+  letter-spacing: 0;
+  line-height: 1.6;
+}
+
+@utility font-body {
+  font-family: var(--font-body);
+  letter-spacing: 0.02em;
+}
+
+@utility animate-blink {
+  animation: blink 1.1s steps(1, end) infinite;
+}
+
+@keyframes blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+@utility animate-stamp {
+  animation: stamp 0.18s steps(2, end);
+}
+
+@keyframes stamp {
+  0% {
+    transform: scale(1.35);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+/* subtle CRT scanlines — must stay faint for sunlight readability */
+@utility scanlines {
+  background-image: repeating-linear-gradient(
+    0deg,
+    transparent 0px,
+    transparent 2px,
+    rgb(0 0 0 / 0.5) 2px,
+    rgb(0 0 0 / 0.5) 3px
+  );
 }

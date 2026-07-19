@@ -28,8 +28,8 @@ export function GameConfigCard({ engine, playable, players, draft, onToggle, onC
 
   return (
     <div
-      className={`rounded-2xl ring-1 ${
-        draft ? 'bg-felt-900/50 ring-felt-600' : 'bg-stone-900/60 ring-stone-800'
+      className={`pixel ${
+        draft ? 'border-felt-500 bg-felt-900/60' : 'border-stone-700 bg-stone-900/70'
       } ${playable ? '' : 'opacity-40'}`}
     >
       <button
@@ -74,10 +74,10 @@ export function GameConfigCard({ engine, playable, players, draft, onToggle, onC
               </p>
             </div>
             <button
-              className={`rounded-xl px-4 py-2 text-sm font-semibold ring-1 ${
+              className={`px-4 py-2 text-lg ${
                 draft.handicap.mode === 'net'
-                  ? 'bg-felt-800 ring-felt-500'
-                  : 'bg-stone-800 ring-stone-700 text-stone-400'
+                  ? 'pixel border-felt-300 bg-felt-700'
+                  : 'border-2 border-stone-700 bg-stone-800 text-stone-400'
               }`}
               onClick={() =>
                 onChange({
@@ -154,8 +154,8 @@ function ConfigField({
               <button
                 key={o.value}
                 onClick={() => onChange(o.value)}
-                className={`rounded-xl px-3.5 py-2 text-sm font-semibold ring-1 ${
-                  value === o.value ? 'bg-felt-800 ring-felt-500' : 'bg-stone-800 ring-stone-700'
+                className={`px-3.5 py-2 text-lg ${
+                  value === o.value ? 'pixel border-felt-300 bg-felt-700' : 'border-2 border-stone-700 bg-stone-800'
                 }`}
               >
                 {o.label}
@@ -188,10 +188,10 @@ function ConfigField({
                         next[team] = [...next[team], idOf(i)]
                         onChange(next)
                       }}
-                      className={`rounded-lg px-3.5 py-1.5 text-sm font-bold ring-1 ${
+                      className={`px-3.5 py-1.5 text-lg font-bold ${
                         teamOf(i) === team
-                          ? 'bg-felt-700 ring-felt-500'
-                          : 'bg-stone-800 ring-stone-700 text-stone-400'
+                          ? 'pixel border-felt-300 bg-felt-700'
+                          : 'border-2 border-stone-700 bg-stone-800 text-stone-400'
                       }`}
                     >
                       {team.toUpperCase()}

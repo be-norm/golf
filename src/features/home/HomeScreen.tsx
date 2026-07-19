@@ -15,56 +15,55 @@ export function HomeScreen() {
 
   return (
     <main className="flex min-h-dvh flex-col gap-6 py-8">
-      <header className="flex items-center gap-3 pt-2">
-        <div className="flex size-12 items-center justify-center rounded-2xl bg-felt-800 text-2xl">
-          ⛳
-        </div>
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Golf</h1>
-          <p className="text-sm text-felt-300">Games between friends</p>
-        </div>
+      <header className="pt-6 text-center">
+        <img src={`${import.meta.env.BASE_URL}pwa-192x192.png`} alt="" className="mx-auto size-16 [image-rendering:pixelated]" />
+        <h1 className="font-display mt-3 text-3xl uppercase text-felt-300 [text-shadow:4px_4px_0_rgb(0_0_0/0.6)]">
+          Golf
+        </h1>
+        <p className="mt-2 text-lg text-felt-400">— games between friends —</p>
       </header>
 
       {liveRound && (
         <Link
           to={`/round/${liveRound.id}`}
-          className="block rounded-3xl bg-felt-700 p-5 shadow-xl shadow-felt-950/50 active:scale-[0.99]"
+          className="pixel-press block border-felt-300 bg-felt-700 p-5"
         >
-          <p className="text-sm font-medium uppercase tracking-wide text-felt-200">Resume round</p>
-          <p className="mt-1 text-xl font-bold">{liveRound.courseSnapshot.name}</p>
-          <p className="mt-1 text-sm text-felt-100">
+          <p className="font-display text-[10px] uppercase text-coin-400">
+            <span className="animate-blink">▶</span> Resume round
+          </p>
+          <p className="mt-2 text-2xl font-bold">{liveRound.courseSnapshot.name}</p>
+          <p className="mt-1 text-lg text-felt-100">
             {liveRound.players.map((p) => p.name).join(' · ')}
           </p>
-          <p className="mt-3 text-sm text-felt-200">
+          <p className="mt-2 text-lg text-felt-200">
             {holesForRange(liveRound.holes).length} holes ·{' '}
-            {liveRound.games.length} game{liveRound.games.length === 1 ? '' : 's'} → tap to continue
+            {liveRound.games.length} game{liveRound.games.length === 1 ? '' : 's'}
           </p>
         </Link>
       )}
 
       <Link
         to="/setup"
-        className="block rounded-3xl bg-felt-900/60 p-5 text-center ring-1 ring-felt-700 active:bg-felt-800/60"
+        className="pixel-press font-display block border-felt-600 bg-felt-900/60 p-5 text-center text-xs uppercase"
       >
-        <span className="text-lg font-semibold">New round</span>
+        {!liveRound && <span className="animate-blink mr-2 text-coin-400">▶</span>}
+        New round
       </Link>
 
       <InstallHint />
 
       {completed.length > 0 && (
         <section>
-          <h2 className="mb-2 text-sm font-medium uppercase tracking-wide text-stone-400">
-            Recent rounds
-          </h2>
-          <ul className="space-y-2">
+          <h2 className="font-display mb-2 text-[10px] uppercase text-stone-400">Recent rounds</h2>
+          <ul className="space-y-2.5">
             {completed.map((r) => (
               <li key={r.id}>
                 <Link
                   to={`/round/${r.id}/settle`}
-                  className="block rounded-2xl bg-stone-900/60 px-4 py-3 ring-1 ring-stone-800"
+                  className="pixel block border-stone-700 bg-stone-900/70 px-4 py-3"
                 >
-                  <span className="font-medium">{r.courseSnapshot.name}</span>
-                  <span className="ml-2 text-sm text-stone-400">
+                  <span className="text-lg font-medium">{r.courseSnapshot.name}</span>
+                  <span className="ml-2 text-stone-400">
                     {new Date(r.startedAt).toLocaleDateString()}
                   </span>
                 </Link>

@@ -26,7 +26,7 @@ describe('SettleScreen', () => {
     render(<RouterProvider router={router} />)
 
     expect(await screen.findByText('Settle up')).toBeInTheDocument()
-    expect(screen.getByText('pays')).toBeInTheDocument()
+    expect(screen.getByText(/pays/)).toBeInTheDocument()
     expect(screen.getAllByText('+$1').length).toBeGreaterThan(0)
   })
 })

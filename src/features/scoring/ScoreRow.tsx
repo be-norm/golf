@@ -18,12 +18,12 @@ export function ScoreRow({ name, par, gross, strokes, onScore }: ScoreRowProps) 
   const diff = gross !== undefined ? gross - par : 0
 
   return (
-    <div className="flex items-center justify-between rounded-2xl bg-stone-900/70 py-2.5 pl-4 pr-2.5 ring-1 ring-stone-800">
+    <div className="pixel flex items-center justify-between border-stone-700 bg-stone-900/80 py-2.5 pl-4 pr-2.5">
       <div className="min-w-0">
-        <p className="truncate text-lg font-semibold">{name}</p>
+        <p className="truncate text-xl font-semibold">{name}</p>
         {strokes !== 0 && (
-          <p className="text-xs tracking-widest text-felt-400" aria-label={`${strokes} strokes`}>
-            {strokes > 0 ? '●'.repeat(strokes) : `+${-strokes}`}
+          <p className="text-sm tracking-widest text-felt-300" aria-label={`${strokes} strokes`}>
+            {strokes > 0 ? '■'.repeat(strokes) : `+${-strokes}`}
           </p>
         )}
       </div>
@@ -34,19 +34,20 @@ export function ScoreRow({ name, par, gross, strokes, onScore }: ScoreRowProps) 
         <motion.button
           aria-label={`${name} score`}
           onClick={() => gross === undefined && onScore(par)}
-          whileTap={{ scale: 0.94 }}
-          className={`flex h-14 w-16 flex-col items-center justify-center rounded-2xl text-2xl font-extrabold tabular-nums ring-1 transition-colors ${
+          whileTap={{ scale: 0.92 }}
+          transition={{ duration: 0.05 }}
+          className={`font-display flex h-14 w-16 flex-col items-center justify-center gap-1 border-2 text-xl ${
             gross === undefined
-              ? 'bg-stone-800/50 text-stone-500 ring-stone-700'
+              ? 'border-dashed border-stone-600 bg-stone-800/40 text-stone-500'
               : diff < 0
-                ? 'bg-felt-700 text-white ring-felt-500'
+                ? 'pixel border-felt-300 bg-felt-600 text-white'
                 : diff === 0
-                  ? 'bg-stone-700 text-white ring-stone-500'
-                  : 'bg-stone-800 text-amber-200 ring-amber-700/50'
+                  ? 'pixel border-stone-400 bg-stone-700 text-white'
+                  : 'pixel border-coin-500 bg-stone-800 text-coin-400'
           }`}
         >
           {shown}
-          <span className="text-[10px] font-medium leading-none opacity-70">
+          <span className="font-body text-xs leading-none opacity-80">
             {gross === undefined ? 'par?' : diffLabel(diff)}
           </span>
         </motion.button>
@@ -71,7 +72,7 @@ function TapButton({
     <button
       aria-label={label}
       onClick={onClick}
-      className="flex size-12 select-none items-center justify-center rounded-xl bg-stone-800 text-2xl font-bold text-stone-300 active:bg-stone-700"
+      className="pixel-press flex size-12 select-none items-center justify-center border-stone-600 bg-stone-800 text-2xl font-bold text-stone-200"
     >
       {children}
     </button>

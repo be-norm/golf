@@ -22,11 +22,11 @@ export function DiagnosticsScreen() {
         <Link to="/" className="text-stone-400">
           ← Home
         </Link>
-        <h1 className="font-bold">Diagnostics</h1>
+        <h1 className="font-display text-xs uppercase text-felt-300">Diagnostics</h1>
         <span className="w-12" />
       </header>
 
-      <section className="rounded-2xl bg-stone-900/60 p-4 text-sm ring-1 ring-stone-800">
+      <section className="pixel border-stone-700 bg-stone-900/70 p-4 text-lg">
         <p>
           Version <span className="font-mono text-felt-300">{__APP_VERSION__}</span>
         </p>
@@ -38,7 +38,7 @@ export function DiagnosticsScreen() {
 
       <section>
         <div className="mb-2 flex items-center justify-between">
-          <h2 className="text-sm font-medium uppercase tracking-wide text-stone-400">
+          <h2 className="font-display text-[10px] uppercase text-stone-400">
             Error log ({entries.length})
           </h2>
           {entries.length > 0 && (
@@ -58,7 +58,7 @@ export function DiagnosticsScreen() {
         ) : (
           <ul className="space-y-2">
             {[...entries].reverse().map((e, i) => (
-              <li key={i} className="rounded-xl bg-stone-900/60 p-3 text-xs ring-1 ring-stone-800">
+              <li key={i} className="pixel border-stone-700 bg-stone-900/70 p-3 text-sm">
                 <p className="text-stone-500">{e.at}</p>
                 <p className="mt-1 font-medium text-flag-500">{e.message}</p>
                 {e.stack && (

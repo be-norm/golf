@@ -113,7 +113,7 @@ export function SetupScreen() {
 
       {step === 0 && (
         <section className="flex flex-col gap-4">
-          <h1 className="text-2xl font-bold">Where are you playing?</h1>
+          <h1 className="font-display text-sm uppercase text-felt-300">Where are you playing?</h1>
           <div className="space-y-2">
             {courses?.map((c: Course) => (
               <button
@@ -123,10 +123,10 @@ export function SetupScreen() {
                   setTeeSetId(c.teeSets[0]?.id)
                   if (c.holeCount === 9) setHoles('front9')
                 }}
-                className={`block w-full rounded-2xl px-4 py-4 text-left ring-1 ${
+                className={`block w-full px-4 py-4 text-left ${
                   c.id === courseId
-                    ? 'bg-felt-800 ring-felt-500'
-                    : 'bg-stone-900/60 ring-stone-800 active:bg-stone-800/60'
+                    ? 'pixel border-felt-300 bg-felt-700'
+                    : 'pixel border-stone-700 bg-stone-900/70'
                 }`}
               >
                 <span className="font-semibold">{c.name}</span>
@@ -141,16 +141,16 @@ export function SetupScreen() {
           {course && (
             <>
               <div>
-                <h2 className="mb-2 text-sm font-medium uppercase tracking-wide text-stone-400">Tees</h2>
+                <h2 className="font-display mb-2 text-[10px] uppercase text-stone-400">Tees</h2>
                 <div className="flex flex-wrap gap-2">
                   {course.teeSets.map((t) => (
                     <button
                       key={t.id}
                       onClick={() => setTeeSetId(t.id)}
-                      className={`rounded-xl px-4 py-2.5 text-sm font-semibold ring-1 ${
+                      className={`px-4 py-2.5 text-lg ${
                         t.id === teeSetId
-                          ? 'bg-felt-800 ring-felt-500'
-                          : 'bg-stone-900/60 ring-stone-800'
+                          ? 'pixel border-felt-300 bg-felt-700'
+                          : 'pixel border-stone-700 bg-stone-900/70'
                       }`}
                     >
                       {t.name}
@@ -163,7 +163,7 @@ export function SetupScreen() {
               </div>
               {course.holeCount === 18 && (
                 <div>
-                  <h2 className="mb-2 text-sm font-medium uppercase tracking-wide text-stone-400">Holes</h2>
+                  <h2 className="font-display mb-2 text-[10px] uppercase text-stone-400">Holes</h2>
                   <div className="flex gap-2">
                     {(
                       [
@@ -175,8 +175,8 @@ export function SetupScreen() {
                       <button
                         key={value}
                         onClick={() => setHoles(value)}
-                        className={`rounded-xl px-4 py-2.5 text-sm font-semibold ring-1 ${
-                          holes === value ? 'bg-felt-800 ring-felt-500' : 'bg-stone-900/60 ring-stone-800'
+                        className={`px-4 py-2.5 text-lg ${
+                          holes === value ? 'pixel border-felt-300 bg-felt-700' : 'pixel border-stone-700 bg-stone-900/70'
                         }`}
                       >
                         {label}
@@ -192,7 +192,7 @@ export function SetupScreen() {
 
       {step === 1 && (
         <section className="flex flex-col gap-4">
-          <h1 className="text-2xl font-bold">Who's playing?</h1>
+          <h1 className="font-display text-sm uppercase text-felt-300">Who's playing?</h1>
           <form
             className="flex gap-2"
             onSubmit={(e) => {
@@ -267,7 +267,7 @@ export function SetupScreen() {
 
       {step === 2 && (
         <section className="flex flex-col gap-4">
-          <h1 className="text-2xl font-bold">What's the game?</h1>
+          <h1 className="font-display text-sm uppercase text-felt-300">What's the game?</h1>
           {listEngines().map((engine) => {
             const active = games.find((g) => g.type === engine.type)
             const playable =

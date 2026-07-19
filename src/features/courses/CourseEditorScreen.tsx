@@ -73,7 +73,7 @@ export function CourseEditorScreen() {
         <Link to="/courses" className="text-stone-400">
           ← Courses
         </Link>
-        <h1 className="font-bold">{isNew ? 'New course' : 'Edit course'}</h1>
+        <h1 className="font-display text-xs uppercase text-felt-300">{isNew ? 'New course' : 'Edit course'}</h1>
         <span className="w-14" />
       </header>
 
@@ -108,7 +108,7 @@ export function CourseEditorScreen() {
       </section>
 
       <section>
-        <h2 className="mb-2 text-sm font-medium uppercase tracking-wide text-stone-400">Tees</h2>
+        <h2 className="font-display mb-2 text-[10px] uppercase text-stone-400">Tees</h2>
         <div className="space-y-2">
           {course.teeSets.map((tee, i) => (
             <div
@@ -171,7 +171,7 @@ export function CourseEditorScreen() {
 
       <section>
         <div className="mb-2 flex items-center justify-between">
-          <h2 className="text-sm font-medium uppercase tracking-wide text-stone-400">
+          <h2 className="font-display text-[10px] uppercase text-stone-400">
             Holes — par & stroke index
           </h2>
           {!siValid && <span className="text-xs text-flag-500">SI must use 1–{course.holeCount} once each</span>}

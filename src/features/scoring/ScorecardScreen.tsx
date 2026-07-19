@@ -81,7 +81,7 @@ export function ScorecardScreen() {
         <Link to={`/round/${round.id}`} className="text-stone-400">
           ← Back
         </Link>
-        <h1 className="font-bold">{round.courseSnapshot.name}</h1>
+        <h1 className="font-display text-xs uppercase text-felt-300">{round.courseSnapshot.name}</h1>
         <span className="w-10" />
       </header>
       {front.length > 0 && half(front)}

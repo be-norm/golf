@@ -23,7 +23,7 @@ describe('ScoringScreen', () => {
 
     // hole header renders (hole 1, par 4)
     await screen.findByText('Hole')
-    expect(await screen.findByText('Par 4 · SI 5')).toBeInTheDocument()
+    expect(await screen.findByText('par 4 · si 5')).toBeInTheDocument()
 
     // one tap on Ben's chip confirms par
     const chip = await screen.findByRole('button', { name: 'Ben score' })

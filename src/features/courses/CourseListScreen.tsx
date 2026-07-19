@@ -57,7 +57,7 @@ export function CourseListScreen() {
         <Link to="/" className="text-stone-400">
           ← Home
         </Link>
-        <h1 className="font-bold">Courses</h1>
+        <h1 className="font-display text-xs uppercase text-felt-300">Courses</h1>
         <span className="w-12" />
       </header>
 
@@ -70,7 +70,7 @@ export function CourseListScreen() {
 
       {hits !== undefined && (
         <section>
-          <h2 className="mb-2 text-sm font-medium uppercase tracking-wide text-stone-400">
+          <h2 className="font-display mb-2 text-[10px] uppercase text-stone-400">
             {searching ? 'Searching…' : `Results (${hits.length})`}
           </h2>
           {error && <p className="mb-2 text-sm text-flag-500">{error}</p>}
@@ -80,7 +80,7 @@ export function CourseListScreen() {
                 <button
                   disabled={importing === h.id || localIds.has(h.id)}
                   onClick={() => void pick(h)}
-                  className="flex w-full items-center justify-between rounded-2xl bg-stone-900/60 px-4 py-3 text-left ring-1 ring-stone-800 active:bg-stone-800/60 disabled:opacity-50"
+                  className="flex w-full items-center justify-between pixel border-stone-700 bg-stone-900/70 px-4 py-3 text-left disabled:opacity-50"
                 >
                   <span>
                     <span className="font-semibold">{h.name}</span>
@@ -107,13 +107,13 @@ export function CourseListScreen() {
 
       <Link
         to="/courses/new"
-        className="block rounded-2xl bg-felt-900/60 px-4 py-4 text-center font-semibold ring-1 ring-felt-700 active:bg-felt-800/60"
+        className="block pixel-press font-display border-felt-600 bg-felt-900/60 px-4 py-4 text-center text-xs uppercase"
       >
         + New course
       </Link>
 
       <section>
-        <h2 className="mb-2 text-sm font-medium uppercase tracking-wide text-stone-400">
+        <h2 className="font-display mb-2 text-[10px] uppercase text-stone-400">
           My library
         </h2>
         <ul className="space-y-2">
@@ -121,7 +121,7 @@ export function CourseListScreen() {
             <li key={c.id}>
               <button
                 onClick={() => navigate(`/courses/${c.id}/edit`)}
-                className="block w-full rounded-2xl bg-stone-900/60 px-4 py-3 text-left ring-1 ring-stone-800 active:bg-stone-800/60"
+                className="block w-full pixel border-stone-700 bg-stone-900/70 px-4 py-3 text-left"
               >
                 <span className="font-semibold">{c.name}</span>
                 <span className="ml-2 text-sm text-stone-400">
