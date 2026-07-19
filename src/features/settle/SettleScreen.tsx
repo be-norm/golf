@@ -7,6 +7,7 @@ import { roundRepo } from '../../db/repos'
 import { useRound } from '../scoring/useRound'
 import { BigButton } from '../../components/BigButton'
 import { GameSummary } from '../../components/GameSummary'
+import { DetailLines } from '../../components/DetailLines'
 import { buildExport, downloadExport } from './exportRound'
 
 export function SettleScreen() {
@@ -131,19 +132,9 @@ export function SettleScreen() {
               {open && (
                 <div className="border-t-2 border-stone-800 px-4 py-3">
                   {d.detailLines && d.detailLines.length > 0 && (
-                    <ul className="mb-3 space-y-1">
-                      {d.detailLines.map((line, i) => (
-                        <li
-                          key={i}
-                          className={`flex items-baseline justify-between gap-2 ${line.depth ? 'pl-4' : ''}`}
-                        >
-                          <span className="font-display shrink-0 text-[9px] uppercase text-coin-400">
-                            {line.label}
-                          </span>
-                          <span className="text-lg tabular-nums text-stone-300">{line.value}</span>
-                        </li>
-                      ))}
-                    </ul>
+                    <div className="mb-3">
+                      <DetailLines lines={d.detailLines} valueClass="text-stone-300" />
+                    </div>
                   )}
                   <ul className="space-y-1 text-lg text-stone-300">
                     {d.settlement.lines.map((line, i) => (

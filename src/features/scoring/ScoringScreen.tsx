@@ -8,6 +8,8 @@ import { formatCentsSigned } from '../../engine/core/money'
 import type { InputRequest } from '../../engine/catalog'
 import { Sheet } from '../../components/Sheet'
 import { GameSummary } from '../../components/GameSummary'
+import { DetailLines } from '../../components/DetailLines'
+import { BigButton } from '../../components/BigButton'
 import { enqueueRoundArchive } from '../../remote/outbox'
 import { RulesSheet } from '../games/RulesSheet'
 import { useRound } from './useRound'
@@ -21,6 +23,8 @@ export function ScoringScreen() {
   const [hole, setHole] = useState<number>()
   const [standingsOpen, setStandingsOpen] = useState(false)
   const [rulesFor, setRulesFor] = useState<string>()
+  // optional prompts (e.g. press offers) can be waved off without an event
+  const [dismissedInputs, setDismissedInputs] = useState<Set<string>>(new Set())
 
   // Initial hole, captured ONCE when the view first loads: ?hole= deep link
   // (scorecard tap), else first not-fully-scored hole, else the last hole.
@@ -62,8 +66,9 @@ export function ScoringScreen() {
   const { round, ctx, derivations } = view
   const currentHole = hole ?? derivedHole ?? ctx.holesPlayed[0]!
   const holeIdx = ctx.holesPlayed.indexOf(currentHole)
-  const primaryGame = round.games[0]
-  const holeInputs = pendingInputs.filter((i) => i.hole === currentHole)
+  // stroke dots show the first NET game's allocation (games[0] was arbitrary)
+  const primaryGame = round.games.find((g) => g.handicap.mode === 'net') ?? round.games[0]
+  const holeInputs = pendingInputs.filter((i) => i.hole === currentHole && !dismissedInputs.has(i.id))
 
   const allScored = round.players.every((p) =>
     ctx.holesPlayed.every((h) => ctx.gross.get(p.playerId)?.get(h) !== undefined),
@@ -143,9 +148,13 @@ export function ScoringScreen() {
       {holeInputs.length > 0 && (
         <section className="mb-2 space-y-2.5">
           {holeInputs.map((input) => (
-            <div key={input.id} className="pixel border-coin-500 bg-coin-500/10 p-3">
-              <p className="mb-2 text-lg text-coin-400">
-                <span className="animate-blink">▶</span> {input.prompt}
+            <div
+              key={input.id}
+              className={`pixel p-3 ${input.optional ? 'border-stone-600 bg-stone-800/40' : 'border-coin-500 bg-coin-500/10'}`}
+            >
+              <p className={`mb-2 text-lg ${input.optional ? 'text-stone-300' : 'text-coin-400'}`}>
+                {!input.optional && <span className="animate-blink">▶ </span>}
+                {input.prompt}
               </p>
               <div className="flex flex-wrap gap-2.5">
                 {input.options.map((o) => (
@@ -157,6 +166,14 @@ export function ScoringScreen() {
                     {o.label}
                   </button>
                 ))}
+                {input.optional && (
+                  <button
+                    onClick={() => setDismissedInputs(new Set([...dismissedInputs, input.id]))}
+                    className="px-3 py-2.5 text-lg text-stone-500"
+                  >
+                    ✕ No thanks
+                  </button>
+                )}
               </div>
             </div>
           ))}
@@ -179,12 +196,9 @@ export function ScoringScreen() {
       <div className="fixed inset-x-0 bottom-0 z-30 border-t-4 border-felt-600 bg-stone-950/95 px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 backdrop-blur">
         <div className="mx-auto max-w-md">
           {allScored ? (
-            <button
-              onClick={() => void finish()}
-              className="pixel-press font-display mb-1 w-full border-felt-300 bg-felt-600 py-4 text-sm uppercase"
-            >
+            <BigButton className="mb-1 w-full" onClick={() => void finish()}>
               🏁 Finish round
-            </button>
+            </BigButton>
           ) : (
             <button className="w-full text-left" onClick={() => setStandingsOpen(true)}>
               {round.games.map((g) => {
@@ -230,19 +244,9 @@ export function ScoringScreen() {
                   </button>
                 </div>
                 {d.detailLines && d.detailLines.length > 0 && (
-                  <ul className="mb-3 space-y-1.5 border-l-2 border-stone-800 pl-3">
-                    {d.detailLines.map((line, i) => (
-                      <li
-                        key={i}
-                        className={`flex items-baseline justify-between gap-2 ${line.depth ? 'pl-4' : ''}`}
-                      >
-                        <span className="font-display shrink-0 text-[9px] uppercase text-coin-400">
-                          {line.label}
-                        </span>
-                        <span className="text-lg tabular-nums text-stone-200">{line.value}</span>
-                      </li>
-                    ))}
-                  </ul>
+                  <div className="mb-3 border-l-2 border-stone-800 pl-3">
+                    <DetailLines lines={d.detailLines} />
+                  </div>
                 )}
                 <ul className="space-y-2">
                   {d.standings.map((line) => (
@@ -279,12 +283,13 @@ export function ScoringScreen() {
           })}
 
           {!allScored && anyScored && (
-            <button
+            <BigButton
+              variant="outline"
+              className="w-full text-[10px] normal-case text-stone-300"
               onClick={() => void finish()}
-              className="pixel-press font-display block w-full border-stone-600 bg-stone-800 px-4 py-3 text-center text-[10px] uppercase text-stone-300"
             >
               🏁 Finish round early — settle what's been played
-            </button>
+            </BigButton>
           )}
         </div>
       </Sheet>

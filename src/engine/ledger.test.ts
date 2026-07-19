@@ -46,13 +46,14 @@ describe('buildHoleLedger', () => {
     expect(midRows[0]!.summary[1]).toContain('F9 A ↑1')
     expect(midRows.every((r) => r.deltas.length === 0)).toBe(true)
 
-    // finishing the round closes the bet — money lands on the final hole row
+    // finishing the round closes the bet — money lands on the last PLAYED
+    // hole's row (never on an unplayed hole finalized by completion)
     log.append({ type: 'round/completed' })
     const done = deriveRound(round, log.events)
     const ledger = buildHoleLedger(round, log.events, done.ctx.holesPlayed, done.derivations)
     const rows = ledger.get('game-1')!
     const closing = rows[rows.length - 1]!
-    expect(closing.hole).toBe(9)
+    expect(closing.hole).toBe(3)
     expect(closing.summary.some((s) => s.includes('closes'))).toBe(true)
     expect(closing.deltas).toEqual([
       { playerId: 'p-a', cents: 500 },

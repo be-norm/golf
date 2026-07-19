@@ -45,12 +45,19 @@ export function buildHoleLedger(
   const hasScore = (hole: number) =>
     round.players.some((p) => gross.get(p.playerId)?.get(hole) !== undefined)
 
-  const lastHole = holesPlayed[holesPlayed.length - 1]
+  // Round completion finalizes everything at once — attribute the money it
+  // locks to the last hole anyone actually played (an early-finished round
+  // must not show money moving on an unplayed hole 18).
+  const scoredHoles = events
+    .filter((e): e is Extract<RoundEvent, { type: 'score/set' }> => e.type === 'score/set')
+    .map((e) => e.hole)
+    .filter((h) => holesPlayed.includes(h))
+  const completionHole = scoredHoles.length
+    ? Math.max(...scoredHoles)
+    : holesPlayed[holesPlayed.length - 1]
   for (const hole of holesPlayed) {
     const prefix = events.filter((e) => {
-      // round completion finalizes everything at once — attribute the money
-      // it locks to the final hole, not to every prefix
-      if (e.type === 'round/completed' || e.type === 'round/reopened') return hole === lastHole
+      if (e.type === 'round/completed' || e.type === 'round/reopened') return hole >= completionHole!
       const eh = eventHole(e)
       return eh === null || eh <= hole
     })

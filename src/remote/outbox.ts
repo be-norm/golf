@@ -30,13 +30,21 @@ export async function flushOutbox(): Promise<void> {
     const deviceId = await getDeviceId(db)
     for (const item of items) {
       if (item.kind !== 'archiveRound') continue
+      // give up quietly after repeated permanent failures — archiving is
+      // best-effort and must not churn the network forever
+      if (item.attempts >= 10) continue
       const { round } = item.payload as { round: Round }
-      const { error } = await supabase.from('round_archives').insert({
-        id: item.id,
-        round_id: round.id,
-        device_id: deviceId,
-        data: item.payload,
-      })
+      // upsert-ignore makes a lost response idempotent: if the row landed but
+      // the ack didn't, the retry succeeds instead of duplicate-keying forever
+      const { error } = await supabase.from('round_archives').upsert(
+        {
+          id: item.id,
+          round_id: round.id,
+          device_id: deviceId,
+          data: item.payload,
+        },
+        { onConflict: 'id', ignoreDuplicates: true },
+      )
       if (error) {
         await db.outbox.update(item.id, { attempts: item.attempts + 1 })
       } else {

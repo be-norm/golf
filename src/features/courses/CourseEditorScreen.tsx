@@ -5,6 +5,7 @@ import type { Course, TeeSet } from '../../engine/core/types'
 import { courseRepo } from '../../db/repos'
 import { newId } from '../../db/ids'
 import { BigButton } from '../../components/BigButton'
+import { selectOnFocus } from '../../components/inputs'
 
 function blankCourse(holeCount: 9 | 18): Course {
   return {
@@ -127,7 +128,7 @@ export function CourseEditorScreen() {
                   type="number"
                   inputMode="decimal"
                   step="0.1"
-                  onFocus={(e) => e.currentTarget.select()}
+                  onFocus={selectOnFocus}
                   value={tee.rating}
                   onChange={(e) => updateTee(i, { rating: Number(e.target.value) })}
                   className="min-h-10 w-16 rounded-lg bg-stone-800 px-2 text-sm text-stone-100 ring-1 ring-stone-700 focus:outline-none"
@@ -138,7 +139,7 @@ export function CourseEditorScreen() {
                 <input
                   type="number"
                   inputMode="numeric"
-                  onFocus={(e) => e.currentTarget.select()}
+                  onFocus={selectOnFocus}
                   value={tee.slope}
                   onChange={(e) => updateTee(i, { slope: Number(e.target.value) })}
                   className="min-h-10 w-14 rounded-lg bg-stone-800 px-2 text-sm text-stone-100 ring-1 ring-stone-700 focus:outline-none"
@@ -212,7 +213,7 @@ export function CourseEditorScreen() {
                     <input
                       type="number"
                       inputMode="numeric"
-                      onFocus={(e) => e.currentTarget.select()}
+                      onFocus={selectOnFocus}
                       min={1}
                       max={course.holeCount}
                       value={hole.strokeIndex}

@@ -118,7 +118,14 @@ export function deriveRound(
   for (const game of round.games) {
     const engine = registry.get(game.type)
     if (!engine) continue
-    derivations.set(game.gameId, engine.derive(game, gameEventsFor(effective, game.gameId), ctx))
+    // Enforce each engine's event schemas here, once: an unknown kind or a
+    // malformed payload (corrupt import, stale event) is dropped rather than
+    // blind-cast inside the engine — reducers stay total, bad data is inert.
+    const gameEvents = gameEventsFor(effective, game.gameId).filter((e) => {
+      const schema = engine.eventKinds[e.kind]
+      return schema !== undefined && schema.safeParse(e.data).success
+    })
+    derivations.set(game.gameId, engine.derive(game, gameEvents, ctx))
   }
   return { ctx, derivations }
 }

@@ -11,9 +11,12 @@ export function effectiveEvents(events: readonly RoundEvent[]): RoundEvent[] {
   for (const e of events) {
     if (e.type === 'meta/retract') retracted.add(e.targetEventId)
   }
-  return events
-    .filter((e) => e.type !== 'meta/retract' && !retracted.has(e.id))
-    .sort((a, b) => a.seq - b.seq)
+  const kept = events.filter((e) => e.type !== 'meta/retract' && !retracted.has(e.id))
+  // EventStore.list yields seq order already — only pay for a sort when needed
+  for (let i = 1; i < kept.length; i++) {
+    if (kept[i]!.seq < kept[i - 1]!.seq) return kept.sort((a, b) => a.seq - b.seq)
+  }
+  return kept
 }
 
 /**

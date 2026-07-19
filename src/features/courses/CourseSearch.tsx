@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { Course } from '../../engine/core/types'
 import {
   importCourseHit,
@@ -26,6 +26,10 @@ export function CourseSearch({ localIds, onImported, placeholder }: Props) {
   const [importing, setImporting] = useState<string>()
   const [error, setError] = useState<string>()
   const debounce = useRef<ReturnType<typeof setTimeout>>(undefined)
+  const requestSeq = useRef(0)
+
+  // abandoned searches must not fire network requests or setState after unmount
+  useEffect(() => () => clearTimeout(debounce.current), [])
 
   const onQueryChange = (value: string) => {
     setQuery(value)
@@ -36,8 +40,10 @@ export function CourseSearch({ localIds, onImported, placeholder }: Props) {
       return
     }
     debounce.current = setTimeout(() => {
+      const seq = ++requestSeq.current
       setSearching(true)
       void searchCourses(value).then((results) => {
+        if (seq !== requestSeq.current) return // a newer query superseded this one
         setHits(results)
         setSearching(false)
       })

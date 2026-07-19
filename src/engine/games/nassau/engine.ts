@@ -3,13 +3,14 @@ import type { GameEngine, GameDerivation, InputRequest, StandingLine } from '../
 import type { RoundContext } from '../../core/context'
 import type { GameScopedEvent } from '../../core/events'
 import { addLine, emptySettlement, type Settlement } from '../../core/money'
+import { teamsSchema, teamPartitionProblems } from '../../core/teams'
 import type { GameConfig, HandicapSettings, RoundPlayer, Uuid } from '../../core/types'
 
 export const nassauConfigSchema = z.object({
   /** per-player stake on each bet (front, back, overall, and every press) */
   stakeCents: z.number().int().positive(),
   /** null = 1v1 (first two players); otherwise 2v2 best ball */
-  teams: z.object({ a: z.array(z.string()), b: z.array(z.string()) }).nullable(),
+  teams: teamsSchema.nullable(),
   /** spawn a press automatically whenever a live bet goes exactly 2 down */
   autoPress: z.boolean(),
 })
@@ -28,17 +29,23 @@ interface Bet {
   depth: number
   /** running diff from side A's perspective, over scored holes */
   diff: number
+  /** diff after each decided hole, recorded during the single accumulation walk */
+  history: Map<number, number>
   holesRemaining: number
 }
 
 const SEGMENT_LABEL: Record<Segment, string> = { front: 'Front', back: 'Back', overall: 'Overall' }
 
-function segmentHoles(segment: Segment, holesPlayed: readonly number[]): number[] {
+function computeSpans(holesPlayed: readonly number[]): Record<Segment, number[]> {
   // 9-hole rounds collapse to a single 'overall' bet
-  if (holesPlayed.length <= 9) return segment === 'overall' ? [...holesPlayed] : []
-  if (segment === 'front') return holesPlayed.filter((h) => h <= 9)
-  if (segment === 'back') return holesPlayed.filter((h) => h > 9)
-  return [...holesPlayed]
+  if (holesPlayed.length <= 9) {
+    return { front: [], back: [], overall: [...holesPlayed] }
+  }
+  return {
+    front: holesPlayed.filter((h) => h <= 9),
+    back: holesPlayed.filter((h) => h > 9),
+    overall: [...holesPlayed],
+  }
 }
 
 function derive(
@@ -50,19 +57,10 @@ function derive(
   const players = ctx.round.players
   const playerIds = players.map((p) => p.playerId)
   const nameOf = new Map(players.map((p) => [p.playerId, p.name]))
+  const spans = computeSpans(ctx.holesPlayed)
 
   const sideA: Uuid[] = game.config.teams ? game.config.teams.a : [playerIds[0]!]
   const sideB: Uuid[] = game.config.teams ? game.config.teams.b : [playerIds[1]!]
-
-  /** best net ball among the side's POSTED scores, or null if nobody posted */
-  const bestBall = (side: Uuid[], hole: number): number | null => {
-    let best: number | null = null
-    for (const id of side) {
-      const net = ctx.netFor(game.gameId, id, hole)
-      if (net !== null && (best === null || net < best)) best = net
-    }
-    return best
-  }
 
   /** +1 side A, -1 side B, 0 halved, null not yet finalized */
   const holeResult = new Map<number, 1 | -1 | 0 | null>()
@@ -71,8 +69,8 @@ function derive(
       holeResult.set(hole, null)
       continue
     }
-    const a = bestBall(sideA, hole)
-    const b = bestBall(sideB, hole)
+    const a = ctx.bestNetAmongPosted(game.gameId, sideA, hole)
+    const b = ctx.bestNetAmongPosted(game.gameId, sideB, hole)
     // a side with no posted score can't win the hole; neither side → halved
     if (a === null && b === null) holeResult.set(hole, 0)
     else if (b === null) holeResult.set(hole, 1)
@@ -80,28 +78,30 @@ function derive(
     else holeResult.set(hole, a < b ? 1 : b < a ? -1 : 0)
   }
 
-  const manualPresses = events
-    .filter((e) => e.kind === 'nassau/press')
-    .map((e) => e.data as { hole: number; segment: Segment })
+  // Manual presses dedupe by segment+hole: tapping the offer twice (or a
+  // re-imported duplicate event) must not create a double-stake bet.
+  const manualPresses = new Map<string, { hole: number; segment: Segment }>()
+  for (const e of events) {
+    if (e.kind !== 'nassau/press') continue
+    const data = e.data as { hole: number; segment: Segment }
+    manualPresses.set(`${data.segment}-${data.hole}`, data)
+  }
 
-  // Walk holes in order; each bet accumulates over its own span. Auto-presses
-  // spawn when a bet's diff transitions into exactly ±2 (from a smaller gap),
-  // starting the NEXT hole of the same segment (never past the segment's end).
   const bets: Bet[] = (['front', 'back', 'overall'] as const)
-    .filter((seg) => segmentHoles(seg, ctx.holesPlayed).length > 0)
+    .filter((seg) => spans[seg].length > 0)
     .map((seg) => ({
       id: seg,
       segment: seg,
-      startHole: segmentHoles(seg, ctx.holesPlayed)[0]!,
+      startHole: spans[seg][0]!,
       label: SEGMENT_LABEL[seg],
       depth: 0,
       diff: 0,
+      history: new Map(),
       holesRemaining: 0,
     }))
 
-  for (const press of manualPresses) {
-    const holes = segmentHoles(press.segment, ctx.holesPlayed)
-    if (!holes.includes(press.hole)) continue
+  for (const press of manualPresses.values()) {
+    if (!spans[press.segment].includes(press.hole)) continue
     bets.push({
       id: `press-${press.segment}-${press.hole}`,
       segment: press.segment,
@@ -109,28 +109,30 @@ function derive(
       label: `Press ${SEGMENT_LABEL[press.segment]} @${press.hole}`,
       depth: 1,
       diff: 0,
+      history: new Map(),
       holesRemaining: 0,
     })
   }
 
+  // Single accumulation walk. Auto-presses spawn when a bet's diff transitions
+  // into exactly ±2 (from a smaller gap), starting the NEXT hole of the same
+  // segment (never past the segment's end). Presses spawned this hole don't
+  // score it — the `active` snapshot is taken before spawning.
   for (const hole of ctx.holesPlayed) {
     const result = holeResult.get(hole)
     if (result === null || result === undefined) continue
-    // snapshot: presses spawned this hole start scoring NEXT hole
-    const active = bets.filter((b) => {
-      const span = segmentHoles(b.segment, ctx.holesPlayed)
-      return span.includes(hole) && hole >= b.startHole
-    })
+    const active = bets.filter((b) => spans[b.segment].includes(hole) && hole >= b.startHole)
     for (const bet of active) {
       const prev = bet.diff
       bet.diff += result
+      bet.history.set(hole, bet.diff)
       if (
         autoPress &&
         Math.abs(bet.diff) === 2 &&
         Math.abs(prev) < 2 &&
-        segmentHoles(bet.segment, ctx.holesPlayed).some((h) => h > hole)
+        spans[bet.segment].some((h) => h > hole)
       ) {
-        const nextHole = segmentHoles(bet.segment, ctx.holesPlayed).find((h) => h > hole)!
+        const nextHole = spans[bet.segment].find((h) => h > hole)!
         bets.push({
           id: `auto-${bet.id}-@${nextHole}`,
           segment: bet.segment,
@@ -138,6 +140,7 @@ function derive(
           label: `Press ${SEGMENT_LABEL[bet.segment]} @${nextHole}`,
           depth: bet.depth + 1,
           diff: 0,
+          history: new Map(),
           holesRemaining: 0,
         })
       }
@@ -145,8 +148,9 @@ function derive(
   }
 
   for (const bet of bets) {
-    const span = segmentHoles(bet.segment, ctx.holesPlayed).filter((h) => h >= bet.startHole)
-    bet.holesRemaining = span.filter((h) => (holeResult.get(h) ?? null) === null).length
+    bet.holesRemaining = spans[bet.segment].filter(
+      (h) => h >= bet.startHole && (holeResult.get(h) ?? null) === null,
+    ).length
   }
 
   // Money is LOCKED-ONLY: a bet pays when its holes run out (holesRemaining 0
@@ -189,8 +193,7 @@ function derive(
   // Every bet — parents and presses — reported the way a golfer tracks it:
   // who's up, by how much, holes left; dormie/closed-out/final when apt.
   const firstName = (id: Uuid) => (nameOf.get(id) ?? '').split(' ')[0]
-  const sideShort = (side: 'a' | 'b') =>
-    (side === 'a' ? sideA : sideB).map(firstName).join(' & ')
+  const sideShort = (side: 'a' | 'b') => (side === 'a' ? sideA : sideB).map(firstName).join(' & ')
   const segLabel = (seg: Segment): string =>
     // a collapsed 9-hole nassau's single bet is the nine that was played
     seg === 'overall'
@@ -202,8 +205,7 @@ function derive(
       : seg === 'front'
         ? 'F9'
         : 'B9'
-  const betLabel = (b: Bet): string =>
-    b.depth === 0 ? segLabel(b.segment) : `Press @${b.startHole}`
+  const betLabel = (b: Bet): string => (b.depth === 0 ? segLabel(b.segment) : `Press @${b.startHole}`)
   const betValue = (b: Bet): string => {
     const n = Math.abs(b.diff)
     const leader = b.diff === 0 ? null : sideShort(b.diff > 0 ? 'a' : 'b')
@@ -243,20 +245,27 @@ function derive(
       : parents.map((b) => ({ label: betLabel(b), value: compactValue(b) }))
   if (livePresses > 0) summaryParts.push({ label: 'presses', value: String(livePresses) })
   const summary = summaryParts
-    .map((p) => (p.label === 'presses' ? `${p.value} press${p.value === '1' ? '' : 'es'}` : `${p.label}: ${p.value}`))
+    .map((p) =>
+      p.label === 'presses' ? `${p.value} press${p.value === '1' ? '' : 'es'}` : `${p.label}: ${p.value}`,
+    )
     .join(' · ')
 
   // Manual-press affordance: on the active frontier hole, a side that is down
-  // in a live bet may press (optional chip — never blocks scoring).
+  // in a live bet may press (optional chip — never blocks scoring). Segments
+  // already pressed at this hole are not offered again.
   const requiredInputs = (): InputRequest[] => {
     if (autoPress) return []
     const frontier = ctx.holesPlayed.find((h) => holeResult.get(h) === null)
     if (frontier === undefined) return []
-    const pressable = bets.filter((b) => {
-      const span = segmentHoles(b.segment, ctx.holesPlayed)
-      return b.diff !== 0 && span.includes(frontier) && frontier > b.startHole
-    })
+    const pressable = bets.filter(
+      (b) =>
+        b.diff !== 0 &&
+        spans[b.segment].includes(frontier) &&
+        frontier > b.startHole &&
+        !manualPresses.has(`${b.segment}-${frontier}`),
+    )
     if (pressable.length === 0) return []
+    const segments = [...new Set(pressable.map((b) => b.segment))]
     return [
       {
         id: `nassau-press-${frontier}`,
@@ -264,10 +273,7 @@ function derive(
         hole: frontier,
         prompt: 'Press?',
         optional: true,
-        options: pressable.map((b) => ({
-          value: b.segment,
-          label: `Press ${SEGMENT_LABEL[b.segment]}`,
-        })),
+        options: segments.map((seg) => ({ value: seg, label: `Press ${SEGMENT_LABEL[seg]}` })),
         eventKind: 'nassau/press',
       },
     ]
@@ -280,32 +286,30 @@ function derive(
     if (!holeNotes.has(h)) holeNotes.set(h, [])
     holeNotes.get(h)!.push(s)
   }
-  {
-    const running = new Map<string, number>()
-    for (const h of ctx.holesPlayed) {
-      for (const b of bets) {
-        if (b.depth > 0 && b.startHole === h) note(h, `${betLabel(b)} starts`)
-      }
-      const r = holeResult.get(h)
-      if (r === null || r === undefined || r === 0) continue
-      const states: string[] = []
-      for (const b of ordered) {
-        const span = segmentHoles(b.segment, ctx.holesPlayed)
-        if (!span.includes(h) || h < b.startHole) continue
-        const d = (running.get(b.id) ?? 0) + r
-        running.set(b.id, d)
-        if (b.depth === 0) {
-          states.push(`${betLabel(b)} ${d === 0 ? 'AS' : `${sideShort(d > 0 ? 'a' : 'b')} ↑${Math.abs(d)}`}`)
-        }
-      }
-      if (states.length > 0) note(h, states.join(' · '))
+  for (const h of ctx.holesPlayed) {
+    for (const b of bets) {
+      if (b.depth > 0 && b.startHole === h) note(h, `${betLabel(b)} starts`)
     }
-    for (const b of ordered) {
-      if (!isClosed(b)) continue
-      const span = segmentHoles(b.segment, ctx.holesPlayed).filter((x) => x >= b.startHole)
-      const closeAt = span[span.length - 1]
-      if (closeAt !== undefined) note(closeAt, `${betLabel(b)} closes — ${betValue(b)}`)
-    }
+    const r = holeResult.get(h)
+    if (r === null || r === undefined || r === 0) continue
+    const states = parents
+      .filter((b) => b.history.has(h))
+      .map((b) => {
+        const d = b.history.get(h)!
+        return `${betLabel(b)} ${d === 0 ? 'AS' : `${sideShort(d > 0 ? 'a' : 'b')} ↑${Math.abs(d)}`}`
+      })
+    if (states.length > 0) note(h, states.join(' · '))
+  }
+  for (const b of ordered) {
+    if (!isClosed(b)) continue
+    const span = spans[b.segment].filter((x) => x >= b.startHole)
+    // a bet closed by round completion closes on its last PLAYED hole —
+    // never narrate (or attribute money) on a hole nobody played
+    const played = span.filter((h) =>
+      playerIds.some((id) => ctx.gross.get(id)?.get(h) !== undefined),
+    )
+    const closeAt = played[played.length - 1] ?? span[span.length - 1]
+    if (closeAt !== undefined) note(closeAt, `${betLabel(b)} closes — ${betValue(b)}`)
   }
 
   const holeSummary = (hole: number): string[] => {
@@ -362,7 +366,8 @@ export const nassauEngine: GameEngine<NassauConfig> = {
         { term: 'Halve', def: 'A tied hole — nobody gains ground on any bet.' },
         { term: 'All square (AS)', def: 'A bet where neither side is up.' },
         { term: 'Push', def: 'A bet that ends tied — no money moves.' },
-        { term: 'Best ball', def: "In 2v2, each team counts only its lower score on a hole." },
+        { term: 'Best ball', def: 'In 2v2, each team counts only its lower score on a hole.' },
+        { term: 'Dormie', def: 'Up exactly as many holes as remain — can no longer lose the bet.' },
       ],
     },
   },
@@ -385,29 +390,25 @@ export const nassauEngine: GameEngine<NassauConfig> = {
   }),
   defaultHandicap: (): HandicapSettings => ({ mode: 'net', allowancePct: 100, reference: 'offLow' }),
   validateSetup: (config: GameConfig<NassauConfig>, players: readonly RoundPlayer[]) => {
-    const problems: string[] = []
     const parsed = nassauConfigSchema.safeParse(config.config)
     if (!parsed.success) return ['Invalid nassau configuration']
     const teams = parsed.data.teams
     if (teams === null) {
-      if (players.length !== 2) problems.push('Nassau without teams needs exactly 2 players')
-    } else {
-      const all = [...teams.a, ...teams.b].sort()
-      const expected = players.map((p) => p.playerId).sort()
-      if (teams.a.length !== 2 || teams.b.length !== 2)
-        problems.push('Nassau teams need 2 players per side')
-      else if (JSON.stringify(all) !== JSON.stringify(expected))
-        problems.push('Every player must be on exactly one nassau team')
+      return players.length === 2 ? [] : ['Nassau without teams needs exactly 2 players']
     }
-    return problems
+    return teamPartitionProblems(teams, players, 'Nassau')
   },
   eventKinds: {
-    'nassau/press': z.object({
-      hole: z.number().int().min(1).max(18),
-      // scoring UI answers prompts with { hole, choice }
-      choice: z.enum(['front', 'back', 'overall']).optional(),
-      segment: z.enum(['front', 'back', 'overall']).optional(),
-    }),
+    'nassau/press': z
+      .object({
+        hole: z.number().int().min(1).max(18),
+        // scoring UI answers prompts with { hole, choice }
+        choice: z.enum(['front', 'back', 'overall']).optional(),
+        segment: z.enum(['front', 'back', 'overall']).optional(),
+      })
+      .refine((d) => d.choice !== undefined || d.segment !== undefined, {
+        message: 'press needs a segment',
+      }),
   },
   derive: (game, events, ctx) =>
     derive(

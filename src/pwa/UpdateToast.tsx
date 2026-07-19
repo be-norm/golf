@@ -2,13 +2,17 @@ import { useRegisterSW } from 'virtual:pwa-register/react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { roundRepo } from '../db/repos'
 
+// one page-level listener regardless of how many times the hook re-registers
+let updateCheckInstalled = false
+
 export function UpdateToast() {
   const {
     needRefresh: [needRefresh, setNeedRefresh],
     updateServiceWorker,
   } = useRegisterSW({
     onRegisteredSW(_url, registration) {
-      if (!registration) return
+      if (!registration || updateCheckInstalled) return
+      updateCheckInstalled = true
       // installed-for-weeks phones learn about updates when brought to foreground
       document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible') void registration.update()

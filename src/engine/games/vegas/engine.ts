@@ -3,12 +3,13 @@ import type { GameEngine, GameDerivation, StandingLine } from '../../catalog'
 import type { RoundContext } from '../../core/context'
 import type { GameScopedEvent } from '../../core/events'
 import { addLine, emptySettlement, formatCentsSigned, type Settlement } from '../../core/money'
+import { teamsSchema, teamPartitionProblems } from '../../core/teams'
 import type { GameConfig, HandicapSettings, RoundPlayer } from '../../core/types'
 
 export const vegasConfigSchema = z.object({
   /** cents per point of team-number differential */
   pointCents: z.number().int().positive(),
-  teams: z.object({ a: z.array(z.string()), b: z.array(z.string()) }),
+  teams: teamsSchema,
   /** a natural (gross) birdie flips the OPPONENTS' number high-digit-first */
   birdieFlip: z.boolean(),
   /** a natural eagle also doubles the hole's differential */
@@ -21,18 +22,29 @@ function concatNum(first: number, second: number): number {
   return Number(`${first}${second}`)
 }
 
+/**
+ * Scores are clamped to ≥1 before pairing: with handicap strokes a net score
+ * can reach 0 or below, and string-concatenating a negative would produce
+ * nonsense team numbers (pair(-1,4) → -14).
+ */
+function digit(n: number): number {
+  return Math.max(1, n)
+}
+
 /** Normal pairing: low digit first — except a 10+ score leads (softens blowups). */
 export function pairNormal(x: number, y: number): number {
-  const lo = Math.min(x, y)
-  const hi = Math.max(x, y)
-  return hi >= 10 ? concatNum(hi, lo) : concatNum(lo, hi)
+  const lo = digit(Math.min(x, y))
+  const hi = digit(Math.max(x, y))
+  // with any 10+ score, take the SOFTER of the two concatenations —
+  // 4 & 10 → 104 (not 410), and 10 & 11 → 1011 (not 1110)
+  return hi >= 10 ? Math.min(concatNum(hi, lo), concatNum(lo, hi)) : concatNum(lo, hi)
 }
 
 /** Flipped pairing (opponent birdied): high digit first — a 10+ score punishes fully. */
 export function pairFlipped(x: number, y: number): number {
-  const lo = Math.min(x, y)
-  const hi = Math.max(x, y)
-  return hi >= 10 ? concatNum(lo, hi) : concatNum(hi, lo)
+  const lo = digit(Math.min(x, y))
+  const hi = digit(Math.max(x, y))
+  return hi >= 10 ? Math.max(concatNum(hi, lo), concatNum(lo, hi)) : concatNum(hi, lo)
 }
 
 export interface VegasHoleResult {
@@ -215,13 +227,7 @@ export const vegasEngine: GameEngine<VegasConfig> = {
     if (players.length !== 4) return ['Vegas needs exactly 4 players']
     const parsed = vegasConfigSchema.safeParse(config.config)
     if (!parsed.success) return ['Invalid vegas configuration']
-    const { teams } = parsed.data
-    const all = [...teams.a, ...teams.b].sort()
-    const expected = players.map((p) => p.playerId).sort()
-    if (teams.a.length !== 2 || teams.b.length !== 2) return ['Vegas teams need 2 players per side']
-    if (JSON.stringify(all) !== JSON.stringify(expected))
-      return ['Every player must be on exactly one vegas team']
-    return []
+    return teamPartitionProblems(parsed.data.teams, players, 'Vegas')
   },
   eventKinds: {},
   derive,

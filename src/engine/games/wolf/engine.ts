@@ -3,6 +3,7 @@ import type { GameEngine, GameDerivation, InputRequest, StandingLine } from '../
 import type { RoundContext } from '../../core/context'
 import type { GameScopedEvent } from '../../core/events'
 import { emptySettlement, formatCentsSigned, type Settlement } from '../../core/money'
+import { isPlayerPermutation } from '../../core/teams'
 import type { GameConfig, HandicapSettings, RoundPlayer, Uuid } from '../../core/types'
 
 export const wolfConfigSchema = z.object({
@@ -84,26 +85,28 @@ function derive(
       )[0]!
     }
 
-    const pick = picks.get(hole) ?? null
-    const nets = new Map<Uuid, number | null>(
-      playerIds.map((id) => [id, ctx.netFor(game.gameId, id, hole)]),
-    )
+    // A partner pick must name a current player other than the hole's wolf.
+    // A pick can go stale legitimately: on trailing-player holes a score
+    // correction can reassign the wolf after the pick was recorded — treat
+    // the orphaned pick as pending so the prompt re-appears, rather than
+    // silently computing a degenerate [wolf, wolf] side.
+    const rawPick = picks.get(hole) ?? null
+    const pick =
+      rawPick?.kind === 'partner' &&
+      (rawPick.partnerId === wolfId || !playerIds.includes(rawPick.partnerId))
+        ? null
+        : rawPick
 
     if (!pick || !ctx.finalized(hole)) {
       holeResults.push({ hole, wolfId, pick, points: null, outcome: 'pending' })
       return
     }
 
-    const wolfSide: Uuid[] =
-      pick.kind === 'partner' ? [wolfId, pick.partnerId] : [wolfId]
+    const wolfSide: Uuid[] = pick.kind === 'partner' ? [wolfId, pick.partnerId] : [wolfId]
     const packSide = playerIds.filter((id) => !wolfSide.includes(id))
-    // a side's best ball counts whoever posted; a side with no scores can't win
-    const best = (side: Uuid[]): number | null => {
-      const posted = side.map((id) => nets.get(id)).filter((n): n is number => n !== null)
-      return posted.length ? Math.min(...posted) : null
-    }
-    const wolfBest = best(wolfSide) ?? Infinity
-    const packBest = best(packSide) ?? Infinity
+    // shared posted-only best ball: a side with no scores can't win
+    const wolfBest = ctx.bestNetAmongPosted(game.gameId, wolfSide, hole) ?? Infinity
+    const packBest = ctx.bestNetAmongPosted(game.gameId, packSide, hole) ?? Infinity
     if (wolfBest === Infinity && packBest === Infinity) {
       holeResults.push({ hole, wolfId, pick, points: new Map(), outcome: 'halved' })
       return
@@ -258,9 +261,7 @@ export const wolfEngine: GameEngine<WolfConfig> = {
     if (players.length !== 4) return ['Wolf needs exactly 4 players']
     const parsed = wolfConfigSchema.safeParse(config.config)
     if (!parsed.success) return ['Invalid wolf configuration']
-    const rotation = [...parsed.data.rotation].sort()
-    const expected = players.map((p) => p.playerId).sort()
-    if (JSON.stringify(rotation) !== JSON.stringify(expected))
+    if (!isPlayerPermutation(parsed.data.rotation, players))
       return ['Wolf order must include every player exactly once']
     return []
   },

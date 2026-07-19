@@ -12,7 +12,7 @@ export interface GameDraft {
 interface Props {
   engine: GameEngine
   playable: boolean
-  players: { name: string }[]
+  players: { draftId: string; name: string }[]
   draft: GameDraft | undefined
   onToggle: () => void
   onChange: (draft: GameDraft) => void
@@ -114,7 +114,7 @@ function ConfigField({
 }: {
   field: ConfigFieldSpec
   value: unknown
-  players: { name: string }[]
+  players: { draftId: string; name: string }[]
   onChange: (value: unknown) => void
 }) {
   switch (field.kind) {
@@ -175,7 +175,7 @@ function ConfigField({
     case 'teams': {
       // 2v2 assignment: value = { a: [draftId, draftId], b: [draftId, draftId] }
       const teams = (value ?? { a: [], b: [] }) as { a: string[]; b: string[] }
-      const idOf = (i: number) => `draft-${i}`
+      const idOf = (i: number) => players[i]!.draftId
       const teamOf = (i: number) => (teams.a.includes(idOf(i)) ? 'a' : teams.b.includes(idOf(i)) ? 'b' : null)
       return (
         <div>
@@ -214,8 +214,8 @@ function ConfigField({
     }
     case 'rotation': {
       // ordered player list: value = [draftId, ...] — defaults to entry order
-      const order = (value ?? players.map((_, i) => `draft-${i}`)) as string[]
-      const nameOf = (id: string) => players[Number(id.replace('draft-', ''))]?.name ?? id
+      const order = (value ?? players.map((p) => p.draftId)) as string[]
+      const nameOf = (id: string) => players.find((p) => p.draftId === id)?.name ?? id
       return (
         <div>
           <p className="mb-2 font-medium">{field.label}</p>

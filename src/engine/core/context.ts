@@ -1,5 +1,5 @@
 import type { RoundEvent } from './events'
-import { deriveGross, isCompleted } from './replay'
+import { deriveGross } from './replay'
 import { allocateStrokes, applyAllowance } from './handicap'
 import type { Round, RoundHoles, Uuid } from './types'
 
@@ -15,6 +15,12 @@ export interface RoundContext {
   strokesFor(gameId: Uuid, playerId: Uuid, hole: number): number
   /** net score under this game's handicap policy, or null if not scored yet */
   netFor(gameId: Uuid, playerId: Uuid, hole: number): number | null
+  /**
+   * Best net ball among a side's POSTED scores, or null if nobody posted.
+   * The one shared definition of "best ball" — engines must not re-implement
+   * posted-only semantics (a side with no posted scores can't win a hole).
+   */
+  bestNetAmongPosted(gameId: Uuid, playerIds: readonly Uuid[], hole: number): number | null
   /**
    * A hole's scores are final and games may settle it: everyone scored, or
    * play has moved on (a later hole has scores), or the round is completed.
@@ -39,21 +45,35 @@ export function buildRoundContext(round: Round, effective: readonly RoundEvent[]
   const gross = deriveGross(effective)
 
   const holeByNumber = new Map(course.holes.map((h) => [h.number, h]))
-  const par = (hole: number): number => holeByNumber.get(hole)?.par ?? 4
-  const strokeIndex = (hole: number): number => holeByNumber.get(hole)?.strokeIndex ?? hole
+  const holeData = (hole: number) => {
+    const h = holeByNumber.get(hole)
+    // fail loudly: a hole outside the snapshot is a data bug, and inventing
+    // par/SI here would silently corrupt stroke allocation and money
+    if (!h) throw new Error(`hole ${hole} is not in the course snapshot`)
+    return h
+  }
+  const par = (hole: number): number => holeData(hole).par
+  const strokeIndex = (hole: number): number => holeData(hole).strokeIndex
+
+  // Playing 9 holes of an 18-hole course halves the (post-allowance) course
+  // handicap before allocation — the WHS convention when no dedicated 9-hole
+  // rating exists. True 9-hole courses already carry 9-hole ratings, so their
+  // course handicap is used as-is.
+  const nineOfEighteen = holesPlayed.length <= 9 && course.holeCount === 18
 
   // Precompute per-game, per-player stroke allocation over the holes played.
   const allocations = new Map<Uuid, Map<Uuid, Map<number, number>>>()
   for (const game of round.games) {
     const perPlayer = new Map<Uuid, Map<number, number>>()
     if (game.handicap.mode === 'net') {
-      const effective = round.players.map((p) =>
-        applyAllowance(p.courseHandicap, game.handicap.allowancePct),
-      )
-      const low = game.handicap.reference === 'offLow' ? Math.min(...effective) : 0
+      const effectiveCH = round.players.map((p) => {
+        const allowed = applyAllowance(p.courseHandicap, game.handicap.allowancePct)
+        return nineOfEighteen ? Math.round(allowed / 2) : allowed
+      })
+      const low = game.handicap.reference === 'offLow' ? Math.min(...effectiveCH) : 0
       const subsetSIs = holesPlayed.map((h) => strokeIndex(h))
       round.players.forEach((p, i) => {
-        const playing = effective[i]! - low
+        const playing = effectiveCH[i]! - low
         const strokes = allocateStrokes(playing, subsetSIs)
         perPlayer.set(p.playerId, new Map(holesPlayed.map((h, j) => [h, strokes[j]!])))
       })
@@ -69,7 +89,28 @@ export function buildRoundContext(round: Round, effective: readonly RoundEvent[]
     return g === undefined ? null : g - strokesFor(gameId, playerId, hole)
   }
 
-  const completed = isCompleted(round, effective)
+  const bestNetAmongPosted = (
+    gameId: Uuid,
+    playerIds: readonly Uuid[],
+    hole: number,
+  ): number | null => {
+    let best: number | null = null
+    for (const id of playerIds) {
+      const net = netFor(gameId, id, hole)
+      if (net !== null && (best === null || net < best)) best = net
+    }
+    return best
+  }
+
+  // Completion comes from EVENTS ONLY, deliberately ignoring round.status:
+  // prefix replays (the money ledger) reuse the same round object, and a
+  // status flag would finalize every prefix the moment the round finishes.
+  let completed = false
+  for (const e of effective) {
+    if (e.type === 'round/completed') completed = true
+    else if (e.type === 'round/reopened') completed = false
+  }
+
   let lastTouchedIdx = -1
   holesPlayed.forEach((h, i) => {
     if (round.players.some((p) => gross.get(p.playerId)?.get(h) !== undefined)) lastTouchedIdx = i
@@ -82,5 +123,15 @@ export function buildRoundContext(round: Round, effective: readonly RoundEvent[]
     return idx < lastTouchedIdx
   }
 
-  return { round, holesPlayed, gross, par, strokeIndex, strokesFor, netFor, finalized }
+  return {
+    round,
+    holesPlayed,
+    gross,
+    par,
+    strokeIndex,
+    strokesFor,
+    netFor,
+    bestNetAmongPosted,
+    finalized,
+  }
 }

@@ -2,31 +2,32 @@ import { useState } from 'react'
 import { Link, useNavigate } from 'react-router'
 import { useLiveQuery } from 'dexie-react-hooks'
 import '../../engine/games'
-import { listEngines } from '../../engine/catalog'
+import { getEngine, listEngines } from '../../engine/catalog'
 import { courseHandicap } from '../../engine/core/handicap'
 import type { Course, GameConfig, RoundHoles, TeeSet } from '../../engine/core/types'
 import { courseRepo, playerRepo, roundRepo } from '../../db/repos'
 import { newId } from '../../db/ids'
 import { BigButton } from '../../components/BigButton'
+import { selectOnFocus } from '../../components/inputs'
 import { CourseSearch } from '../courses/CourseSearch'
 import { RulesSheet } from '../games/RulesSheet'
 import { GameConfigCard, type GameDraft } from './GameConfigCard'
 
 interface PlayerDraft {
+  /** stable id — game configs reference THIS, so list edits never remap teams */
+  draftId: string
   name: string
   /** WHS index; course handicap is derived from the selected course + tee */
   handicapIndex: number
 }
 
+let draftCounter = 0
+const nextDraftId = () => `draft-${++draftCounter}-${Math.random().toString(36).slice(2, 8)}`
+
 function computeCourseHandicap(index: number, course: Course | undefined, tee: TeeSet | undefined): number {
   if (!course || !tee) return Math.round(index)
   const par = course.holes.reduce((a, h) => a + h.par, 0)
   return courseHandicap(index, tee.slope, tee.rating, par)
-}
-
-/** tapping a numeric field selects its contents so typing replaces, not appends */
-export function selectOnFocus(e: React.FocusEvent<HTMLInputElement>): void {
-  e.currentTarget.select()
 }
 
 export function SetupScreen() {
@@ -52,7 +53,11 @@ export function SetupScreen() {
     const known = roster?.find((r) => r.name.toLowerCase() === trimmed.toLowerCase())
     setPlayers([
       ...players,
-      { name: trimmed, handicapIndex: known?.handicapIndex ?? known?.lastCourseHandicap ?? 0 },
+      {
+        draftId: nextDraftId(),
+        name: trimmed,
+        handicapIndex: known?.handicapIndex ?? known?.lastCourseHandicap ?? 0,
+      },
     ])
     setNameInput('')
   }
@@ -60,23 +65,24 @@ export function SetupScreen() {
   const canContinue =
     step === 0 ? !!course && !!teeSetId : step === 1 ? players.length >= 2 : games.length >= 1
 
+  const draftRoundPlayers = players.map((p) => ({
+    playerId: p.draftId,
+    name: p.name,
+    courseHandicap: computeCourseHandicap(
+      p.handicapIndex,
+      course,
+      course?.teeSets.find((t) => t.id === teeSetId),
+    ),
+  }))
+
   const problems =
     step === 2
       ? games.flatMap((g) => {
-          const engine = listEngines().find((e) => e.type === g.type)
+          const engine = getEngine(g.type)
           if (!engine) return []
-          const roundPlayers = players.map((p, i) => ({
-            playerId: `draft-${i}`,
-            name: p.name,
-            courseHandicap: computeCourseHandicap(
-              p.handicapIndex,
-              course,
-              course?.teeSets.find((t) => t.id === teeSetId),
-            ),
-          }))
           return engine.validateSetup(
             { gameId: 'draft', type: g.type, handicap: g.handicap, config: g.config },
-            roundPlayers,
+            draftRoundPlayers,
           )
         })
       : []
@@ -84,11 +90,13 @@ export function SetupScreen() {
   const teeOff = async () => {
     if (!course || !teeSetId) return
     const tee = course.teeSets.find((t) => t.id === teeSetId)
+    const draftToReal = new Map<string, string>()
     const roundPlayers = await Promise.all(
       players.map(async (p) => {
         const player = await playerRepo.upsertByName(p.name)
         const ch = computeCourseHandicap(p.handicapIndex, course, tee)
         await playerRepo.rememberHandicap(player.id, p.handicapIndex, ch)
+        draftToReal.set(p.draftId, player.id)
         return {
           playerId: player.id,
           name: player.name,
@@ -102,7 +110,7 @@ export function SetupScreen() {
       gameId: newId(),
       type: g.type,
       handicap: g.handicap,
-      config: resolveDraftPlayers(g.config, roundPlayers),
+      config: resolveDraftPlayers(g.config, draftToReal),
     }))
     const roundId = newId()
     await roundRepo.put({
@@ -344,17 +352,7 @@ export function SetupScreen() {
                       {
                         type: engine.type,
                         handicap: engine.defaultHandicap(),
-                        config: engine.defaultConfig(
-                          players.map((p, i) => ({
-                            playerId: `draft-${i}`,
-                            name: p.name,
-                            courseHandicap: computeCourseHandicap(
-                              p.handicapIndex,
-                              course,
-                              course?.teeSets.find((t) => t.id === teeSetId),
-                            ),
-                          })),
-                        ),
+                        config: engine.defaultConfig(draftRoundPlayers),
                       },
                     ])
                 }}
@@ -395,14 +393,19 @@ export function SetupScreen() {
 }
 
 /**
- * Game configs are drafted against placeholder ids (draft-0…) before real
- * player ids exist; swap them at round creation.
+ * Game configs are drafted against stable per-draft ids before real player
+ * ids exist; swap them at round creation. Stable ids (not list positions)
+ * mean adding/removing players never silently remaps teams or rotations —
+ * a stale reference instead fails engine validateSetup and blocks tee-off.
  */
-function resolveDraftPlayers(config: unknown, roundPlayers: { playerId: string }[]): unknown {
-  const json = JSON.stringify(config)
-  const resolved = json.replace(/"draft-(\d+)"/g, (_, idx: string) => {
-    const player = roundPlayers[Number(idx)]
-    return player ? `"${player.playerId}"` : `"draft-${idx}"`
-  })
-  return JSON.parse(resolved)
+function resolveDraftPlayers(config: unknown, draftToReal: Map<string, string>): unknown {
+  const walk = (value: unknown): unknown => {
+    if (typeof value === 'string') return draftToReal.get(value) ?? value
+    if (Array.isArray(value)) return value.map(walk)
+    if (value !== null && typeof value === 'object') {
+      return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, walk(v)]))
+    }
+    return value
+  }
+  return walk(config)
 }
