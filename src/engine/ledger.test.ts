@@ -52,6 +52,69 @@ describe('buildHoleLedger', () => {
     expect(nassau[2]!.deltas).toEqual([])
   })
 
+  it('wolf: silent before any scores, attributes point-money on decided holes', () => {
+    const round = makeRound({
+      players: makePlayers([{ name: 'A' }, { name: 'B' }, { name: 'C' }, { name: 'D' }]),
+      holes: 'front9',
+      games: [
+        { type: 'wolf', config: { pointCents: 100, rotation: ['p-a', 'p-b', 'p-c', 'p-d'] } },
+      ],
+    })
+    const emptyLog = new EventLog()
+    const { ctx: emptyCtx, derivations: emptyDerivations } = deriveRound(round, emptyLog.events)
+    const emptyLedger = buildHoleLedger(round, emptyLog.events, emptyCtx.holesPlayed, emptyDerivations)
+    // wolf announces "Wolf: A" for every pending hole — none of that belongs here
+    expect(emptyLedger.get('game-1')).toEqual([])
+
+    const log = new EventLog()
+    log.append({ type: 'game/event', gameId: 'game-1', kind: 'wolf/pick', data: { hole: 1, choice: 'p-b' } })
+    log.scoreByHole(round, { A: [4], B: [5], C: [5], D: [5] }, [1])
+    const { ctx, derivations } = deriveRound(round, log.events)
+    const ledger = buildHoleLedger(round, log.events, ctx.holesPlayed, derivations)
+    const wolf = ledger.get('game-1')!
+    expect(wolf).toHaveLength(1)
+    expect(wolf[0]!.hole).toBe(1)
+    // A+2 B+2 points → pairwise money: A/B +$4, C/D −$4
+    expect(wolf[0]!.deltas).toEqual([
+      { playerId: 'p-a', cents: 400 },
+      { playerId: 'p-b', cents: 400 },
+      { playerId: 'p-c', cents: -400 },
+      { playerId: 'p-d', cents: -400 },
+    ])
+  })
+
+  it('vegas: pushes show with no deltas, decided holes attribute team money', () => {
+    const round = makeRound({
+      players: makePlayers([{ name: 'A' }, { name: 'B' }, { name: 'C' }, { name: 'D' }]),
+      holes: 'front9',
+      games: [
+        {
+          type: 'vegas',
+          config: {
+            pointCents: 10,
+            teams: { a: ['p-a', 'p-b'], b: ['p-c', 'p-d'] },
+            birdieFlip: true,
+            eagleDouble: true,
+          },
+        },
+      ],
+    })
+    const log = new EventLog()
+    // h1: 45 v 45 push · h2: 44 v 45 → team A +1 pt
+    log.scoreByHole(round, { A: [4, 4], B: [5, 4], C: [4, 4], D: [5, 5] }, [1, 2])
+    const { ctx, derivations } = deriveRound(round, log.events)
+    const vegas = buildHoleLedger(round, log.events, ctx.holesPlayed, derivations).get('game-1')!
+    expect(vegas).toHaveLength(2)
+    expect(vegas[0]!.summary[0]).toContain('push')
+    expect(vegas[0]!.deltas).toEqual([])
+    expect(vegas[1]!.deltas).toEqual([
+      { playerId: 'p-a', cents: 10 },
+      { playerId: 'p-b', cents: 10 },
+      { playerId: 'p-c', cents: -10 },
+      { playerId: 'p-d', cents: -10 },
+    ])
+  })
+
   it('respects retractions in prefixes (corrected hole re-attributes cleanly)', () => {
     const round = makeRound({
       players: makePlayers([{ name: 'A' }, { name: 'B' }]),

@@ -168,16 +168,28 @@ export function ScorecardScreen() {
                       </p>
                     ))}
                     {impact.deltas.length > 0 && (
-                      <p className="mt-1 flex flex-wrap gap-x-3 text-base">
-                        {impact.deltas.map((d) => (
-                          <span
-                            key={d.playerId}
-                            className={d.cents > 0 ? 'text-felt-300' : 'text-flag-500'}
-                          >
-                            {nameOf.get(d.playerId)} {formatCentsSigned(d.cents)}
-                          </span>
-                        ))}
-                      </p>
+                      <>
+                        <p className="mt-1 flex flex-wrap gap-x-3 text-base">
+                          {impact.deltas.map((d) => (
+                            <span
+                              key={d.playerId}
+                              className={d.cents > 0 ? 'text-felt-300' : 'text-flag-500'}
+                            >
+                              {nameOf.get(d.playerId)} {formatCentsSigned(d.cents)}
+                            </span>
+                          ))}
+                        </p>
+                        <p className="mt-0.5 text-sm text-stone-500">
+                          now:{' '}
+                          {round.players
+                            .filter((p) => (impact.runningCents[p.playerId] ?? 0) !== 0)
+                            .map(
+                              (p) =>
+                                `${nameOf.get(p.playerId)} ${formatCentsSigned(impact.runningCents[p.playerId] ?? 0)}`,
+                            )
+                            .join(' · ')}
+                        </p>
+                      </>
                     )}
                   </div>
                 </div>

@@ -1,5 +1,6 @@
 import { deriveRound, type GameDerivation } from './catalog'
 import type { RoundEvent } from './core/events'
+import { deriveGross, effectiveEvents } from './core/replay'
 import type { Round, Uuid } from './core/types'
 
 export interface HoleImpact {
@@ -37,6 +38,13 @@ export function buildHoleLedger(
   const ledger = new Map<Uuid, HoleImpact[]>(round.games.map((g) => [g.gameId, []]))
   let prev = new Map<Uuid, Record<Uuid, number>>(round.games.map((g) => [g.gameId, {}]))
 
+  // A hole earns a ledger row only once it exists in play: money moved, or the
+  // game has something to say about a hole somebody actually scored. Keeps
+  // chatty engines (wolf announces its wolf pre-round) out of the ledger.
+  const gross = deriveGross(effectiveEvents(events))
+  const hasScore = (hole: number) =>
+    round.players.some((p) => gross.get(p.playerId)?.get(hole) !== undefined)
+
   for (const hole of holesPlayed) {
     const prefix = events.filter((e) => {
       const eh = eventHole(e)
@@ -54,7 +62,7 @@ export function buildHoleLedger(
         }))
         .filter((d) => d.cents !== 0)
       const summary = full.get(game.gameId)?.holeSummary(hole) ?? []
-      if (summary.length > 0 || deltas.length > 0) {
+      if (deltas.length > 0 || (summary.length > 0 && hasScore(hole))) {
         ledger.get(game.gameId)!.push({ hole, summary, deltas, runningCents: cents })
       }
       next.set(game.gameId, cents)
