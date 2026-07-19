@@ -74,6 +74,21 @@ describe('nassau — golden fixtures (hand-verified)', () => {
   })
 
   /**
+   * N5: a hole where only one side posts a score goes to that side once
+   * play moves on; a hole with no scores at all halves.
+   */
+  it('N5: missing scores — posted side wins, empty hole halves', () => {
+    const players = makePlayers([{ name: 'A' }, { name: 'B' }])
+    const round = makeRound({ players, holes: 'front9', games: [game({})] })
+    const log = new EventLog()
+    log.scoreByHole(round, { A: [4] }, [1]) // B skips h1
+    log.scoreByHole(round, { A: [4], B: [4] }, [2]) // play moved on; h2 halved
+    const d = deriveRound(round, log.events).derivations.get('game-1')!
+    // 9-hole → single overall bet; A up 1 from the hole B never played
+    expect(d.settlement.perPlayerCents).toEqual({ 'p-a': 500, 'p-b': -500 })
+  })
+
+  /**
    * N4: 2v2 net best-ball off low; 9-hole round collapses to one Overall bet.
    * CHs: A0 B8 C4 D12 → off low: 0/8/4/12 over 9 holes.
    * Teams {A,D} vs {B,C}. Verifies best-ball + team stake per player.

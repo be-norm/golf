@@ -88,9 +88,8 @@ function derive(
     const nets = new Map<Uuid, number | null>(
       playerIds.map((id) => [id, ctx.netFor(game.gameId, id, hole)]),
     )
-    const allScored = [...nets.values()].every((v) => v !== null)
 
-    if (!pick || !allScored) {
+    if (!pick || !ctx.finalized(hole)) {
       holeResults.push({ hole, wolfId, pick, points: null, outcome: 'pending' })
       return
     }
@@ -98,9 +97,17 @@ function derive(
     const wolfSide: Uuid[] =
       pick.kind === 'partner' ? [wolfId, pick.partnerId] : [wolfId]
     const packSide = playerIds.filter((id) => !wolfSide.includes(id))
-    const best = (side: Uuid[]) => Math.min(...side.map((id) => nets.get(id)!))
-    const wolfBest = best(wolfSide)
-    const packBest = best(packSide)
+    // a side's best ball counts whoever posted; a side with no scores can't win
+    const best = (side: Uuid[]): number | null => {
+      const posted = side.map((id) => nets.get(id)).filter((n): n is number => n !== null)
+      return posted.length ? Math.min(...posted) : null
+    }
+    const wolfBest = best(wolfSide) ?? Infinity
+    const packBest = best(packSide) ?? Infinity
+    if (wolfBest === Infinity && packBest === Infinity) {
+      holeResults.push({ hole, wolfId, pick, points: new Map(), outcome: 'halved' })
+      return
+    }
 
     const points = new Map<Uuid, number>(playerIds.map((id) => [id, 0]))
     let outcome: WolfHoleResult['outcome']
@@ -217,6 +224,7 @@ export const wolfEngine: GameEngine<WolfConfig> = {
         'Watching the tee shots, the Wolf picks a partner for the hole — or declares Lone Wolf and plays 1 against 3. Declaring Blind Wolf (before anyone swings) raises the stakes further.',
         'Best net ball of each side decides the hole. A tie halves it — nobody scores.',
         'When the rotation runs out (holes 17–18, or the 9th of a nine), the player with the fewest points is the Wolf.',
+        "Missing a score? A side's best ball counts whoever posted.",
       ],
       scoring: [
         'Wolf & partner win: 2 points each. The other pair win: 3 points each — beating the side that had the pick pays better.',

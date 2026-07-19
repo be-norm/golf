@@ -67,6 +67,9 @@ export function ScoringScreen() {
   const allScored = round.players.every((p) =>
     ctx.holesPlayed.every((h) => ctx.gross.get(p.playerId)?.get(h) !== undefined),
   )
+  const anyScored = round.players.some((p) =>
+    ctx.holesPlayed.some((h) => ctx.gross.get(p.playerId)?.get(h) !== undefined),
+  )
 
   const setScore = (playerId: string, gross: number) => {
     void eventStore.append(round.id, [{ type: 'score/set', playerId, hole: currentHole, gross }])
@@ -258,6 +261,15 @@ export function ScoringScreen() {
               </div>
             )
           })}
+
+          {!allScored && anyScored && (
+            <button
+              onClick={() => void finish()}
+              className="pixel-press font-display block w-full border-stone-600 bg-stone-800 px-4 py-3 text-center text-[10px] uppercase text-stone-300"
+            >
+              🏁 Finish round early — settle what's been played
+            </button>
+          )}
         </div>
       </Sheet>
 

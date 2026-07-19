@@ -129,7 +129,37 @@ describe('skins — golden fixtures (hand-verified)', () => {
     expect(skinsOf(round, log).settlement.perPlayerCents).toEqual({ 'p-a': -100, 'p-b': 100 })
   })
 
-  it('unscored hole blocks the carry chain (later holes pending)', () => {
+  /**
+   * Field-reported (Crooked Stick test round): one player missing on hole 1
+   * must NOT block the game forever. Once play moves on, holes settle among
+   * whoever posted; the missing player just can't win them.
+   * h1: 5/5/5 posted, D missing → tie, carry · h2: 4/4/5/4 → tie, carry ·
+   * h3: A2/B4/C5/D3 → A wins 3 skins.
+   */
+  it('a skipped player cannot win, holes settle once play moves on', () => {
+    const players = makePlayers([{ name: 'A' }, { name: 'B' }, { name: 'C' }, { name: 'D' }])
+    const round = makeRound({
+      players,
+      holes: 'front9',
+      games: [{ type: 'skins', config: { stakeCents: 100, carryover: true } }],
+    })
+    const log = new EventLog()
+    log.scoreByHole(round, { A: [5], B: [5], C: [5] }, [1]) // D never plays h1
+    log.scoreByHole(round, { A: [4], B: [4], C: [5], D: [4] }, [2])
+    log.scoreByHole(round, { A: [2], B: [4], C: [5], D: [3] }, [3])
+
+    const skins = skinsOf(round, log)
+    expect(skins.holeResults.slice(0, 3).map((r) => r.kind)).toEqual(['tied', 'tied', 'won'])
+    expect(skins.holeResults[2]).toMatchObject({ winnerId: 'p-a', skins: 3 })
+    expect(skins.settlement.perPlayerCents).toEqual({
+      'p-a': 900,
+      'p-b': -300,
+      'p-c': -300,
+      'p-d': -300,
+    })
+  })
+
+  it('the frontier hole with partial scores stays pending', () => {
     const players = makePlayers([{ name: 'A' }, { name: 'B' }])
     const round = makeRound({
       players,
@@ -137,14 +167,42 @@ describe('skins — golden fixtures (hand-verified)', () => {
       games: [{ type: 'skins', config: { stakeCents: 100, carryover: true } }],
     })
     const log = new EventLog()
-    // Hole 1 scored for A only; hole 2 fully scored.
     log.append({ type: 'score/set', playerId: 'p-a', hole: 1, gross: 4 })
-    log.scoreByHole(round, { A: [3], B: [5] }, [2])
 
     const skins = skinsOf(round, log)
     expect(skins.holeResults[0]).toEqual({ hole: 1, kind: 'pending' })
-    expect(skins.holeResults[1]).toEqual({ hole: 2, kind: 'pending' })
     expect(skins.settlement.perPlayerCents).toEqual({ 'p-a': 0, 'p-b': 0 })
+  })
+
+  it('a hole nobody scored is void once play moves on', () => {
+    const players = makePlayers([{ name: 'A' }, { name: 'B' }])
+    const round = makeRound({
+      players,
+      holes: 'front9',
+      games: [{ type: 'skins', config: { stakeCents: 100, carryover: true } }],
+    })
+    const log = new EventLog()
+    log.scoreByHole(round, { A: [3], B: [5] }, [2]) // h1 skipped entirely
+
+    const skins = skinsOf(round, log)
+    expect(skins.holeResults[0]).toEqual({ hole: 1, kind: 'void' })
+    // h2 is worth only its own skin — the void hole added nothing to the pot
+    expect(skins.holeResults[1]).toMatchObject({ kind: 'won', winnerId: 'p-a', skins: 1 })
+  })
+
+  it('completing the round finalizes a partially scored frontier hole', () => {
+    const players = makePlayers([{ name: 'A' }, { name: 'B' }])
+    const round = makeRound({
+      players,
+      holes: 'front9',
+      games: [{ type: 'skins', config: { stakeCents: 100, carryover: true } }],
+    })
+    const log = new EventLog()
+    log.append({ type: 'score/set', playerId: 'p-a', hole: 1, gross: 4 })
+    log.append({ type: 'round/completed' })
+
+    const skins = skinsOf(round, log)
+    expect(skins.holeResults[0]).toMatchObject({ kind: 'won', winnerId: 'p-a', skins: 1 })
   })
 
   it('carryover off: ties are simply dead', () => {

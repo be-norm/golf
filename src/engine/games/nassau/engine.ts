@@ -54,23 +54,30 @@ function derive(
   const sideA: Uuid[] = game.config.teams ? game.config.teams.a : [playerIds[0]!]
   const sideB: Uuid[] = game.config.teams ? game.config.teams.b : [playerIds[1]!]
 
-  /** best net ball of a side on a hole, or null if any member unscored */
+  /** best net ball among the side's POSTED scores, or null if nobody posted */
   const bestBall = (side: Uuid[], hole: number): number | null => {
     let best: number | null = null
     for (const id of side) {
       const net = ctx.netFor(game.gameId, id, hole)
-      if (net === null) return null
-      if (best === null || net < best) best = net
+      if (net !== null && (best === null || net < best)) best = net
     }
     return best
   }
 
-  /** +1 side A, -1 side B, 0 halved, null not fully scored */
+  /** +1 side A, -1 side B, 0 halved, null not yet finalized */
   const holeResult = new Map<number, 1 | -1 | 0 | null>()
   for (const hole of ctx.holesPlayed) {
+    if (!ctx.finalized(hole)) {
+      holeResult.set(hole, null)
+      continue
+    }
     const a = bestBall(sideA, hole)
     const b = bestBall(sideB, hole)
-    holeResult.set(hole, a === null || b === null ? null : a < b ? 1 : b < a ? -1 : 0)
+    // a side with no posted score can't win the hole; neither side → halved
+    if (a === null && b === null) holeResult.set(hole, 0)
+    else if (b === null) holeResult.set(hole, 1)
+    else if (a === null) holeResult.set(hole, -1)
+    else holeResult.set(hole, a < b ? 1 : b < a ? -1 : 0)
   }
 
   const manualPresses = events
@@ -247,6 +254,7 @@ export const nassauEngine: GameEngine<NassauConfig> = {
       scoring: [
         'When a bet runs out of holes, whoever is up wins its stake; a tied bet pushes.',
         'Every player pays or collects the stake — a $5 bet swings $5 per player, in singles or 2v2.',
+        'A hole where only one side posts a score goes to that side; no scores at all halves it.',
       ],
       terms: [
         {

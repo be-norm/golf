@@ -44,6 +44,8 @@ export interface VegasHoleResult {
   pointsA: number
   doubled: boolean
   flipped: 'a' | 'b' | null
+  /** finalized but missing a score — team numbers can't pair, hole is void */
+  void?: boolean
 }
 
 function derive(
@@ -61,6 +63,7 @@ function derive(
   let totalA = 0
 
   for (const hole of ctx.holesPlayed) {
+    if (!ctx.finalized(hole)) continue
     const nets: Record<'a' | 'b', number[]> = { a: [], b: [] }
     const grossDiffs: Record<'a' | 'b', number[]> = { a: [], b: [] }
     let missing = false
@@ -76,7 +79,11 @@ function derive(
         grossDiffs[side].push(gross - ctx.par(hole))
       }
     }
-    if (missing) continue
+    if (missing) {
+      // team numbers need both scores — a finalized hole missing any is void
+      holeResults.push({ hole, numA: 0, numB: 0, diff: 0, pointsA: 0, doubled: false, flipped: null, void: true })
+      continue
+    }
 
     // flips key off NATURAL (gross) birdies/eagles even in net games
     const bird = (side: 'a' | 'b') => grossDiffs[side].some((d) => d <= -1)
@@ -138,6 +145,7 @@ function derive(
   const holeSummary = (hole: number): string[] => {
     const r = holeResults.find((h) => h.hole === hole)
     if (!r) return []
+    if (r.void) return ['Missing scores — hole void']
     const flipNote = r.flipped ? ` — flipped ${teamLabel(r.flipped)}` : ''
     const doubleNote = r.doubled ? ' — eagle ×2' : ''
     if (r.pointsA === 0) return [`${r.numA} vs ${r.numB} — push${flipNote}`]
@@ -173,6 +181,7 @@ export const vegasEngine: GameEngine<VegasConfig> = {
       scoring: [
         'Every decided hole moves points × the per-point stake for each player; equal numbers push.',
         'Net vegas applies handicap strokes before pairing — but flips still key off natural (gross) birdies.',
+        'A hole missing any of the four scores is void — team numbers need both halves.',
       ],
       terms: [
         { term: 'Team number', def: "Both teammates' scores glued into one number, low digit first." },

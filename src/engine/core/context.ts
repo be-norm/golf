@@ -1,5 +1,5 @@
 import type { RoundEvent } from './events'
-import { deriveGross } from './replay'
+import { deriveGross, isCompleted } from './replay'
 import { allocateStrokes, applyAllowance } from './handicap'
 import type { Round, RoundHoles, Uuid } from './types'
 
@@ -15,6 +15,13 @@ export interface RoundContext {
   strokesFor(gameId: Uuid, playerId: Uuid, hole: number): number
   /** net score under this game's handicap policy, or null if not scored yet */
   netFor(gameId: Uuid, playerId: Uuid, hole: number): number | null
+  /**
+   * A hole's scores are final and games may settle it: everyone scored, or
+   * play has moved on (a later hole has scores), or the round is completed.
+   * Missing players on a finalized hole simply can't win it. The frontier
+   * hole being actively entered stays unfinalized — no premature payouts.
+   */
+  finalized(hole: number): boolean
 }
 
 export function holesForRange(range: RoundHoles): number[] {
@@ -62,5 +69,18 @@ export function buildRoundContext(round: Round, effective: readonly RoundEvent[]
     return g === undefined ? null : g - strokesFor(gameId, playerId, hole)
   }
 
-  return { round, holesPlayed, gross, par, strokeIndex, strokesFor, netFor }
+  const completed = isCompleted(round, effective)
+  let lastTouchedIdx = -1
+  holesPlayed.forEach((h, i) => {
+    if (round.players.some((p) => gross.get(p.playerId)?.get(h) !== undefined)) lastTouchedIdx = i
+  })
+  const finalized = (hole: number): boolean => {
+    const idx = holesPlayed.indexOf(hole)
+    if (idx === -1) return false
+    if (round.players.every((p) => gross.get(p.playerId)?.get(hole) !== undefined)) return true
+    if (completed) return true
+    return idx < lastTouchedIdx
+  }
+
+  return { round, holesPlayed, gross, par, strokeIndex, strokesFor, netFor, finalized }
 }

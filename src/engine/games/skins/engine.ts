@@ -23,6 +23,7 @@ export type SkinsHoleResult =
   | { hole: number; kind: 'won'; winnerId: Uuid; skins: number; effective: number }
   | { hole: number; kind: 'tied'; carryAfter: number }
   | { hole: number; kind: 'pending' }
+  | { hole: number; kind: 'void' }
 
 export interface SkinsDerivation extends GameDerivation {
   holeResults: SkinsHoleResult[]
@@ -45,21 +46,20 @@ function derive(
   const holeResults: SkinsHoleResult[] = []
 
   let carry = 0
-  let blocked = false
   for (const hole of ctx.holesPlayed) {
-    if (blocked) {
+    // The frontier hole being actively entered stays pending; everything
+    // behind it settles among whoever posted a score (skipped players
+    // can't win a hole they didn't play).
+    if (!ctx.finalized(hole)) {
       holeResults.push({ hole, kind: 'pending' })
       continue
     }
-    const nets = players.map((p) => ({
-      playerId: p.playerId,
-      net: ctx.netFor(game.gameId, p.playerId, hole),
-    }))
-    if (nets.some((n) => n.net === null)) {
-      // An unscored hole blocks the carry chain: later holes stay pending
-      // until the gap fills (corrections replay everything anyway).
-      blocked = true
-      holeResults.push({ hole, kind: 'pending' })
+    const nets = players
+      .map((p) => ({ playerId: p.playerId, net: ctx.netFor(game.gameId, p.playerId, hole) }))
+      .filter((n) => n.net !== null)
+    if (nets.length === 0) {
+      // finalized but nobody scored it — the hole is void, no skin at stake
+      holeResults.push({ hole, kind: 'void' })
       continue
     }
     const low = Math.min(...nets.map((n) => n.net!))
@@ -104,6 +104,7 @@ function derive(
   const holeSummary = (hole: number): string[] => {
     const r = holeResults.find((h) => h.hole === hole)
     if (!r || r.kind === 'pending') return []
+    if (r.kind === 'void') return ['No scores — hole void']
     if (r.kind === 'won') {
       return [
         `${nameOf.get(r.winnerId)} wins ${r.skins} skin${r.skins > 1 ? 's' : ''} (${
@@ -138,6 +139,7 @@ export const skinsEngine: GameEngine<SkinsConfig> = {
         'Each hole is worth one skin. The lowest score wins it — but only outright. Any tie for low and the skin goes unwon.',
         'With carryovers on, an unwon skin rolls onto the next hole. Holes stack until someone wins one outright and banks the whole pile.',
         'Playing net, handicap strokes land on the hardest holes (by stroke index) and the lowest net score takes the skin.',
+        "No score on a hole? You can't win it. Once play moves on, the hole settles among the scores that were posted.",
       ],
       scoring: [
         'A skin collects the skin value from every other player. Win a 3-skin carry in a foursome at $1 and you collect $3 from each — a $9 swing.',
