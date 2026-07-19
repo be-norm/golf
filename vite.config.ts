@@ -41,6 +41,11 @@ export default defineConfig({
         globPatterns: ['**/*.{js,css,html,svg,png,ico,woff2,webmanifest}'],
         navigateFallback: 'index.html',
         cleanupOutdatedCaches: true,
+        // prompt-mode update flow: activation waits for the user's SKIP_WAITING,
+        // but the fresh SW must CLAIM open pages or controllerchange never fires
+        // and the toast's reload does nothing.
+        clientsClaim: true,
+        skipWaiting: false,
       },
     }),
   ],

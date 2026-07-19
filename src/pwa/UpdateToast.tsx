@@ -22,18 +22,27 @@ export function UpdateToast() {
   if (!needRefresh || liveRound) return null
 
   return (
-    <div className="fixed inset-x-4 bottom-4 z-50 flex items-center justify-between gap-3 rounded-2xl bg-stone-900 p-4 shadow-xl ring-1 ring-stone-700">
-      <span className="text-sm">Update available</span>
+    <div className="pixel fixed inset-x-4 bottom-4 z-50 flex items-center justify-between gap-3 border-felt-500 bg-stone-900 p-4">
+      <span className="text-lg">
+        <span className="animate-blink text-coin-400">▶</span> Update available
+      </span>
       <div className="flex gap-2">
         <button
-          className="rounded-lg px-3 py-1.5 text-sm text-stone-400"
+          className="px-3 py-1.5 text-lg text-stone-400"
           onClick={() => setNeedRefresh(false)}
         >
           Later
         </button>
         <button
-          className="rounded-lg bg-felt-600 px-3 py-1.5 text-sm font-semibold"
-          onClick={() => void updateServiceWorker(true)}
+          className="pixel-press border-felt-300 bg-felt-600 px-3 py-1.5 text-lg"
+          onClick={() => {
+            void updateServiceWorker(true).then(() => {
+              // belt & suspenders: if the SW swap didn't reload the page
+              // (older installs, activation races), force it once the
+              // fresh worker has had a beat to claim the client
+              setTimeout(() => window.location.reload(), 800)
+            })
+          }}
         >
           Reload
         </button>
