@@ -26,6 +26,8 @@ describe('nassau — golden fixtures (hand-verified)', () => {
     const d = deriveRound(round, log.events).derivations.get('game-1')!
     expect(d.settlement.perPlayerCents).toEqual({ 'p-a': 500, 'p-b': -500 })
     expect(d.settlement.lines).toHaveLength(3)
+    // mini-bar shows match status per bet, not dollars
+    expect(d.summary).toBe('F: A 2↑ · B: B 1↑ · O: A 1↑')
   })
 
   /**
@@ -86,6 +88,8 @@ describe('nassau — golden fixtures (hand-verified)', () => {
     const d = deriveRound(round, log.events).derivations.get('game-1')!
     // 9-hole → single overall bet; A up 1 from the hole B never played
     expect(d.settlement.perPlayerCents).toEqual({ 'p-a': 500, 'p-b': -500 })
+    // single-bet rounds show holes to play
+    expect(d.summary).toBe('A 1↑ · 7 to play')
   })
 
   /**

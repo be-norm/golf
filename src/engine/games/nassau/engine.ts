@@ -2,7 +2,7 @@ import { z } from 'zod'
 import type { GameEngine, GameDerivation, InputRequest, StandingLine } from '../../catalog'
 import type { RoundContext } from '../../core/context'
 import type { GameScopedEvent } from '../../core/events'
-import { addLine, emptySettlement, formatCentsSigned, type Settlement } from '../../core/money'
+import { addLine, emptySettlement, type Settlement } from '../../core/money'
 import type { GameConfig, HandicapSettings, RoundPlayer, Uuid } from '../../core/types'
 
 export const nassauConfigSchema = z.object({
@@ -183,12 +183,26 @@ function derive(
     }))
     .sort((a, b) => b.amountCents - a.amountCents)
 
+  // Mini-bar speaks match status, not dollars — money lives in the sheet.
   const pressCount = bets.filter((b) => b.depth > 0).length
-  const lead = standings[0]!
-  const summary =
-    lead.amountCents === 0
-      ? `all square${pressCount ? ` · ${pressCount} press${pressCount > 1 ? 'es' : ''}` : ''}`
-      : `${lead.label} ${formatCentsSigned(lead.amountCents)}${pressCount ? ` · ${pressCount} press${pressCount > 1 ? 'es' : ''}` : ''}`
+  const firstName = (id: Uuid) => (nameOf.get(id) ?? '').split(' ')[0]
+  const sideShort = (side: 'a' | 'b') =>
+    (side === 'a' ? sideA : sideB).map(firstName).join(' & ')
+  const betStatus = (b: Bet, withSeg: boolean): string => {
+    const seg = b.segment === 'overall' ? 'O' : b.segment === 'front' ? 'F' : 'B'
+    const prefix = withSeg ? `${seg}: ` : ''
+    if (b.diff === 0) return `${prefix}AS`
+    return `${prefix}${sideShort(b.diff > 0 ? 'a' : 'b')} ${Math.abs(b.diff)}↑`
+  }
+  const parentBets = bets.filter((b) => b.depth === 0)
+  let summary: string
+  if (parentBets.length === 1) {
+    const b = parentBets[0]!
+    summary = `${betStatus(b, false)} · ${b.holesRemaining === 0 ? 'final' : `${b.holesRemaining} to play`}`
+  } else {
+    summary = parentBets.map((b) => betStatus(b, true)).join(' · ')
+  }
+  if (pressCount) summary += ` · ${pressCount} press${pressCount > 1 ? 'es' : ''}`
 
   // Manual-press affordance: on the active frontier hole, a side that is down
   // in a live bet may press (optional chip — never blocks scoring).
