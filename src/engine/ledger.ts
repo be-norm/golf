@@ -1,0 +1,65 @@
+import { deriveRound, type GameDerivation } from './catalog'
+import type { RoundEvent } from './core/events'
+import type { Round, Uuid } from './core/types'
+
+export interface HoleImpact {
+  hole: number
+  /** the game's own explanation of the hole (from holeSummary) */
+  summary: string[]
+  /** money that moved ON this hole, per player (non-zero entries only) */
+  deltas: { playerId: Uuid; cents: number }[]
+  /** running settlement AFTER this hole, per player */
+  runningCents: Record<Uuid, number>
+}
+
+function eventHole(e: RoundEvent): number | null {
+  if (e.type === 'score/set' || e.type === 'score/clear') return e.hole
+  if (e.type === 'game/event') {
+    const h = (e.data as { hole?: unknown } | null)?.hole
+    return typeof h === 'number' ? h : null
+  }
+  return null
+}
+
+/**
+ * Where the money moved, hole by hole, for every game — derived by replaying
+ * the event log prefix-by-prefix, so it is exactly the engine's math.
+ * A hole's delta is the settlement swing caused by knowing that hole
+ * (a 3-skin carry banked on 4 shows as one +3-skin move on 4; a nassau bet
+ * flipping from all-square pays out on the hole that flipped it).
+ */
+export function buildHoleLedger(
+  round: Round,
+  events: readonly RoundEvent[],
+  holesPlayed: readonly number[],
+  full: ReadonlyMap<Uuid, GameDerivation>,
+): Map<Uuid, HoleImpact[]> {
+  const ledger = new Map<Uuid, HoleImpact[]>(round.games.map((g) => [g.gameId, []]))
+  let prev = new Map<Uuid, Record<Uuid, number>>(round.games.map((g) => [g.gameId, {}]))
+
+  for (const hole of holesPlayed) {
+    const prefix = events.filter((e) => {
+      const eh = eventHole(e)
+      return eh === null || eh <= hole
+    })
+    const { derivations } = deriveRound(round, prefix)
+    const next = new Map<Uuid, Record<Uuid, number>>()
+    for (const game of round.games) {
+      const cents = derivations.get(game.gameId)?.settlement.perPlayerCents ?? {}
+      const before = prev.get(game.gameId) ?? {}
+      const deltas = round.players
+        .map((p) => ({
+          playerId: p.playerId,
+          cents: (cents[p.playerId] ?? 0) - (before[p.playerId] ?? 0),
+        }))
+        .filter((d) => d.cents !== 0)
+      const summary = full.get(game.gameId)?.holeSummary(hole) ?? []
+      if (summary.length > 0 || deltas.length > 0) {
+        ledger.get(game.gameId)!.push({ hole, summary, deltas, runningCents: cents })
+      }
+      next.set(game.gameId, cents)
+    }
+    prev = next
+  }
+  return ledger
+}

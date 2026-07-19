@@ -200,6 +200,12 @@ export function ScoringScreen() {
 
       <Sheet open={standingsOpen} onClose={() => setStandingsOpen(false)}>
         <div className="space-y-5">
+          <Link
+            to={`/round/${round.id}/card`}
+            className="pixel-press font-display block border-felt-600 bg-felt-900/60 px-4 py-3 text-center text-[10px] uppercase"
+          >
+            View full card ▶
+          </Link>
           {round.games.map((g) => {
             const d = derivations.get(g.gameId)
             if (!d) return null

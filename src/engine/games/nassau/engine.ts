@@ -215,7 +215,9 @@ function derive(
     if (r === null || r === undefined) return []
     if (r === 0) return ['Halved']
     const side = r === 1 ? sideA : sideB
-    return [`${side.map((id) => nameOf.get(id)).join(' & ')} win the hole`]
+    return [
+      `${side.map((id) => nameOf.get(id)).join(' & ')} ${side.length > 1 ? 'win' : 'wins'} the hole`,
+    ]
   }
 
   return {
