@@ -1,6 +1,6 @@
 import 'fake-indexeddb/auto'
 import { describe, expect, it } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { createMemoryRouter, RouterProvider } from 'react-router'
 import '../../engine/games'
@@ -29,8 +29,11 @@ describe('ScoringScreen', () => {
     const chip = await screen.findByRole('button', { name: 'Ben score' })
     await userEvent.click(chip)
 
+    // the tap commits asynchronously — wait for the append to land
+    await waitFor(async () => {
+      expect(await eventStore.list(round.id)).toHaveLength(1)
+    })
     const events = await eventStore.list(round.id)
-    expect(events).toHaveLength(1)
     expect(events[0]).toMatchObject({ type: 'score/set', playerId: 'p-ben', hole: 1, gross: 4 })
   })
 
@@ -48,10 +51,15 @@ describe('ScoringScreen', () => {
 
     const chip = await screen.findByRole('button', { name: 'Cal score' })
     await userEvent.click(chip)
+    await waitFor(async () => {
+      expect(await eventStore.list(round.id)).toHaveLength(1)
+    })
     await userEvent.click(await screen.findByRole('button', { name: 'undo' }))
 
+    await waitFor(async () => {
+      expect(await eventStore.list(round.id)).toHaveLength(2)
+    })
     const events = await eventStore.list(round.id)
-    expect(events).toHaveLength(2)
     expect(events[1]).toMatchObject({ type: 'meta/retract', targetEventId: events[0]!.id })
   })
 })
