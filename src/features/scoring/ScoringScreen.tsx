@@ -229,6 +229,21 @@ export function ScoringScreen() {
                     Rules ?
                   </button>
                 </div>
+                {d.detailLines && d.detailLines.length > 0 && (
+                  <ul className="mb-3 space-y-1.5 border-l-2 border-stone-800 pl-3">
+                    {d.detailLines.map((line, i) => (
+                      <li
+                        key={i}
+                        className={`flex items-baseline justify-between gap-2 ${line.depth ? 'pl-4' : ''}`}
+                      >
+                        <span className="font-display shrink-0 text-[9px] uppercase text-coin-400">
+                          {line.label}
+                        </span>
+                        <span className="text-lg tabular-nums text-stone-200">{line.value}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
                 <ul className="space-y-2">
                   {d.standings.map((line) => (
                     <motion.li

@@ -27,7 +27,7 @@ describe('nassau — golden fixtures (hand-verified)', () => {
     expect(d.settlement.perPlayerCents).toEqual({ 'p-a': 500, 'p-b': -500 })
     expect(d.settlement.lines).toHaveLength(3)
     // mini-bar shows match status per bet, not dollars
-    expect(d.summary).toBe('F9: A 2↑ · B9: B 1↑ · 18: A 1↑')
+    expect(d.summary).toBe('F9: A wins ↑2 · B9: B wins ↑1 · 18: A wins ↑1')
   })
 
   /**
@@ -72,7 +72,11 @@ describe('nassau — golden fixtures (hand-verified)', () => {
     expect(d.settlement.perPlayerCents).toEqual({ 'p-a': -200, 'p-b': 200 })
     // decided bets paying: Front (+2), Back (−2), OP@3 (−2)
     expect(d.settlement.lines).toHaveLength(3)
-    expect(d.summary).toContain('4 press')
+    // bet ledger: 3 parents + 4 presses, presses indented under their nine
+    expect(d.detailLines).toHaveLength(7)
+    expect(d.detailLines!.filter((l) => l.depth === 1)).toHaveLength(4)
+    expect(d.detailLines![0]).toEqual({ label: 'F9', value: 'A wins ↑2', depth: 0 })
+    expect(d.detailLines![1]).toEqual({ label: 'Press @3', value: 'push', depth: 1 })
   })
 
   /**
@@ -89,7 +93,34 @@ describe('nassau — golden fixtures (hand-verified)', () => {
     // 9-hole → single overall bet; A up 1 from the hole B never played
     expect(d.settlement.perPlayerCents).toEqual({ 'p-a': 500, 'p-b': -500 })
     // single-bet rounds show holes to play
-    expect(d.summary).toBe('F9: A 1↑ · 7 to play')
+    expect(d.summary).toBe('F9: A ↑1 · 7 to play')
+  })
+
+  /**
+   * N6: golfer vocabulary — dormie when up exactly the holes remaining,
+   * closed out when up more than remain.
+   */
+  it('N6: dormie and closed-out states', () => {
+    const players = makePlayers([{ name: 'A' }, { name: 'B' }])
+    const round = makeRound({ players, holes: 'front9', games: [game({})] })
+    const log = new EventLog()
+    // A wins 7 straight: after h7, up 7 with 2 to play → closed out
+    log.scoreByHole(round, {
+      A: [3, 3, 3, 3, 3, 3, 3],
+      B: [4, 4, 4, 4, 4, 4, 4],
+    })
+    let d = deriveRound(round, log.events).derivations.get('game-1')!
+    expect(d.detailLines![0]!.value).toBe('A ↑7 · closed out')
+
+    // fresh round: A up 2 after 7 → dormie (2 up, 2 to play)
+    const round2 = makeRound({ players, holes: 'front9', games: [game({})] })
+    const log2 = new EventLog()
+    log2.scoreByHole(round2, {
+      A: [3, 3, 4, 4, 4, 4, 4],
+      B: [4, 4, 4, 4, 4, 4, 4],
+    })
+    d = deriveRound(round2, log2.events).derivations.get('game-1')!
+    expect(d.detailLines![0]!.value).toBe('A ↑2 · dormie')
   })
 
   /**

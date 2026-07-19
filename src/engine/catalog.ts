@@ -38,6 +38,12 @@ export interface GameDerivation {
    * Falls back to `summary` when absent.
    */
   summaryParts?: { label: string; value: string }[]
+  /**
+   * Optional per-bet/per-item status ledger for the standings sheet —
+   * one line per live or settled bet (e.g. every nassau bet incl. presses,
+   * "F9 · Ben ↑2 · dormie"). depth indents children under their parent.
+   */
+  detailLines?: { label: string; value: string; depth?: number }[]
   holeSummary(hole: number): string[]
   requiredInputs(): InputRequest[]
   settlement: Settlement

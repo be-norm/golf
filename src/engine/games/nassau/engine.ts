@@ -170,7 +170,7 @@ function derive(
       .map((b) => {
         const d = side === 'a' ? b.diff : -b.diff
         const seg = b.segment === 'overall' ? '18' : b.segment === 'front' ? 'F9' : 'B9'
-        return `${seg} ${d > 0 ? `${d}↑` : d < 0 ? `${-d}↓` : 'AS'}`
+        return `${seg} ${d > 0 ? `↑${d}` : d < 0 ? `↓${-d}` : 'AS'}`
       })
       .join(' · ')
 
@@ -183,34 +183,53 @@ function derive(
     }))
     .sort((a, b) => b.amountCents - a.amountCents)
 
-  // Mini-bar speaks match status, not dollars — money lives in the sheet.
-  const pressCount = bets.filter((b) => b.depth > 0).length
+  // Every bet — parents and presses — reported the way a golfer tracks it:
+  // who's up, by how much, holes left; dormie/closed-out/final when apt.
   const firstName = (id: Uuid) => (nameOf.get(id) ?? '').split(' ')[0]
   const sideShort = (side: 'a' | 'b') =>
     (side === 'a' ? sideA : sideB).map(firstName).join(' & ')
   const segLabel = (seg: Segment): string =>
-    seg === 'overall' ? '18' : seg === 'front' ? 'F9' : 'B9'
-  const betStatus = (b: Bet): string => {
-    if (b.diff === 0) return 'AS'
-    return `${sideShort(b.diff > 0 ? 'a' : 'b')} ${Math.abs(b.diff)}↑`
+    // a collapsed 9-hole nassau's single bet is the nine that was played
+    seg === 'overall'
+      ? ctx.holesPlayed.length <= 9
+        ? ctx.round.holes === 'back9'
+          ? 'B9'
+          : 'F9'
+        : '18'
+      : seg === 'front'
+        ? 'F9'
+        : 'B9'
+  const betLabel = (b: Bet): string =>
+    b.depth === 0 ? segLabel(b.segment) : `Press @${b.startHole}`
+  const betValue = (b: Bet): string => {
+    const n = Math.abs(b.diff)
+    const leader = b.diff === 0 ? null : sideShort(b.diff > 0 ? 'a' : 'b')
+    if (b.holesRemaining === 0) return leader ? `${leader} wins ↑${n}` : 'push'
+    if (leader && n > b.holesRemaining) return `${leader} ↑${n} · closed out`
+    if (leader && n === b.holesRemaining) return `${leader} ↑${n} · dormie`
+    const status = leader ? `${leader} ↑${n}` : 'AS'
+    return `${status} · ${b.holesRemaining} to play`
   }
-  const parentBets = bets.filter((b) => b.depth === 0)
-  const summaryParts: { label: string; value: string }[] = []
-  if (parentBets.length === 1) {
-    const b = parentBets[0]!
-    // a collapsed 9-hole nassau is the nine that was played
-    const label = ctx.round.holes === 'back9' ? 'B9' : 'F9'
-    summaryParts.push({
-      label,
-      value: `${betStatus(b)} · ${b.holesRemaining === 0 ? 'final' : `${b.holesRemaining} to play`}`,
-    })
-  } else {
-    for (const b of parentBets) summaryParts.push({ label: segLabel(b.segment), value: betStatus(b) })
-  }
-  if (pressCount) summaryParts.push({ label: '', value: `${pressCount} press${pressCount > 1 ? 'es' : ''}` })
-  const summary = summaryParts
-    .map((p) => (p.label ? `${p.label}: ${p.value}` : p.value))
-    .join(' · ')
+
+  // play order: each nine's bet followed by its presses, overall last
+  const ordered = (['front', 'back', 'overall'] as const).flatMap((seg) =>
+    bets
+      .filter((b) => b.segment === seg)
+      .sort((a, b) => a.depth - b.depth || a.startHole - b.startHole),
+  )
+  const detailLines = ordered.map((b) => ({
+    label: betLabel(b),
+    value: betValue(b),
+    depth: b.depth > 0 ? 1 : 0,
+  }))
+
+  // pinned bar: live bets only — settled nines are history, the sheet has them
+  const liveBets = ordered.filter((b) => b.holesRemaining > 0)
+  const summaryParts = (liveBets.length > 0 ? liveBets : ordered).map((b) => ({
+    label: betLabel(b),
+    value: betValue(b),
+  }))
+  const summary = summaryParts.map((p) => `${p.label}: ${p.value}`).join(' · ')
 
   // Manual-press affordance: on the active frontier hole, a side that is down
   // in a live bet may press (optional chip — never blocks scoring).
@@ -253,6 +272,7 @@ function derive(
     standings,
     summary,
     summaryParts,
+    detailLines,
     holeSummary,
     requiredInputs,
     settlement,
