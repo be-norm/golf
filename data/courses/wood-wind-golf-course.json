@@ -1,0 +1,218 @@
+{
+  "id": "d4723405-71b0-4928-a8da-d45e0495c32f",
+  "name": "Wood Wind Golf Course",
+  "location": "Westfield, IN",
+  "holeCount": 18,
+  "holes": [
+    {
+      "number": 1,
+      "par": 4,
+      "strokeIndex": 1
+    },
+    {
+      "number": 2,
+      "par": 4,
+      "strokeIndex": 3
+    },
+    {
+      "number": 3,
+      "par": 5,
+      "strokeIndex": 9
+    },
+    {
+      "number": 4,
+      "par": 3,
+      "strokeIndex": 13
+    },
+    {
+      "number": 5,
+      "par": 4,
+      "strokeIndex": 11
+    },
+    {
+      "number": 6,
+      "par": 3,
+      "strokeIndex": 15
+    },
+    {
+      "number": 7,
+      "par": 5,
+      "strokeIndex": 5
+    },
+    {
+      "number": 8,
+      "par": 3,
+      "strokeIndex": 17
+    },
+    {
+      "number": 9,
+      "par": 4,
+      "strokeIndex": 7
+    },
+    {
+      "number": 10,
+      "par": 4,
+      "strokeIndex": 4
+    },
+    {
+      "number": 11,
+      "par": 3,
+      "strokeIndex": 18
+    },
+    {
+      "number": 12,
+      "par": 4,
+      "strokeIndex": 2
+    },
+    {
+      "number": 13,
+      "par": 5,
+      "strokeIndex": 6
+    },
+    {
+      "number": 14,
+      "par": 3,
+      "strokeIndex": 14
+    },
+    {
+      "number": 15,
+      "par": 4,
+      "strokeIndex": 12
+    },
+    {
+      "number": 16,
+      "par": 4,
+      "strokeIndex": 16
+    },
+    {
+      "number": 17,
+      "par": 4,
+      "strokeIndex": 10
+    },
+    {
+      "number": 18,
+      "par": 5,
+      "strokeIndex": 8
+    }
+  ],
+  "teeSets": [
+    {
+      "id": "tee-black",
+      "name": "Black",
+      "color": "#171717",
+      "rating": 70.7,
+      "slope": 124,
+      "yardages": [
+        455,
+        445,
+        533,
+        195,
+        315,
+        175,
+        490,
+        173,
+        405,
+        398,
+        177,
+        390,
+        500,
+        175,
+        285,
+        327,
+        315,
+        502
+      ]
+    },
+    {
+      "id": "tee-blue",
+      "name": "Blue",
+      "color": "#3b82f6",
+      "rating": 68.8,
+      "slope": 118,
+      "yardages": [
+        420,
+        435,
+        512,
+        173,
+        268,
+        159,
+        480,
+        147,
+        388,
+        385,
+        153,
+        380,
+        452,
+        145,
+        285,
+        310,
+        305,
+        471
+      ]
+    },
+    {
+      "id": "tee-blue-gold",
+      "name": "Blue/Gold",
+      "color": "#a16207",
+      "rating": 67,
+      "slope": 115
+    },
+    {
+      "id": "tee-gold",
+      "name": "Gold",
+      "color": "#eab308",
+      "rating": 65.5,
+      "slope": 108,
+      "yardages": [
+        327,
+        345,
+        445,
+        150,
+        240,
+        139,
+        415,
+        129,
+        366,
+        320,
+        123,
+        335,
+        435,
+        125,
+        268,
+        259,
+        280,
+        462
+      ]
+    },
+    {
+      "id": "tee-white",
+      "name": "White",
+      "color": "#e7e5e4",
+      "rating": 62.7,
+      "slope": 107,
+      "yardages": [
+        321,
+        325,
+        375,
+        120,
+        240,
+        115,
+        375,
+        110,
+        313,
+        312,
+        115,
+        285,
+        352,
+        101,
+        245,
+        250,
+        255,
+        410
+      ]
+    }
+  ],
+  "source": "seed",
+  "updatedAt": "2026-07-19T00:02:01.595Z",
+  "revision": 1
+}

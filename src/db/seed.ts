@@ -2,11 +2,16 @@ import type { Course } from '../engine/core/types'
 import { db as defaultDb, type GolfDB } from './schema'
 import templatePar72 from '../../data/courses/template-par-72.json'
 import broadmoor from '../../data/courses/broadmoor-country-club.json'
+import woodWind from '../../data/courses/wood-wind-golf-course.json'
 
 /** Bump when bundled courses change to re-run the seed. */
-export const SEED_VERSION = 2
+export const SEED_VERSION = 3
 
-export const bundledCourses: Course[] = [broadmoor as Course, templatePar72 as Course]
+export const bundledCourses: Course[] = [
+  broadmoor as Course,
+  woodWind as Course,
+  templatePar72 as Course,
+]
 
 /**
  * Load bundled courses into Dexie on first run (idempotent).
