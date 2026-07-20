@@ -49,6 +49,15 @@ Full plan/architecture history: see `docs/` and the games catalog in `docs/games
   DB password in untracked `.env.local`. Course data source: OpenGolfAPI (ODbL — keep
   attribution + provenance columns; publish transformed dump).
 
+## UI conventions
+
+- **The bar recaps, the sheet accounts.** Every stroke-decided game's pinned-bar
+  summary shows the LATEST decided hole ("H4 · Rob wins 2 skins") via
+  `latestHoleSummary` (core/summary.ts) → `summaryParts`, never the running
+  aggregate (that's the standings sheet). New games follow this by default.
+  Match-play games (Nassau) are the documented exception: their bar shows live
+  bet status because the stakes are the running match, not a single hole.
+
 ## Testing conventions
 
 - Every game engine ships hand-verified golden scorecard tests (TypeScript, in

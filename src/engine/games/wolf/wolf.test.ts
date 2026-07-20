@@ -57,6 +57,8 @@ describe('wolf — golden fixture (hand-verified)', () => {
     expect(d.holeSummary(9)[0]).toContain('Wolf C')
     expect(d.holeSummary(2)[0]).toContain('B +4')
     expect(d.holeSummary(4)[0]).toContain('+2')
+    // bar recaps the latest decided hole (h9: C rides with B, C+B win → 2 each)
+    expect(d.summaryParts![0]!.label).toBe('H9')
   })
 
   it('blocks with a pick prompt when the hole is scored but no pick exists', () => {
@@ -84,5 +86,7 @@ describe('wolf — golden fixture (hand-verified)', () => {
     const after = deriveRound(round, log.events).derivations.get('game-1')!
     expect(after.requiredInputs().map((i) => i.hole)).toEqual([2])
     expect(after.settlement.perPlayerCents['p-a']).toBe(1200) // lone win: 100×(4·4 − 4)
+    // bar recaps the solo win with its mode tag
+    expect(after.summaryParts).toEqual([{ label: 'H1', value: 'A lone +4' }])
   })
 })

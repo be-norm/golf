@@ -2,7 +2,8 @@ import { z } from 'zod'
 import type { GameEngine, GameDerivation, InputRequest, StandingLine } from '../../catalog'
 import type { RoundContext } from '../../core/context'
 import type { GameScopedEvent } from '../../core/events'
-import { emptySettlement, formatCentsSigned, type Settlement } from '../../core/money'
+import { emptySettlement, type Settlement } from '../../core/money'
+import { latestHoleSummary, summaryString } from '../../core/summary'
 import { isPlayerPermutation } from '../../core/teams'
 import type { GameConfig, HandicapSettings, RoundPlayer, Uuid } from '../../core/types'
 
@@ -157,9 +158,30 @@ function derive(
     }))
     .sort((a, b) => b.amountCents - a.amountCents)
 
-  const lead = standings[0]!
-  const summary =
-    lead.amountCents === 0 ? 'all square' : `${lead.label} ${formatCentsSigned(lead.amountCents)}`
+  // Bar recaps the latest decided hole — "H4 · Ben lone +4" / "Ben & Rob +2".
+  const pickTag = (r: WolfHoleResult): string =>
+    r.pick!.kind === 'partner'
+      ? `& ${nameOf.get(r.pick!.partnerId)}`
+      : r.pick!.kind === 'blind'
+        ? 'blind'
+        : 'lone'
+  const summaryParts = latestHoleSummary(
+    ctx.holesPlayed,
+    (hole) => {
+      const r = holeResults.find((h) => h.hole === hole)
+      if (!r || r.outcome === 'pending') return null
+      const wolfName = nameOf.get(r.wolfId)
+      if (r.outcome === 'halved') return `${wolfName} ${pickTag(r)} · halved`
+      const gainers = [...r.points!.entries()].filter(([, p]) => p > 0)
+      const pts = gainers[0]?.[1] ?? 0
+      const names = gainers.map(([id]) => nameOf.get(id)).join(' & ')
+      // solo wins keep the mode tag ("Ben lone +4"); partner/pack just name them
+      const soloTag = r.pick!.kind !== 'partner' && r.outcome === 'wolfWin' ? ` ${pickTag(r)}` : ''
+      return `${names}${soloTag} +${pts}`
+    },
+    'no points yet',
+  )
+  const summary = summaryString(summaryParts)
 
   // The wolf must decide on any hole that's being scored (or is next up) and
   // has no pick yet — a blocking chip, since the hole can't compute without it.
@@ -210,7 +232,7 @@ function derive(
     return [`Wolf ${wolfName} (${pickLabel}) — ${gains}`]
   }
 
-  return { standings, summary, holeSummary, requiredInputs, settlement }
+  return { standings, summary, summaryParts, holeSummary, requiredInputs, settlement }
 }
 
 export const wolfEngine: GameEngine<WolfConfig> = {

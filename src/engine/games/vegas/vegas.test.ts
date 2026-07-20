@@ -66,6 +66,8 @@ describe('vegas — golden fixture (hand-verified)', () => {
     expect(d.holeSummary(2)[0]).toContain('flipped')
     expect(d.holeSummary(6)[0]).toContain('×2')
     expect(d.holeSummary(7)[0]).toContain('push')
+    // bar recaps the latest decided hole (h9: 45 v 45 push)
+    expect(d.summaryParts).toEqual([{ label: 'H9', value: '45 v 45 · push' }])
   })
 
   it('net vegas applies strokes before pairing but flips on gross birdies only', () => {

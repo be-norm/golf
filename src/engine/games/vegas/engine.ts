@@ -2,7 +2,8 @@ import { z } from 'zod'
 import type { GameEngine, GameDerivation, StandingLine } from '../../catalog'
 import type { RoundContext } from '../../core/context'
 import type { GameScopedEvent } from '../../core/events'
-import { addLine, emptySettlement, formatCentsSigned, type Settlement } from '../../core/money'
+import { addLine, emptySettlement, type Settlement } from '../../core/money'
+import { latestHoleSummary, summaryString } from '../../core/summary'
 import { teamsSchema, teamPartitionProblems } from '../../core/teams'
 import type { GameConfig, HandicapSettings, RoundPlayer } from '../../core/types'
 
@@ -149,10 +150,22 @@ function derive(
     })
     .sort((a, b) => b.amountCents - a.amountCents)
 
-  const summary =
-    totalA === 0
-      ? 'all square'
-      : `${teamLabel(totalA > 0 ? 'a' : 'b')} ${formatCentsSigned(Math.abs(totalA) * pointCents)}`
+  // Bar recaps the latest decided hole — "H6 · 26 v 44 ×2 → Ben & Rob +36".
+  const teamShort = (side: 'a' | 'b') =>
+    teams[side].map((id) => (nameOf.get(id) ?? '').split(' ')[0]).join(' & ')
+  const summaryParts = latestHoleSummary(
+    ctx.holesPlayed,
+    (hole) => {
+      const r = holeResults.find((h) => h.hole === hole)
+      if (!r) return null
+      if (r.void) return 'void — missing scores'
+      const marks = `${r.flipped ? ' flip' : ''}${r.doubled ? ' ×2' : ''}`
+      if (r.pointsA === 0) return `${r.numA} v ${r.numB} · push`
+      return `${r.numA} v ${r.numB}${marks} → ${teamShort(r.pointsA > 0 ? 'a' : 'b')} +${Math.abs(r.pointsA)}`
+    },
+    'no points yet',
+  )
+  const summary = summaryString(summaryParts)
 
   const holeSummary = (hole: number): string[] => {
     const r = holeResults.find((h) => h.hole === hole)
@@ -169,6 +182,7 @@ function derive(
   return {
     standings,
     summary,
+    summaryParts,
     holeSummary,
     requiredInputs: () => [],
     settlement,

@@ -33,9 +33,13 @@ export interface GameDerivation {
   /** one-liner for the pinned mini-bar, e.g. "Ben +$3 · 2 carried" */
   summary: string
   /**
-   * Optional structured form of the summary for UIs that can style it:
-   * label = small metadata chip (e.g. "F9"), value = the status itself.
-   * Falls back to `summary` when absent.
+   * Structured form of the summary for the pinned bar (UIs style it):
+   * label = small gold chip (e.g. "H4"), value = the status.
+   *
+   * CONVENTION every new game follows: the bar recaps the LATEST DECIDED HOLE
+   * — what just happened — via `latestHoleSummary` in core/summary.ts. Never
+   * the running aggregate (that lives in the standings sheet). Match-play games
+   * (Nassau) are the documented exception: their bar shows live bet status.
    */
   summaryParts?: { label: string; value: string }[]
   /**

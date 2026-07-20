@@ -3,6 +3,7 @@ import type { GameEngine, GameDerivation, StandingLine } from '../../catalog'
 import type { RoundContext } from '../../core/context'
 import type { GameScopedEvent } from '../../core/events'
 import { addLine, emptySettlement, type Settlement } from '../../core/money'
+import { latestHoleSummary, summaryString } from '../../core/summary'
 import type { GameConfig, HandicapSettings, RoundPlayer, Uuid } from '../../core/types'
 
 export const skinsConfigSchema = z.object({
@@ -87,26 +88,19 @@ function derive(
     }))
     .sort((a, b) => b.amountCents - a.amountCents)
 
-  // The bar recaps the LATEST decided hole — what just happened, not the
-  // aggregate (that lives in the sheet standings): "H4 · Rob wins 2 skins".
-  const lastDecided = [...holeResults]
-    .reverse()
-    .find((r) => r.kind === 'won' || r.kind === 'tied')
-  const summaryParts: { label: string; value: string }[] = []
-  if (!lastDecided) {
-    summaryParts.push({ label: '', value: 'no skins yet' })
-  } else if (lastDecided.kind === 'won') {
-    summaryParts.push({
-      label: `H${lastDecided.hole}`,
-      value: `${nameOf.get(lastDecided.winnerId)} wins ${lastDecided.skins} skin${lastDecided.skins > 1 ? 's' : ''}`,
-    })
-  } else {
-    summaryParts.push({
-      label: `H${lastDecided.hole}`,
-      value:
-        lastDecided.carryAfter > 0 ? `tied · ${lastDecided.carryAfter} carried` : 'tied — no skin',
-    })
-  }
+  // Bar recaps the latest decided hole — "H4 · Rob wins 2 skins".
+  const summaryParts = latestHoleSummary(
+    ctx.holesPlayed,
+    (hole) => {
+      const r = holeResults.find((h) => h.hole === hole)
+      if (r?.kind === 'won')
+        return `${nameOf.get(r.winnerId)} wins ${r.skins} skin${r.skins > 1 ? 's' : ''}`
+      if (r?.kind === 'tied')
+        return r.carryAfter > 0 ? `tied · ${r.carryAfter} carried` : 'tied — no skin'
+      return null
+    },
+    'no skins yet',
+  )
 
   const holeSummary = (hole: number): string[] => {
     const r = holeResults.find((h) => h.hole === hole)
@@ -124,9 +118,7 @@ function derive(
 
   return {
     standings,
-    summary: summaryParts
-      .map((p) => (p.label ? `${p.label}: ${p.value}` : p.value))
-      .join(' · '),
+    summary: summaryString(summaryParts),
     summaryParts,
     holeSummary,
     requiredInputs: () => [],
