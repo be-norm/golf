@@ -1,13 +1,18 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router'
 import { clearErrorLog, readErrorLog, type DiagnosticEntry } from '../../pwa/diagnostics'
+import { importRound } from '../settle/exportRound'
+import { LOCAL_USER } from '../../db/ids'
+import { enqueuePushRound } from '../../remote/outbox'
 import { useAuth } from '../../auth/AuthProvider'
 import { AuthSheet } from '../auth/AuthSheet'
 import { BigButton } from '../../components/BigButton'
 
 export function DiagnosticsScreen() {
-  const { isGuest, displayName, signOut } = useAuth()
+  const { activeUserId, isGuest, displayName, signOut } = useAuth()
   const [authOpen, setAuthOpen] = useState(false)
+  const fileRef = useRef<HTMLInputElement>(null)
+  const [importError, setImportError] = useState(false)
   const [entries, setEntries] = useState<DiagnosticEntry[]>(() => readErrorLog())
   const [storage, setStorage] = useState<string>()
   const [persisted, setPersisted] = useState<boolean>()
@@ -60,6 +65,39 @@ export function DiagnosticsScreen() {
         <p className="mt-1">
           Persistent storage: {persisted === undefined ? '—' : persisted ? 'granted ✓' : 'not granted'}
         </p>
+      </section>
+
+      <section className="pixel border-stone-700 bg-stone-900/70 p-4">
+        <h2 className="font-display mb-2 text-[10px] uppercase text-stone-400">Data</h2>
+        <input
+          ref={fileRef}
+          type="file"
+          accept="application/json"
+          className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0]
+            if (!file) return
+            void file
+              .text()
+              .then((text) => importRound(text, activeUserId))
+              .then((round) => {
+                setImportError(false)
+                // a signed-in import of a completed round should sync too
+                if (activeUserId !== LOCAL_USER && round.status === 'completed') {
+                  void enqueuePushRound(activeUserId, round)
+                }
+              })
+              .catch(() => setImportError(true))
+            e.target.value = ''
+          }}
+        />
+        <BigButton variant="outline" className="w-full" onClick={() => fileRef.current?.click()}>
+          Import round from file
+        </BigButton>
+        <p className="mt-2 text-sm text-stone-500">Restore a round from an exported .json file.</p>
+        {importError && (
+          <p className="mt-2 text-sm text-flag-500">That file isn't a golf round export.</p>
+        )}
       </section>
 
       <section>

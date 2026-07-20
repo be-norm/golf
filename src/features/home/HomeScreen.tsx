@@ -1,19 +1,18 @@
-import { useRef, useState } from 'react'
+import { useState } from 'react'
 import { Link } from 'react-router'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { roundRepo } from '../../db/repos'
 import { holesForRange } from '../../engine/core/context'
-import { importRound } from '../settle/exportRound'
 import { InstallHint } from '../../pwa/InstallHint'
-import { LOCAL_USER } from '../../db/ids'
-import { enqueuePushRound } from '../../remote/outbox'
 import { useAuth } from '../../auth/AuthProvider'
 import { AuthSheet } from '../auth/AuthSheet'
 
+/** Footer nav rendered as pressable pixel chips — the app's tappable idiom,
+ *  so utility links read as controls instead of faint text. */
+const NAV_CHIP = 'pixel-press border-stone-700 bg-stone-900/70 px-3.5 py-2 text-sm text-stone-200'
+
 export function HomeScreen() {
   const { activeUserId, isGuest, displayName } = useAuth()
-  const fileRef = useRef<HTMLInputElement>(null)
-  const [importError, setImportError] = useState(false)
   const [authOpen, setAuthOpen] = useState(false)
   const liveRound = useLiveQuery(() => roundRepo.liveRound(activeUserId), [activeUserId])
   const recent = useLiveQuery(() => roundRepo.listRecent(activeUserId, 8), [activeUserId])
@@ -80,28 +79,6 @@ export function HomeScreen() {
       )}
 
       <footer className="mt-auto pb-2 text-center">
-        <input
-          ref={fileRef}
-          type="file"
-          accept="application/json"
-          className="hidden"
-          onChange={(e) => {
-            const file = e.target.files?.[0]
-            if (!file) return
-            void file
-              .text()
-              .then((text) => importRound(text, activeUserId))
-              .then((round) => {
-                setImportError(false)
-                // a signed-in import of a completed round should sync too
-                if (activeUserId !== LOCAL_USER && round.status === 'completed') {
-                  void enqueuePushRound(activeUserId, round)
-                }
-              })
-              .catch(() => setImportError(true))
-            e.target.value = ''
-          }}
-        />
         <div className="mb-3 text-sm">
           {isGuest ? (
             <button className="text-felt-400" onClick={() => setAuthOpen(true)}>
@@ -116,21 +93,17 @@ export function HomeScreen() {
             </span>
           )}
         </div>
-        <div className="flex items-center justify-center gap-4">
-          <Link to="/players" className="text-sm text-stone-500">
+        <nav className="flex flex-wrap items-center justify-center gap-2">
+          <Link to="/players" className={NAV_CHIP}>
             Players
           </Link>
-          <Link to="/courses" className="text-sm text-stone-500">
+          <Link to="/courses" className={NAV_CHIP}>
             Courses
           </Link>
-          <button className="text-sm text-stone-500" onClick={() => fileRef.current?.click()}>
-            Import round
-          </button>
-          <Link to="/diagnostics" className="text-sm text-stone-600">
+          <Link to="/diagnostics" aria-label="Diagnostics" className={NAV_CHIP}>
             ⚙
           </Link>
-        </div>
-        {importError && <p className="mt-1 text-sm text-flag-500">That file isn't a golf round export.</p>}
+        </nav>
       </footer>
 
       <AuthSheet open={authOpen} onClose={() => setAuthOpen(false)} />

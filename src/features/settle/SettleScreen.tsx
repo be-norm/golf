@@ -189,7 +189,7 @@ export function SettleScreen() {
           </div>
         ) : (
           <button
-            className="w-full py-2 text-center text-sm text-stone-600"
+            className="pixel-press mx-auto mt-1 block border-flag-500 bg-flag-600/10 px-5 py-2 text-sm font-medium text-flag-500"
             onClick={() => setConfirmDelete(true)}
           >
             Delete round
