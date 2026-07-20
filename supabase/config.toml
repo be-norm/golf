@@ -212,6 +212,13 @@ otp_length = 6
 # Number of seconds before the email OTP expires (defaults to 1 hour).
 otp_expiry = 3600
 
+# Branded signup-confirmation email. NOTE: this drives the LOCAL stack / config
+# push — the HOSTED project's template lives in the dashboard (Auth → Emails →
+# "Confirm signup") and must be pasted there to take effect for real users.
+[auth.email.template.confirmation]
+subject = "Confirm your email for Golf ⛳"
+content_path = "./supabase/templates/confirmation.html"
+
 # Use a production-ready SMTP server
 # [auth.email.smtp]
 # enabled = true
