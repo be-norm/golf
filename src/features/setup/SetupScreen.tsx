@@ -6,7 +6,9 @@ import { getEngine, listEngines } from '../../engine/catalog'
 import { courseHandicap } from '../../engine/core/handicap'
 import type { Course, GameConfig, RoundHoles, TeeSet } from '../../engine/core/types'
 import { courseRepo, playerRepo, roundRepo } from '../../db/repos'
-import { newId } from '../../db/ids'
+import { LOCAL_USER, newId } from '../../db/ids'
+import { enqueuePushPlayer } from '../../remote/outbox'
+import { useAuth } from '../../auth/AuthProvider'
 import { BigButton } from '../../components/BigButton'
 import { selectOnFocus } from '../../components/inputs'
 import { CourseSearch } from '../courses/CourseSearch'
@@ -32,8 +34,9 @@ function computeCourseHandicap(index: number, course: Course | undefined, tee: T
 
 export function SetupScreen() {
   const navigate = useNavigate()
+  const { activeUserId } = useAuth()
   const courses = useLiveQuery(() => courseRepo.list())
-  const roster = useLiveQuery(() => playerRepo.list())
+  const roster = useLiveQuery(() => playerRepo.list(activeUserId), [activeUserId])
 
   const [step, setStep] = useState(0)
   const [courseId, setCourseId] = useState<string>()
@@ -93,10 +96,16 @@ export function SetupScreen() {
     const draftToReal = new Map<string, string>()
     const roundPlayers = await Promise.all(
       players.map(async (p) => {
-        const player = await playerRepo.upsertByName(p.name)
+        const player = await playerRepo.upsertByName(activeUserId, p.name)
         const ch = computeCourseHandicap(p.handicapIndex, course, tee)
         await playerRepo.rememberHandicap(player.id, p.handicapIndex, ch)
         draftToReal.set(p.draftId, player.id)
+        // Keep the synced roster current — push the just-learned handicap so the
+        // saved player isn't names-only on other devices.
+        if (activeUserId !== LOCAL_USER) {
+          const saved = await playerRepo.get(player.id)
+          if (saved) void enqueuePushPlayer(activeUserId, saved)
+        }
         return {
           playerId: player.id,
           name: player.name,
@@ -126,6 +135,7 @@ export function SetupScreen() {
       updatedAt: new Date().toISOString(),
       deviceId: '',
       schemaVersion: 1,
+      userId: activeUserId,
     })
     navigate(`/round/${roundId}`, { replace: true })
   }

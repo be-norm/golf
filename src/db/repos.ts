@@ -1,6 +1,7 @@
+import Dexie from 'dexie'
 import type { Course, Player, Round } from '../engine/core/types'
 import { db as defaultDb, type GolfDB } from './schema'
-import { newId } from './ids'
+import { LOCAL_USER, newId } from './ids'
 
 export class CourseRepo {
   constructor(private db: GolfDB = defaultDb) {}
@@ -25,18 +26,48 @@ export class CourseRepo {
 export class PlayerRepo {
   constructor(private db: GolfDB = defaultDb) {}
 
-  list(): Promise<Player[]> {
-    return this.db.players.orderBy('name').toArray()
+  /** The signed-in (or guest) user's roster, sorted by name. */
+  list(userId: string): Promise<Player[]> {
+    return this.db.players
+      .where('[userId+name]')
+      .between([userId, Dexie.minKey], [userId, Dexie.maxKey])
+      .toArray()
   }
 
-  /** Reuse the roster: same name → same player. */
-  async upsertByName(name: string): Promise<Player> {
+  get(id: string): Promise<Player | undefined> {
+    return this.db.players.get(id)
+  }
+
+  /** Reuse the roster: same (owner, name) → same player. */
+  async upsertByName(userId: string, name: string): Promise<Player> {
     const trimmed = name.trim()
-    const existing = await this.db.players.where('name').equals(trimmed).first()
+    const existing = await this.db.players.where('[userId+name]').equals([userId, trimmed]).first()
     if (existing) return existing
-    const player: Player = { id: newId(), name: trimmed, updatedAt: new Date().toISOString() }
+    return this.create(userId, trimmed)
+  }
+
+  /** Explicit roster add (used by the Players screen). */
+  async create(userId: string, name: string, handicapIndex?: number): Promise<Player> {
+    const player: Player = {
+      id: newId(),
+      userId,
+      name: name.trim(),
+      handicapIndex,
+      updatedAt: new Date().toISOString(),
+    }
     await this.db.players.put(player)
     return player
+  }
+
+  async update(id: string, patch: Partial<Pick<Player, 'name' | 'handicapIndex'>>): Promise<void> {
+    const next: Partial<Player> = { updatedAt: new Date().toISOString() }
+    if (patch.name !== undefined) next.name = patch.name.trim()
+    if ('handicapIndex' in patch) next.handicapIndex = patch.handicapIndex
+    await this.db.players.update(id, next)
+  }
+
+  async delete(id: string): Promise<void> {
+    await this.db.players.delete(id)
   }
 
   /** Remember what a player teed off with — next setup recomputes from their index. */
@@ -56,6 +87,8 @@ export class PlayerRepo {
 export class RoundRepo {
   constructor(private db: GolfDB = defaultDb) {}
 
+  /** Read-by-id is intentionally NOT owner-scoped: the id already owns access
+   *  (resume link, scoring, import all hold an owned id). */
   get(id: string): Promise<Round | undefined> {
     return this.db.rounds.get(id)
   }
@@ -64,14 +97,34 @@ export class RoundRepo {
     await this.db.rounds.put({ ...round, updatedAt: new Date().toISOString() })
   }
 
-  /** The round to resume, if any — most recently started live round. */
-  async liveRound(): Promise<Round | undefined> {
+  /**
+   * The round to resume, if any — most recently started live round. With a
+   * userId, scoped to that owner (Home resume card); without, any live round
+   * on the device (UpdateToast suppresses the update prompt mid-round).
+   */
+  async liveRound(userId?: string): Promise<Round | undefined> {
     const live = await this.db.rounds.where('status').equals('live').toArray()
-    return live.sort((a, b) => b.startedAt.localeCompare(a.startedAt))[0]
+    const scoped =
+      userId === undefined ? live : live.filter((r) => (r.userId ?? LOCAL_USER) === userId)
+    return scoped.sort((a, b) => b.startedAt.localeCompare(a.startedAt))[0]
   }
 
-  async listRecent(limit = 20): Promise<Round[]> {
-    return this.db.rounds.orderBy('startedAt').reverse().limit(limit).toArray()
+  async listRecent(userId: string, limit = 20): Promise<Round[]> {
+    return this.db.rounds
+      .where('[userId+startedAt]')
+      .between([userId, Dexie.minKey], [userId, Dexie.maxKey])
+      .reverse()
+      .limit(limit)
+      .toArray()
+  }
+
+  /** Hard-delete a round and its event log. Deleting a whole round is outside
+   *  the append-only event invariant (that governs edits WITHIN a round). */
+  async delete(id: string): Promise<void> {
+    await this.db.transaction('rw', this.db.rounds, this.db.round_events, async () => {
+      await this.db.rounds.delete(id)
+      await this.db.round_events.where('roundId').equals(id).delete()
+    })
   }
 }
 

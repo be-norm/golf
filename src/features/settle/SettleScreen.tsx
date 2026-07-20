@@ -4,6 +4,8 @@ import { motion } from 'motion/react'
 import { formatCents, formatCentsSigned, minimalTransfers } from '../../engine/core/money'
 import { eventStore } from '../../db/eventStore'
 import { roundRepo } from '../../db/repos'
+import { LOCAL_USER } from '../../db/ids'
+import { enqueueDeleteRound } from '../../remote/outbox'
 import { useRound } from '../scoring/useRound'
 import { BigButton } from '../../components/BigButton'
 import { GameSummary } from '../../components/GameSummary'
@@ -15,6 +17,7 @@ export function SettleScreen() {
   const navigate = useNavigate()
   const view = useRound(roundId)
   const [expanded, setExpanded] = useState<string>()
+  const [confirmDelete, setConfirmDelete] = useState(false)
 
   if (view === undefined) return null
   if (view === null) {
@@ -48,6 +51,14 @@ export function SettleScreen() {
     await eventStore.append(round.id, [{ type: 'round/reopened' }])
     await roundRepo.put({ ...round, status: 'live' })
     navigate(`/round/${round.id}`)
+  }
+
+  const remove = async () => {
+    const owner = round.userId ?? LOCAL_USER
+    await roundRepo.delete(round.id)
+    // tombstone the cloud copy for owned rounds so other devices converge
+    if (owner !== LOCAL_USER) await enqueueDeleteRound(owner, round.id)
+    navigate('/')
   }
 
   return (
@@ -167,6 +178,23 @@ export function SettleScreen() {
         <BigButton className="w-full" onClick={() => navigate('/')}>
           Done
         </BigButton>
+        {confirmDelete ? (
+          <div className="flex gap-2">
+            <BigButton variant="ghost" className="flex-1" onClick={() => setConfirmDelete(false)}>
+              Cancel
+            </BigButton>
+            <BigButton variant="danger" className="flex-1" onClick={() => void remove()}>
+              Delete round
+            </BigButton>
+          </div>
+        ) : (
+          <button
+            className="w-full py-2 text-center text-sm text-stone-600"
+            onClick={() => setConfirmDelete(true)}
+          >
+            Delete round
+          </button>
+        )}
       </div>
     </main>
   )

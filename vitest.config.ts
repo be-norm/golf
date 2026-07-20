@@ -23,7 +23,7 @@ export default defineConfig({
         test: {
           name: 'app',
           environment: 'jsdom',
-          include: ['src/**/*.test.tsx', 'src/db/**/*.test.ts'],
+          include: ['src/**/*.test.tsx', 'src/db/**/*.test.ts', 'src/remote/**/*.test.ts'],
           setupFiles: ['./src/test/setup.ts'],
         },
       },

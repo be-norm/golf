@@ -56,10 +56,13 @@ const importSchema = z.object({
  * event rule (documented in CLAUDE.md): a restore replaces an entire round's
  * log atomically — it never edits events within a live log. Every event is
  * validated (envelope + payload) and must belong to the imported round.
+ *
+ * The imported round is stamped with `userId` so it lands under the importer's
+ * account (or the guest partition), not whatever owner the export file carried.
  */
-export async function importRound(json: string): Promise<Round> {
+export async function importRound(json: string, userId: string): Promise<Round> {
   const parsed = importSchema.parse(JSON.parse(json))
-  const round = parsed.round as unknown as Round
+  const round = { ...(parsed.round as unknown as Round), userId }
 
   const events = parsed.events.map((raw, i) => {
     const envelope = envelopeSchema.parse(raw)

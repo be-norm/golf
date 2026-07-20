@@ -5,12 +5,18 @@ import { roundRepo } from '../../db/repos'
 import { holesForRange } from '../../engine/core/context'
 import { importRound } from '../settle/exportRound'
 import { InstallHint } from '../../pwa/InstallHint'
+import { LOCAL_USER } from '../../db/ids'
+import { enqueuePushRound } from '../../remote/outbox'
+import { useAuth } from '../../auth/AuthProvider'
+import { AuthSheet } from '../auth/AuthSheet'
 
 export function HomeScreen() {
+  const { activeUserId, isGuest, displayName } = useAuth()
   const fileRef = useRef<HTMLInputElement>(null)
   const [importError, setImportError] = useState(false)
-  const liveRound = useLiveQuery(() => roundRepo.liveRound())
-  const recent = useLiveQuery(() => roundRepo.listRecent(8))
+  const [authOpen, setAuthOpen] = useState(false)
+  const liveRound = useLiveQuery(() => roundRepo.liveRound(activeUserId), [activeUserId])
+  const recent = useLiveQuery(() => roundRepo.listRecent(activeUserId, 8), [activeUserId])
   const completed = recent?.filter((r) => r.status === 'completed') ?? []
 
   return (
@@ -84,13 +90,36 @@ export function HomeScreen() {
             if (!file) return
             void file
               .text()
-              .then(importRound)
-              .then(() => setImportError(false))
+              .then((text) => importRound(text, activeUserId))
+              .then((round) => {
+                setImportError(false)
+                // a signed-in import of a completed round should sync too
+                if (activeUserId !== LOCAL_USER && round.status === 'completed') {
+                  void enqueuePushRound(activeUserId, round)
+                }
+              })
               .catch(() => setImportError(true))
             e.target.value = ''
           }}
         />
+        <div className="mb-3 text-sm">
+          {isGuest ? (
+            <button className="text-felt-400" onClick={() => setAuthOpen(true)}>
+              Sign in to sync your rounds ▸
+            </button>
+          ) : (
+            <span className="text-stone-500">
+              Signed in as <span className="text-felt-300">{displayName}</span> ·{' '}
+              <Link to="/diagnostics" className="text-felt-400">
+                Account
+              </Link>
+            </span>
+          )}
+        </div>
         <div className="flex items-center justify-center gap-4">
+          <Link to="/players" className="text-sm text-stone-500">
+            Players
+          </Link>
           <Link to="/courses" className="text-sm text-stone-500">
             Courses
           </Link>
@@ -103,6 +132,8 @@ export function HomeScreen() {
         </div>
         {importError && <p className="mt-1 text-sm text-flag-500">That file isn't a golf round export.</p>}
       </footer>
+
+      <AuthSheet open={authOpen} onClose={() => setAuthOpen(false)} />
     </main>
   )
 }

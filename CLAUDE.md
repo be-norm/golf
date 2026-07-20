@@ -49,6 +49,31 @@ Full plan/architecture history: see `docs/` and the games catalog in `docs/games
   DB password in untracked `.env.local`. Course data source: OpenGolfAPI (ODbL — keep
   attribution + provenance columns; publish transformed dump).
 
+## Auth & sync
+
+- **Guest-first, not login-walled.** Supabase Auth (email/password; Google is behind
+  the `VITE_GOOGLE_AUTH` build flag, off until its OAuth client is configured). The app
+  stays fully usable signed-out — offline-first invariant #5 holds. `AuthProvider`
+  (`src/auth/`) is the single source of truth for identity and gates the routed outlet on
+  an initial-session `loading` flag (no guest flash for a signed-in user).
+- **Ownership dimension.** `Round`/`Player` carry `userId`; signed-out ("guest") rows use
+  the sentinel `LOCAL_USER = '@local'` (`src/db/ids.ts`) — a real string, since IndexedDB
+  omits `undefined`-keyed rows from compound indexes. Repos scope **lists** by userId
+  (`[userId+startedAt]` / `[userId+name]`); **reads-by-id stay unscoped** (an owned id is
+  the capability). Courses stay global/shared. Dexie v2 `.upgrade()` backfilled existing
+  rows to `LOCAL_USER`.
+- **Claim-on-login.** Signing in offers (opt-in) to rewrite this device's guest rows to the
+  auth uid in one transaction, then push them — this is how pre-auth data moves into an
+  account (`claimLocalData`, `src/remote/sync.ts`).
+- **Sync is snapshot + outbox, best-effort.** Only signed-in, **completed** rounds and the
+  roster sync; live rounds stay on their device. Push/delete go through the Dexie `outbox`
+  (`src/remote/outbox.ts`); `pull` (`sync.ts`) is additive + last-write-wins by `updatedAt`
+  with soft-delete tombstones. round_archives is keyed by `(user_id, round_id)`; a re-push
+  never clears a tombstone (`deleted_at` omitted from the upsert).
+- **RLS is `auth.uid() = user_id`** on `round_archives` + `players`; `courses` SELECT is
+  granted to `anon, authenticated` so signed-in users keep library access. Deleting a whole
+  round/player is outside the append-only event invariant (#2 governs edits *within* a round).
+
 ## UI conventions
 
 - **The bar recaps, the sheet accounts.** Every stroke-decided game's pinned-bar
