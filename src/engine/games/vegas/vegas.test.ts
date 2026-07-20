@@ -63,8 +63,10 @@ describe('vegas — golden fixture (hand-verified)', () => {
       'p-c': -220,
       'p-d': -220,
     })
-    expect(d.holeSummary(2)[0]).toContain('flipped')
-    expect(d.holeSummary(6)[0]).toContain('×2')
+    // the ledger now explains WHY on a ↳ cause line
+    expect(d.holeSummary(2).join(' ')).toContain('birdie flipped')
+    expect(d.holeSummary(2)[1]).toContain('A birdie flipped') // A's birdie flipped B
+    expect(d.holeSummary(6).join(' ')).toContain('eagle doubled')
     expect(d.holeSummary(7)[0]).toContain('push')
     // bar recaps the latest decided hole (h9: 45 v 45 push)
     expect(d.summaryParts).toEqual([{ label: 'H9', value: '45 v 45 · push' }])
@@ -107,6 +109,33 @@ describe('vegas — golden fixture (hand-verified)', () => {
       'p-c': -10,
       'p-d': -10,
     })
-    expect(d.holeSummary(1)[0]).not.toContain('flipped')
+    expect(d.holeSummary(1).join(' ')).not.toContain('flipped')
+  })
+
+  it('the ledger explains WHY a flip and a double happened', () => {
+    const course = makeCourse([4, 4, 5, 3, 4, 4, 3, 5, 4], [5, 13, 1, 9, 17, 3, 11, 7, 15])
+    const players = makePlayers([{ name: 'Ben' }, { name: 'Rob' }, { name: 'Gary' }, { name: 'Dee' }])
+    const round = makeRound({
+      course,
+      players,
+      holes: 'front9',
+      games: [
+        {
+          type: 'vegas',
+          config: {
+            pointCents: 10,
+            teams: { a: ['p-ben', 'p-rob'], b: ['p-gary', 'p-dee'] },
+            birdieFlip: true,
+            eagleDouble: true,
+          },
+        },
+      ],
+    })
+    const log = new EventLog()
+    // h1 par-4: Ben birdies (3), Rob 5 → team A 35; Gary 4, Dee 5 → B 45 flips to 54
+    log.scoreByHole(round, { Ben: [3], Rob: [5], Gary: [4], Dee: [5] }, [1])
+    const d = deriveRound(round, log.events).derivations.get('game-1')!
+    const lines = d.holeSummary(1)
+    expect(lines[1]).toBe('↳ Ben birdie flipped Gary & Dee’s number high-first')
   })
 })

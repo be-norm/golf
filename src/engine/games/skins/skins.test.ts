@@ -159,6 +159,8 @@ describe('skins — golden fixtures (hand-verified)', () => {
       'p-c': -300,
       'p-d': -300,
     })
+    // ledger explains the multi-skin win came from carried ties
+    expect(skins.holeSummary(3)[1]).toBe('↳ this hole + 2 carried in from ties')
   })
 
   it('the frontier hole with partial scores stays pending', () => {

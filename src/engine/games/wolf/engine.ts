@@ -229,7 +229,11 @@ function derive(
       .filter(([, p]) => p > 0)
       .map(([id, p]) => `${nameOf.get(id)} +${p}`)
       .join(', ')
-    return [`Wolf ${wolfName} (${pickLabel}) — ${gains}`]
+    const lines = [`Wolf ${wolfName} (${pickLabel}) — ${gains}`]
+    // explain the elevated points behind a solo pick
+    if (r.pick!.kind === 'lone') lines.push('↳ lone wolf — solo stakes')
+    if (r.pick!.kind === 'blind') lines.push('↳ blind wolf — called before any tee shot')
+    return lines
   }
 
   return { standings, summary, summaryParts, holeSummary, requiredInputs, settlement }

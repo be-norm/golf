@@ -57,6 +57,10 @@ Full plan/architecture history: see `docs/` and the games catalog in `docs/games
   aggregate (that's the standings sheet). New games follow this by default.
   Match-play games (Nassau) are the documented exception: their bar shows live
   bet status because the stakes are the running match, not a single hole.
+- **The ledger explains WHY, not just what.** Each engine's `holeSummary` states
+  the outcome, then explains the cause of anything non-obvious on a "↳ "
+  continuation line (birdie→flip, carry→multi-skin, 2-down→press, lone/blind→
+  Wolf points). A reader should never have to ask why a result happened.
 
 ## Testing conventions
 

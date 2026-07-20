@@ -107,11 +107,14 @@ function derive(
     if (!r || r.kind === 'pending') return []
     if (r.kind === 'void') return ['No scores — hole void']
     if (r.kind === 'won') {
-      return [
-        `${nameOf.get(r.winnerId)} wins ${r.skins} skin${r.skins > 1 ? 's' : ''} (${
-          game.handicap.mode === 'net' ? 'net' : ''
-        } ${r.effective})`.replace('( ', '('),
-      ]
+      const scoreTag = game.handicap.mode === 'net' ? `net ${r.effective}` : `${r.effective}`
+      const lines = [`${nameOf.get(r.winnerId)} wins ${r.skins} skin${r.skins > 1 ? 's' : ''} (${scoreTag})`]
+      // explain WHY it's more than one: skins carried in from earlier ties
+      if (r.skins > 1) {
+        const carried = r.skins - 1
+        lines.push(`↳ this hole + ${carried} carried in from ties`)
+      }
+      return lines
     }
     return [r.carryAfter > 0 ? `Tied — ${r.carryAfter} carried` : 'Tied — no skin']
   }

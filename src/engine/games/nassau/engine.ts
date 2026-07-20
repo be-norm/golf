@@ -288,7 +288,12 @@ function derive(
   }
   for (const h of ctx.holesPlayed) {
     for (const b of bets) {
-      if (b.depth > 0 && b.startHole === h) note(h, `${betLabel(b)} starts`)
+      if (b.depth > 0 && b.startHole === h) {
+        // explain WHY the press exists: auto-presses fire at 2 down, manual
+        // presses are the trailing side choosing to double down
+        const why = b.id.startsWith('auto-') ? '2 down → auto-press' : 'trailing side pressed'
+        note(h, `${betLabel(b)} starts (${why})`)
+      }
     }
     const r = holeResult.get(h)
     if (r === null || r === undefined || r === 0) continue

@@ -48,6 +48,13 @@ export interface GameDerivation {
    * "F9 · Ben ↑2 · dormie"). depth indents children under their parent.
    */
   detailLines?: { label: string; value: string; depth?: number }[]
+  /**
+   * Per-hole narration for the money ledger and standings sheet. CONVENTION:
+   * state the outcome, THEN explain the CAUSE of anything non-obvious on a
+   * "↳ " continuation line — the birdie behind a Vegas flip, the carry behind
+   * a multi-skin win, the 2-down behind a Nassau press, the lone/blind behind
+   * Wolf's points. A reader should never have to ask "why did that happen?".
+   */
   holeSummary(hole: number): string[]
   requiredInputs(): InputRequest[]
   settlement: Settlement

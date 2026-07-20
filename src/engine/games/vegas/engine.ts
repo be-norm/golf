@@ -5,7 +5,7 @@ import type { GameScopedEvent } from '../../core/events'
 import { addLine, emptySettlement, type Settlement } from '../../core/money'
 import { latestHoleSummary, summaryString } from '../../core/summary'
 import { teamsSchema, teamPartitionProblems } from '../../core/teams'
-import type { GameConfig, HandicapSettings, RoundPlayer } from '../../core/types'
+import type { GameConfig, HandicapSettings, RoundPlayer, Uuid } from '../../core/types'
 
 export const vegasConfigSchema = z.object({
   /** cents per point of team-number differential */
@@ -57,6 +57,12 @@ export interface VegasHoleResult {
   pointsA: number
   doubled: boolean
   flipped: 'a' | 'b' | null
+  /** players whose natural birdie(s) caused the flip — the WHY behind it */
+  birdiesBy: Uuid[]
+  /** players whose natural eagle caused the double */
+  eaglesBy: Uuid[]
+  /** both teams birdied, so the flips cancelled */
+  birdiesCancelled: boolean
   /** finalized but missing a score — team numbers can't pair, hole is void */
   void?: boolean
 }
@@ -94,16 +100,38 @@ function derive(
     }
     if (missing) {
       // team numbers need both scores — a finalized hole missing any is void
-      holeResults.push({ hole, numA: 0, numB: 0, diff: 0, pointsA: 0, doubled: false, flipped: null, void: true })
+      holeResults.push({
+        hole,
+        numA: 0,
+        numB: 0,
+        diff: 0,
+        pointsA: 0,
+        doubled: false,
+        flipped: null,
+        birdiesBy: [],
+        eaglesBy: [],
+        birdiesCancelled: false,
+        void: true,
+      })
       continue
     }
 
     // flips key off NATURAL (gross) birdies/eagles even in net games
-    const bird = (side: 'a' | 'b') => grossDiffs[side].some((d) => d <= -1)
-    const eagle = (side: 'a' | 'b') => grossDiffs[side].some((d) => d <= -2)
+    const birdiesBySide: Record<'a' | 'b', Uuid[]> = { a: [], b: [] }
+    const eaglesBySide: Record<'a' | 'b', Uuid[]> = { a: [], b: [] }
+    for (const side of ['a', 'b'] as const) {
+      teams[side].forEach((id, i) => {
+        const d = grossDiffs[side][i]!
+        if (d <= -1) birdiesBySide[side].push(id)
+        if (d <= -2) eaglesBySide[side].push(id)
+      })
+    }
+    const bird = (side: 'a' | 'b') => birdiesBySide[side].length > 0
+    const eagle = (side: 'a' | 'b') => eaglesBySide[side].length > 0
     const flipB = birdieFlip && bird('a') && !bird('b')
     const flipA = birdieFlip && bird('b') && !bird('a')
     const doubled = eagleDouble && eagle('a') !== eagle('b')
+    const flipped = flipA ? 'a' : flipB ? 'b' : null
 
     const numA = flipA ? pairFlipped(nets.a[0]!, nets.a[1]!) : pairNormal(nets.a[0]!, nets.a[1]!)
     const numB = flipB ? pairFlipped(nets.b[0]!, nets.b[1]!) : pairNormal(nets.b[0]!, nets.b[1]!)
@@ -117,7 +145,12 @@ function derive(
       diff,
       pointsA,
       doubled,
-      flipped: flipA ? 'a' : flipB ? 'b' : null,
+      flipped,
+      // the flip is caused by the OTHER (non-flipped) team's birdie; the double
+      // by the eagling team. Record the players so the ledger can explain why.
+      birdiesBy: flipped ? birdiesBySide[flipped === 'a' ? 'b' : 'a'] : [],
+      eaglesBy: doubled ? [...eaglesBySide.a, ...eaglesBySide.b] : [],
+      birdiesCancelled: birdieFlip && bird('a') && bird('b'),
     })
 
     if (pointsA !== 0) {
@@ -167,16 +200,31 @@ function derive(
   )
   const summary = summaryString(summaryParts)
 
+  // holeSummary states the outcome, then a "↳" cause line for anything that
+  // changed the pairing — so the ledger explains WHY, not just what.
+  const names = (ids: Uuid[]) => ids.map((id) => nameOf.get(id)).join(' & ')
   const holeSummary = (hole: number): string[] => {
     const r = holeResults.find((h) => h.hole === hole)
     if (!r) return []
     if (r.void) return ['Missing scores — hole void']
-    const flipNote = r.flipped ? ` — flipped ${teamLabel(r.flipped)}` : ''
-    const doubleNote = r.doubled ? ' — eagle ×2' : ''
-    if (r.pointsA === 0) return [`${r.numA} vs ${r.numB} — push${flipNote}`]
-    return [
-      `${r.numA} vs ${r.numB}${flipNote}${doubleNote} → ${teamLabel(r.pointsA > 0 ? 'a' : 'b')} +${Math.abs(r.pointsA)}`,
-    ]
+    const lines: string[] =
+      r.pointsA === 0
+        ? [`${r.numA} vs ${r.numB} — push`]
+        : [
+            `${r.numA} vs ${r.numB} → ${teamLabel(r.pointsA > 0 ? 'a' : 'b')} +${Math.abs(r.pointsA)}`,
+          ]
+    if (r.flipped && r.birdiesBy.length > 0) {
+      lines.push(
+        `↳ ${names(r.birdiesBy)} birdie flipped ${teamLabel(r.flipped)}’s number high-first`,
+      )
+    }
+    if (r.doubled && r.eaglesBy.length > 0) {
+      lines.push(`↳ ${names(r.eaglesBy)} eagle doubled the hole`)
+    }
+    if (r.birdiesCancelled) {
+      lines.push('↳ both teams birdied — flips cancel')
+    }
+    return lines
   }
 
   return {
