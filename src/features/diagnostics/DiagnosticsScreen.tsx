@@ -1,8 +1,13 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router'
 import { clearErrorLog, readErrorLog, type DiagnosticEntry } from '../../pwa/diagnostics'
+import { useAuth } from '../../auth/AuthProvider'
+import { AuthSheet } from '../auth/AuthSheet'
+import { BigButton } from '../../components/BigButton'
 
 export function DiagnosticsScreen() {
+  const { isGuest, displayName, signOut } = useAuth()
+  const [authOpen, setAuthOpen] = useState(false)
   const [entries, setEntries] = useState<DiagnosticEntry[]>(() => readErrorLog())
   const [storage, setStorage] = useState<string>()
   const [persisted, setPersisted] = useState<boolean>()
@@ -25,6 +30,27 @@ export function DiagnosticsScreen() {
         <h1 className="font-display text-xs uppercase text-felt-300">Diagnostics</h1>
         <span className="w-12" />
       </header>
+
+      <section className="pixel border-stone-700 bg-stone-900/70 p-4 text-lg">
+        <h2 className="font-display mb-2 text-[10px] uppercase text-stone-400">Account</h2>
+        {isGuest ? (
+          <>
+            <p className="text-stone-400">Not signed in — your data lives only on this device.</p>
+            <BigButton variant="outline" className="mt-3 w-full" onClick={() => setAuthOpen(true)}>
+              Sign in
+            </BigButton>
+          </>
+        ) : (
+          <>
+            <p>
+              Signed in as <span className="text-felt-300">{displayName}</span>
+            </p>
+            <BigButton variant="outline" className="mt-3 w-full" onClick={() => void signOut()}>
+              Sign out
+            </BigButton>
+          </>
+        )}
+      </section>
 
       <section className="pixel border-stone-700 bg-stone-900/70 p-4 text-lg">
         <p>
@@ -69,6 +95,8 @@ export function DiagnosticsScreen() {
           </ul>
         )}
       </section>
+
+      <AuthSheet open={authOpen} onClose={() => setAuthOpen(false)} />
     </main>
   )
 }

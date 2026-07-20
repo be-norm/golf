@@ -1,10 +1,13 @@
 import 'fake-indexeddb/auto'
+import Dexie from 'dexie'
 import { beforeEach, describe, expect, it } from 'vitest'
 import '../engine/games/index'
 import { deriveRound } from '../engine/catalog'
 import { makePlayers, makeRound } from '../engine/test/harness'
+import type { Round, RoundStatus } from '../engine/core/types'
 import { EventStore } from './eventStore'
-import { resetDeviceIdCache } from './ids'
+import { LOCAL_USER, newId, resetDeviceIdCache } from './ids'
+import { PlayerRepo, RoundRepo } from './repos'
 import { GolfDB } from './schema'
 import { seedCourses } from './seed'
 
@@ -98,18 +101,123 @@ describe('EventStore', () => {
   })
 })
 
+const U1 = 'user-1'
+const U2 = 'user-2'
+
+function roundRow(userId: string, status: RoundStatus, startedAt: string): Round {
+  return {
+    id: newId(),
+    courseId: 'c',
+    courseSnapshot: { id: 'c' } as Round['courseSnapshot'],
+    teeSetId: 't',
+    holes: 'full18',
+    players: [],
+    games: [],
+    status,
+    startedAt,
+    updatedAt: startedAt,
+    deviceId: '',
+    schemaVersion: 1,
+    userId,
+  }
+}
+
 describe('PlayerRepo', () => {
   it('remembers index + course handicap a player teed off with', async () => {
-    const db = freshDb()
-    const { PlayerRepo } = await import('./repos')
-    const repo = new PlayerRepo(db)
-    const ben = await repo.upsertByName('Ben')
+    const repo = new PlayerRepo(freshDb())
+    const ben = await repo.upsertByName(U1, 'Ben')
     await repo.rememberHandicap(ben.id, 7.4, 8)
 
-    const again = await repo.upsertByName('Ben')
+    const again = await repo.upsertByName(U1, 'Ben')
     expect(again.id).toBe(ben.id)
     expect(again.handicapIndex).toBe(7.4)
     expect(again.lastCourseHandicap).toBe(8)
+  })
+
+  it('isolates the roster by userId', async () => {
+    const repo = new PlayerRepo(freshDb())
+    const ben1 = await repo.upsertByName(U1, 'Ben')
+    const ben2 = await repo.upsertByName(U2, 'Ben')
+    expect(ben1.id).not.toBe(ben2.id)
+    // same (owner, name) reuses; different owner is a distinct row
+    expect((await repo.upsertByName(U1, 'Ben')).id).toBe(ben1.id)
+    expect(await repo.list(U1)).toHaveLength(1)
+    expect(await repo.list(U2)).toHaveLength(1)
+  })
+
+  it('creates, updates, and deletes a roster player', async () => {
+    const repo = new PlayerRepo(freshDb())
+    const p = await repo.create(U1, 'Rob', 8.1)
+    expect(p.handicapIndex).toBe(8.1)
+    expect(p.userId).toBe(U1)
+    await repo.update(p.id, { name: 'Robert', handicapIndex: 9 })
+    const updated = await repo.get(p.id)
+    expect(updated?.name).toBe('Robert')
+    expect(updated?.handicapIndex).toBe(9)
+    await repo.delete(p.id)
+    expect(await repo.get(p.id)).toBeUndefined()
+    expect(await repo.list(U1)).toHaveLength(0)
+  })
+})
+
+describe('RoundRepo', () => {
+  it('scopes listRecent + liveRound by userId', async () => {
+    const repo = new RoundRepo(freshDb())
+    await repo.put(roundRow(U1, 'live', '2026-01-01T00:00:00Z'))
+    await repo.put(roundRow(U1, 'completed', '2026-01-02T00:00:00Z'))
+    await repo.put(roundRow(U2, 'live', '2026-01-03T00:00:00Z'))
+
+    expect(await repo.listRecent(U1)).toHaveLength(2)
+    expect(await repo.listRecent(U2)).toHaveLength(1)
+    // most-recent first within the owner
+    expect((await repo.listRecent(U1))[0]!.startedAt).toBe('2026-01-02T00:00:00Z')
+
+    expect((await repo.liveRound(U1))?.userId).toBe(U1)
+    expect((await repo.liveRound(U2))?.userId).toBe(U2)
+    // no userId → any live round on the device (UpdateToast suppression)
+    expect(await repo.liveRound()).toBeDefined()
+  })
+
+  it('hard-deletes a round and its event log in one transaction', async () => {
+    const db = freshDb()
+    const repo = new RoundRepo(db)
+    const store = new EventStore(db)
+    const r = roundRow(U1, 'completed', '2026-01-01T00:00:00Z')
+    await repo.put(r)
+    await store.append(r.id, [{ type: 'score/set', playerId: 'p1', hole: 1, gross: 4 }])
+    expect(await store.list(r.id)).toHaveLength(1)
+
+    await repo.delete(r.id)
+    expect(await repo.get(r.id)).toBeUndefined()
+    expect(await store.list(r.id)).toHaveLength(0)
+  })
+})
+
+describe('v1 → v2 migration', () => {
+  it('backfills userId to the guest sentinel for pre-auth rows', async () => {
+    const name = `golf-mig-${++testDbCounter}`
+    const v1 = new Dexie(name)
+    v1.version(1).stores({
+      courses: 'id, name, updatedAt',
+      players: 'id, name',
+      rounds: 'id, status, startedAt',
+      round_events: '[roundId+seq], id, roundId',
+      outbox: 'id, createdAt',
+      meta: 'key',
+    })
+    await v1.open()
+    await v1.table('players').put({ id: 'p1', name: 'Ben', updatedAt: 't' })
+    await v1.table('rounds').put({ id: 'r1', status: 'completed', startedAt: 't' })
+    v1.close()
+
+    const db = new GolfDB(name)
+    await db.open() // triggers the 1 → 2 upgrade
+    expect((await db.players.get('p1'))?.userId).toBe(LOCAL_USER)
+    expect((await db.rounds.get('r1'))?.userId).toBe(LOCAL_USER)
+    // backfilled rows are now visible through the owner-scoped indexes
+    expect(await new PlayerRepo(db).list(LOCAL_USER)).toHaveLength(1)
+    expect(await new RoundRepo(db).listRecent(LOCAL_USER)).toHaveLength(1)
+    db.close()
   })
 })
 

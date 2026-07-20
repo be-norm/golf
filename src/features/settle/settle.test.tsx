@@ -48,8 +48,9 @@ describe('export/import round-trip', () => {
     await db.rounds.delete(round.id)
     await db.round_events.where('roundId').equals(round.id).delete()
 
-    const imported = await importRound(JSON.stringify(exported))
+    const imported = await importRound(JSON.stringify(exported), 'user-x')
     expect(imported.id).toBe(round.id)
+    expect(imported.userId).toBe('user-x')
     const events = await db.round_events.where('roundId').equals(round.id).toArray()
     expect(events).toHaveLength(log.events.length)
   })

@@ -37,6 +37,13 @@ export interface Player {
   /** legacy fallback default from before indexes were stored */
   lastCourseHandicap?: number
   updatedAt: string
+  /**
+   * Owner partition. Signed-out ("guest") rows use the LOCAL_USER sentinel;
+   * signing in claims them to the auth uid. Optional so the pure engine and
+   * fixtures never have to declare it — repos always stamp it and the Dexie v2
+   * upgrade backfills existing rows. See src/db/ids.ts (LOCAL_USER).
+   */
+  userId?: string
 }
 
 export interface RoundPlayer {
@@ -86,4 +93,6 @@ export interface Round {
   updatedAt: string
   deviceId: string
   schemaVersion: number
+  /** Owner partition — see the note on Player.userId. */
+  userId?: string
 }

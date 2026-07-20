@@ -10,7 +10,8 @@ import { Sheet } from '../../components/Sheet'
 import { GameSummary } from '../../components/GameSummary'
 import { DetailLines } from '../../components/DetailLines'
 import { BigButton } from '../../components/BigButton'
-import { enqueueRoundArchive } from '../../remote/outbox'
+import { enqueuePushRound } from '../../remote/outbox'
+import { LOCAL_USER } from '../../db/ids'
 import { RulesSheet } from '../games/RulesSheet'
 import { useRound } from './useRound'
 import { ScoreRow } from './ScoreRow'
@@ -96,7 +97,12 @@ export function ScoringScreen() {
   const finish = async () => {
     await eventStore.append(round.id, [{ type: 'round/completed' }])
     await roundRepo.put({ ...round, status: 'completed' })
-    void enqueueRoundArchive({ ...round, status: 'completed' })
+    // Push only owner-scoped (signed-in) rounds; guest rounds stay local until
+    // claimed on sign-in. Re-read so the pushed snapshot matches what's stored
+    // (put re-stamps updatedAt). The round carries its own owner.
+    const stored = await roundRepo.get(round.id)
+    const owner = stored?.userId ?? LOCAL_USER
+    if (stored && owner !== LOCAL_USER) void enqueuePushRound(owner, stored)
     navigate(`/round/${round.id}/settle`)
   }
 
