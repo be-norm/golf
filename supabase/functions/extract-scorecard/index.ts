@@ -78,29 +78,32 @@ async function bumpDailyCount(uid: string): Promise<number> {
 // stroke-index permutation, par clamp, hole renumber, neutral-tee fallback),
 // so a strict schema buys little and adds a failure surface. Opus follows an
 // explicit shape + "JSON only" reliably; the parser below is tolerant anyway.
-const PROMPT = `You are reading photo(s) of a golf scorecard. Extract the course data and respond with ONLY a single JSON object — no prose, no markdown, no code fences.
+const PROMPT = `You are reading photo(s) of a golf scorecard — a dense grid. Extract the course data and respond with ONLY a single JSON object — no prose, no markdown, no code fences.
 
-Use exactly this shape:
+CRITICAL — column alignment. The card has one column per hole, labelled 1, 2, 3 … across the top. Every per-hole value belongs under its own hole's column. The leftmost data cell of a row is HOLE 1; the rightmost (before any OUT/IN/TOT totals) is the last hole. Do NOT shift a row by a column — this is the most common mistake. After reading each row, re-check that its first value sits under the "1" column and its last value under the final hole column, and that totals columns (OUT, IN, TOT, HCP) are NOT mistaken for a hole.
+
+Shape:
 {
   "name": string,                 // course/club name printed on the card
   "location": string | null,      // "City, ST" if shown, else null
   "holeCount": 9 | 18,            // number of holes the card scores
-  "holes": [                      // one entry per hole, in playing order
+  "holes": [                      // one entry per hole, in order 1..holeCount
     { "number": integer, "par": integer, "handicapIndex": integer | null }
   ],
-  "teeSets": [                    // one entry per tee/color column
+  "teeSets": [                    // one entry per tee/color row
     { "name": string, "color": string | null, "rating": number | null, "slope": integer | null,
       "yardages": (integer | null)[], "strokeIndexes": (integer | null)[], "pars": (integer | null)[] }
   ]
 }
 
-Guidance:
-- Top-level "holes": par is the hole's primary par; handicapIndex is a representative stroke index for the hole (use the back/men's Handicap row if several are shown; null if none).
-- A tee set is each named tee/color column (e.g. Black, Blue, White, Gold, Red, and named combos like "Blue/White"). name = its label; color = a CSS color name/hex if implied, else null; rating = Course Rating (e.g. 71.2); slope = Slope Rating (e.g. 128).
-- yardages = one yardage per hole for THIS tee, aligned to the holes order, null where unreadable.
-- strokeIndexes = THIS tee's own Handicap/stroke-index row. Many cards print a separate "Handicap" row under each tee and they often DIFFER between tees — read each tee's own row. If the card has just one shared Handicap row, use it for every tee. One value per hole, aligned to holes order.
-- pars = THIS tee's par per hole. Usually identical across tees, but a hole printed like "4/3" plays as a different par depending on the tee's length — assign the value matching THIS tee's yardage (a short forward-tee hole can be a par 3 where the back tees are par 4). One value per hole, aligned to holes order.
-- Align every per-hole array to the hole order. If a value isn't on the card, use null rather than guessing. Do not invent tees or holes that aren't printed.`
+Rules:
+- Top-level "holes": par is the hole's primary par; handicapIndex is a representative stroke index (use the back/men's Handicap row; null if none).
+- A tee set is each named tee/color row (Black, Blue, White, Gold, Red, and named combos like "Blue/White"). name = its label; color = a CSS color name/hex if the label implies one, else null; rating = Course Rating (e.g. 71.2); slope = Slope Rating (e.g. 128).
+- Each tee has up to three per-hole rows, ALL aligned to the same hole columns:
+  • yardages — the tee's yardage row.
+  • strokeIndexes — the "Handicap" row printed directly UNDER that tee's yardage row (read each tee's OWN row; they differ between tees). A stroke-index row RANKS the holes, so every integer from 1 to holeCount appears EXACTLY ONCE. If your read has a duplicate or a missing number, you misread or mis-shifted it — re-read that row cell by cell.
+  • pars — the tee's par per hole. Usually the same across tees, but a hole printed like "4/3" plays as a different par by tee based on length; give THIS tee the value matching its yardage (a short forward-tee hole can be par 3 where the back tees are par 4).
+- Every per-hole array must have exactly holeCount values, in hole order. Use null only for a single cell you genuinely cannot read — never guess or shift neighbouring values to fill a gap. Do not invent tees or holes that aren't printed.`
 
 interface ImageInput {
   media_type?: string
@@ -165,7 +168,11 @@ Deno.serve(async (req: Request) => {
       },
       body: JSON.stringify({
         model: MODEL,
-        max_tokens: 8000,
+        max_tokens: 12000,
+        // Reasoning helps a lot on a dense grid — let the model deliberate about
+        // which cell belongs to which hole instead of one-pass reading. Thinking
+        // blocks come back separately; we read the final text block below.
+        thinking: { type: 'adaptive' },
         messages: [{ role: 'user', content }],
       }),
     })
