@@ -4,7 +4,9 @@ import reactHooks from 'eslint-plugin-react-hooks'
 import prettier from 'eslint-config-prettier'
 
 export default tseslint.config(
-  { ignores: ['dist', 'dev-dist', 'coverage', 'node_modules'] },
+  // supabase/functions/** is Deno (its own runtime + globals), linted by the
+  // Supabase/Deno toolchain, not by the Vite app's TS/React ESLint config.
+  { ignores: ['dist', 'dev-dist', 'coverage', 'node_modules', 'supabase/functions/**'] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {

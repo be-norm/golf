@@ -73,6 +73,7 @@ async function applyRemotePlayer(userId: string, row: Record<string, unknown>): 
     name: row.name as string,
     handicapIndex: row.handicap_index == null ? undefined : Number(row.handicap_index),
     lastCourseHandicap: row.last_course_handicap == null ? undefined : Number(row.last_course_handicap),
+    ghinNumber: row.ghin_number == null ? undefined : String(row.ghin_number),
     updatedAt: row.updated_at as string,
   }
   const local = await playerRepo.get(remote.id)

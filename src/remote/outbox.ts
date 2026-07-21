@@ -129,6 +129,7 @@ async function send(item: OutboxItem, deviceId: string): Promise<boolean> {
           name: player.name,
           handicap_index: player.handicapIndex ?? null,
           last_course_handicap: player.lastCourseHandicap ?? null,
+          ghin_number: player.ghinNumber ?? null,
           updated_at: player.updatedAt,
         },
         { onConflict: 'id' },

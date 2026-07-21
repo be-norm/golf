@@ -47,22 +47,32 @@ export class PlayerRepo {
   }
 
   /** Explicit roster add (used by the Players screen). */
-  async create(userId: string, name: string, handicapIndex?: number): Promise<Player> {
+  async create(
+    userId: string,
+    name: string,
+    handicapIndex?: number,
+    ghinNumber?: string,
+  ): Promise<Player> {
     const player: Player = {
       id: newId(),
       userId,
       name: name.trim(),
       handicapIndex,
+      ghinNumber,
       updatedAt: new Date().toISOString(),
     }
     await this.db.players.put(player)
     return player
   }
 
-  async update(id: string, patch: Partial<Pick<Player, 'name' | 'handicapIndex'>>): Promise<void> {
+  async update(
+    id: string,
+    patch: Partial<Pick<Player, 'name' | 'handicapIndex' | 'ghinNumber'>>,
+  ): Promise<void> {
     const next: Partial<Player> = { updatedAt: new Date().toISOString() }
     if (patch.name !== undefined) next.name = patch.name.trim()
     if ('handicapIndex' in patch) next.handicapIndex = patch.handicapIndex
+    if ('ghinNumber' in patch) next.ghinNumber = patch.ghinNumber
     await this.db.players.update(id, next)
   }
 

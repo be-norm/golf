@@ -369,6 +369,13 @@ authorization_url_path = "/oauth/consent"
 # Allow dynamic client registration
 allow_dynamic_registration = false
 
+# GHIN golfer-search proxy. verify_jwt keeps the public anon key from turning
+# this into an open door to the GHIN account — the function itself additionally
+# requires an authenticated (non-anonymous) caller.
+[functions.ghin-search]
+enabled = true
+verify_jwt = true
+
 [edge_runtime]
 enabled = true
 # Supported request policies: `oneshot`, `per_worker`.

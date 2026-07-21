@@ -36,6 +36,8 @@ export interface Player {
   handicapIndex?: number
   /** legacy fallback default from before indexes were stored */
   lastCourseHandicap?: number
+  /** GHIN number, when the player was added via GHIN lookup (enables re-lookup) */
+  ghinNumber?: string
   updatedAt: string
   /**
    * Owner partition. Signed-out ("guest") rows use the LOCAL_USER sentinel;
