@@ -28,6 +28,11 @@ export function CourseListScreen() {
 
       <section>
         <h2 className="font-display mb-2 text-[10px] uppercase text-stone-400">My library</h2>
+        {courses && courses.length === 0 && (
+          <p className="text-sm text-stone-500">
+            No courses saved yet — search above to add one (it's cached here once you pick it).
+          </p>
+        )}
         <ul className="space-y-2">
           {courses?.map((c) => (
             <li key={c.id}>
