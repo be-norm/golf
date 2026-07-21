@@ -194,4 +194,51 @@ describe('nassau — golden fixtures (hand-verified)', () => {
       'p-c': -500,
     })
   })
+
+  /**
+   * N8: 2v1 gross, $5, front9 (single Overall bet), pair {A,B} vs lone C.
+   * The lone player plays each opponent for the stake, so a won bet swings
+   * ±$10 for C and ±$5 per pair member — zero-sum across uneven sides.
+   */
+  const twoVsOne = (config: object) => ({
+    type: 'nassau',
+    config: {
+      stakeCents: 500,
+      teams: { a: ['p-a', 'p-b'], b: ['p-c'] },
+      autoPress: false,
+      ...config,
+    },
+  })
+
+  it('N8a: pair beats the lone player → lone pays each of them', () => {
+    const players = makePlayers([{ name: 'A' }, { name: 'B' }, { name: 'C' }])
+    const round = makeRound({ players, holes: 'front9', games: [twoVsOne({})] })
+    const log = new EventLog()
+    // Pair best ball wins h1 & h2, halves h3–h9 → Overall +2 → pair wins.
+    log.scoreByHole(round, {
+      A: [4, 4, 4, 4, 4, 4, 4, 4, 4],
+      B: [4, 4, 4, 4, 4, 4, 4, 4, 4],
+      C: [5, 5, 4, 4, 4, 4, 4, 4, 4],
+    })
+    const d = deriveRound(round, log.events).derivations.get('game-1')!
+    expect(d.settlement.lines).toHaveLength(1)
+    expect(d.settlement.perPlayerCents).toEqual({ 'p-a': 500, 'p-b': 500, 'p-c': -1000 })
+    // zero-sum across the uneven split
+    expect(Object.values(d.settlement.perPlayerCents).reduce((a, b) => a + b, 0)).toBe(0)
+  })
+
+  it('N8b: lone player beats the pair → collects the stake from each', () => {
+    const players = makePlayers([{ name: 'A' }, { name: 'B' }, { name: 'C' }])
+    const round = makeRound({ players, holes: 'front9', games: [twoVsOne({})] })
+    const log = new EventLog()
+    // C wins h1 & h2, halves the rest → Overall −2 → lone C wins.
+    log.scoreByHole(round, {
+      A: [5, 5, 4, 4, 4, 4, 4, 4, 4],
+      B: [5, 5, 4, 4, 4, 4, 4, 4, 4],
+      C: [4, 4, 4, 4, 4, 4, 4, 4, 4],
+    })
+    const d = deriveRound(round, log.events).derivations.get('game-1')!
+    expect(d.settlement.perPlayerCents).toEqual({ 'p-a': -500, 'p-b': -500, 'p-c': 1000 })
+    expect(Object.values(d.settlement.perPlayerCents).reduce((a, b) => a + b, 0)).toBe(0)
+  })
 })

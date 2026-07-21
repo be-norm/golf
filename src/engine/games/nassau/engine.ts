@@ -3,7 +3,7 @@ import type { GameEngine, GameDerivation, InputRequest, StandingLine } from '../
 import type { RoundContext } from '../../core/context'
 import type { GameScopedEvent } from '../../core/events'
 import { addLine, emptySettlement, type Settlement } from '../../core/money'
-import { teamsSchema, teamPartitionProblems } from '../../core/teams'
+import { teamsSchema, nonEmptyPartitionProblems } from '../../core/teams'
 import type { GameConfig, HandicapSettings, RoundPlayer, Uuid } from '../../core/types'
 
 export const nassauConfigSchema = z.object({
@@ -157,16 +157,25 @@ function derive(
   // — round completion finalizes empty holes, so finishing closes everything).
   // Mid-round a flipped lead moves no money, matching how golfers think.
   const isClosed = (b: Bet) => b.holesRemaining === 0
+  // A full side collectively wagers ONE stake (the 1v1/2v2 convention: a $5 bet
+  // swings $5 per player). An outnumbered lone player instead plays that stake
+  // against EACH opponent, so their swing scales with the other side's size —
+  // this keeps an uneven 2v1 zero-sum and mirrors Wolf's lone-wolf math. With
+  // ≤4 players the only uneven split is a lone side, so it stays integer.
+  const sideStake = (self: readonly Uuid[], other: readonly Uuid[]) =>
+    self.length === 1 ? stakeCents * other.length : stakeCents
   const settlement: Settlement = emptySettlement(playerIds)
   for (const bet of bets) {
     if (!isClosed(bet) || bet.diff === 0) continue
     const winners = bet.diff > 0 ? sideA : sideB
     const losers = bet.diff > 0 ? sideB : sideA
+    const winEach = sideStake(winners, losers)
+    const loseEach = sideStake(losers, winners)
     addLine(settlement, {
-      label: `${bet.label} — ${winners.map((id) => nameOf.get(id)).join(' & ')} win ↑${Math.abs(bet.diff)}`,
+      label: `${bet.label} — ${winners.map((id) => nameOf.get(id)).join(' & ')} ${winners.length > 1 ? 'win' : 'wins'} ↑${Math.abs(bet.diff)}`,
       perPlayerCents: Object.fromEntries([
-        ...winners.map((id) => [id, stakeCents] as const),
-        ...losers.map((id) => [id, -stakeCents] as const),
+        ...winners.map((id) => [id, winEach] as const),
+        ...losers.map((id) => [id, -loseEach] as const),
       ]),
     })
   }
@@ -352,7 +361,7 @@ export const nassauEngine: GameEngine<NassauConfig> = {
     rules: {
       tagline: 'Three bets in one round: the front nine, the back nine, and the overall.',
       howToPlay: [
-        'Match play: each hole is won, lost, or halved. Lowest net score takes the hole — in 2v2, only the better ball of each team counts.',
+        'Match play: each hole is won, lost, or halved. Lowest net score takes the hole — on a team, only its better ball counts.',
         'The front nine, back nine, and full 18 run as three separate bets at the same stake. A hole feeds its nine AND the overall.',
         'Fall 2 down on any bet and a press starts (automatic if auto-press is on): a fresh bet at the same stake from the next hole to the end of that segment. Presses can themselves be pressed.',
         'A 9-hole round collapses to a single overall bet.',
@@ -360,6 +369,7 @@ export const nassauEngine: GameEngine<NassauConfig> = {
       scoring: [
         'When a bet runs out of holes, whoever is up wins its stake; a tied bet pushes.',
         'Every player pays or collects the stake — a $5 bet swings $5 per player, in singles or 2v2.',
+        'In a 2-v-1, the solo player plays each opponent for the stake: a $5 bet swings $10 for them, $5 for each of the pair.',
         'A hole where only one side posts a score goes to that side; no scores at all halves it.',
       ],
       terms: [
@@ -380,7 +390,7 @@ export const nassauEngine: GameEngine<NassauConfig> = {
   configFields: [
     { key: 'stakeCents', kind: 'money', label: 'Stake per bet' },
     { key: 'autoPress', kind: 'boolean', label: 'Auto-press', hint: 'New press at 2 down' },
-    { key: 'teams', kind: 'teams', label: 'Teams (2v2 best ball)' },
+    { key: 'teams', kind: 'teams', label: 'Teams (best ball · 2v2 or 2v1)' },
   ],
   defaultConfig: (players) => ({
     stakeCents: 500,
@@ -390,7 +400,9 @@ export const nassauEngine: GameEngine<NassauConfig> = {
             a: [players[0]!.playerId, players[1]!.playerId],
             b: [players[2]!.playerId, players[3]!.playerId],
           }
-        : null,
+        : players.length === 3
+          ? { a: [players[0]!.playerId, players[1]!.playerId], b: [players[2]!.playerId] }
+          : null,
     autoPress: true,
   }),
   defaultHandicap: (): HandicapSettings => ({ mode: 'net', allowancePct: 100, reference: 'offLow' }),
@@ -401,7 +413,9 @@ export const nassauEngine: GameEngine<NassauConfig> = {
     if (teams === null) {
       return players.length === 2 ? [] : ['Nassau without teams needs exactly 2 players']
     }
-    return teamPartitionProblems(teams, players, 'Nassau')
+    // teams may be uneven (2v1) — the lone side just plays for more per the
+    // settlement rule; only require a real two-sided partition of everyone.
+    return nonEmptyPartitionProblems(teams, players, 'Nassau')
   },
   eventKinds: {
     'nassau/press': z

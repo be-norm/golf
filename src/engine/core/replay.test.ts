@@ -40,14 +40,18 @@ function arbitraryRoundAndEvents() {
       const games: Parameters<typeof makeRound>[0]['games'] = [
         { type: 'skins', config: { stakeCents: 100, carryover }, handicap },
       ]
-      if (playerCount === 2 || playerCount === 4) {
+      {
+        // 2 → singles, 3 → 2v1 (uneven split), 4 → 2v2 — exercises the
+        // lone-plays-each-opponent settlement so zero-sum holds when sizes differ
+        const nassauTeams =
+          playerCount === 4
+            ? { a: [ids[0]!, ids[1]!], b: [ids[2]!, ids[3]!] }
+            : playerCount === 3
+              ? { a: [ids[0]!, ids[1]!], b: [ids[2]!] }
+              : null
         games.push({
           type: 'nassau',
-          config: {
-            stakeCents: 500,
-            teams: playerCount === 4 ? { a: [ids[0]!, ids[1]!], b: [ids[2]!, ids[3]!] } : null,
-            autoPress,
-          },
+          config: { stakeCents: 500, teams: nassauTeams, autoPress },
           handicap,
         })
       }
