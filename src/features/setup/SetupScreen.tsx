@@ -12,6 +12,8 @@ import { useAuth } from '../../auth/AuthProvider'
 import { BigButton } from '../../components/BigButton'
 import { selectOnFocus } from '../../components/inputs'
 import { CourseSearch } from '../courses/CourseSearch'
+import { PlayerSearch } from '../players/PlayerSearch'
+import type { GhinPlayerHit } from '../../remote/ghinSearch'
 import { RulesSheet } from '../games/RulesSheet'
 import { GameConfigCard, type GameDraft } from './GameConfigCard'
 
@@ -21,6 +23,8 @@ interface PlayerDraft {
   name: string
   /** WHS index; course handicap is derived from the selected course + tee */
   handicapIndex: number
+  /** set when added via GHIN lookup — persisted onto the saved player at tee-off */
+  ghinNumber?: string
 }
 
 let draftCounter = 0
@@ -44,6 +48,7 @@ export function SetupScreen() {
   const [holes, setHoles] = useState<RoundHoles>('full18')
   const [players, setPlayers] = useState<PlayerDraft[]>([])
   const [nameInput, setNameInput] = useState('')
+  const [showGhin, setShowGhin] = useState(false)
   const [games, setGames] = useState<GameDraft[]>([])
   const [rulesFor, setRulesFor] = useState<string>()
 
@@ -63,6 +68,20 @@ export function SetupScreen() {
       },
     ])
     setNameInput('')
+  }
+
+  const addPlayerFromGhin = (hit: GhinPlayerHit) => {
+    const name = hit.fullName.trim()
+    if (!name || players.some((p) => p.name.toLowerCase() === name.toLowerCase())) return
+    setPlayers([
+      ...players,
+      {
+        draftId: nextDraftId(),
+        name,
+        handicapIndex: hit.handicapIndex ?? 0,
+        ghinNumber: hit.ghinNumber,
+      },
+    ])
   }
 
   const canContinue =
@@ -97,6 +116,9 @@ export function SetupScreen() {
     const roundPlayers = await Promise.all(
       players.map(async (p) => {
         const player = await playerRepo.upsertByName(activeUserId, p.name)
+        if (p.ghinNumber && !player.ghinNumber) {
+          await playerRepo.update(player.id, { ghinNumber: p.ghinNumber })
+        }
         const ch = computeCourseHandicap(p.handicapIndex, course, tee)
         await playerRepo.rememberHandicap(player.id, p.handicapIndex, ch)
         draftToReal.set(p.draftId, player.id)
@@ -266,6 +288,25 @@ export function SetupScreen() {
               Add
             </BigButton>
           </form>
+
+          <div>
+            <button
+              onClick={() => setShowGhin((v) => !v)}
+              className="font-display text-[10px] uppercase text-felt-400"
+            >
+              {showGhin ? '× Close GHIN lookup' : '🔍 Look up on GHIN'}
+            </button>
+            {showGhin && (
+              <div className="mt-2">
+                <PlayerSearch
+                  onPick={addPlayerFromGhin}
+                  addedGhins={
+                    new Set(players.map((p) => p.ghinNumber).filter((n): n is string => !!n))
+                  }
+                />
+              </div>
+            )}
+          </div>
 
           {roster && roster.length > 0 && (
             <div className="flex flex-wrap gap-2">
