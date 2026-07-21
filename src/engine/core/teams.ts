@@ -29,3 +29,20 @@ export function teamPartitionProblems(
     return [`Every player must be on exactly one ${gameName.toLowerCase()} team`]
   return []
 }
+
+/**
+ * Two non-empty sides that partition every player exactly once, [] when valid.
+ * Unlike teamPartitionProblems this permits uneven sides (e.g. Nassau 2v1);
+ * the engine settling it must keep the payout zero-sum across uneven sizes.
+ */
+export function nonEmptyPartitionProblems(
+  teams: Teams,
+  players: readonly RoundPlayer[],
+  gameName: string,
+): string[] {
+  if (teams.a.length === 0 || teams.b.length === 0)
+    return [`${gameName} needs a player on each side`]
+  if (!isPlayerPermutation([...teams.a, ...teams.b], players))
+    return [`Every player must be on exactly one ${gameName.toLowerCase()} side`]
+  return []
+}
