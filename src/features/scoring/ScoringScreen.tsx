@@ -109,9 +109,18 @@ export function ScoringScreen() {
   return (
     <main className="flex min-h-dvh select-none flex-col pb-40">
       <header className="flex items-center justify-between py-4">
-        <Link to="/" className="px-1 text-stone-400" aria-label="home">
-          ⌂
-        </Link>
+        <div className="flex items-center gap-3">
+          <Link to="/" className="px-1 text-stone-400" aria-label="home">
+            ⌂
+          </Link>
+          <Link
+            to={`/round/${round.id}/start`}
+            className="px-1 text-stone-400"
+            aria-label="round info"
+          >
+            ⓘ
+          </Link>
+        </div>
         <Link to={`/round/${round.id}/card`} className="text-sm font-medium text-stone-400">
           Scorecard
         </Link>

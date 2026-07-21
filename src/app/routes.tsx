@@ -3,6 +3,7 @@ import { AppLayout } from './AppLayout'
 import { HomeScreen } from '../features/home/HomeScreen'
 import { SetupScreen } from '../features/setup/SetupScreen'
 import { ScoringScreen } from '../features/scoring/ScoringScreen'
+import { RoundStartScreen } from '../features/scoring/RoundStartScreen'
 import { ScorecardScreen } from '../features/scoring/ScorecardScreen'
 import { SettleScreen } from '../features/settle/SettleScreen'
 import { CourseListScreen } from '../features/courses/CourseListScreen'
@@ -22,6 +23,7 @@ export const routes: RouteObject[] = [
       { path: '/courses/new', element: <CourseEditorScreen /> },
       { path: '/courses/:courseId/edit', element: <CourseEditorScreen /> },
       { path: '/round/:roundId', element: <ScoringScreen /> },
+      { path: '/round/:roundId/start', element: <RoundStartScreen /> },
       { path: '/round/:roundId/card', element: <ScorecardScreen /> },
       { path: '/round/:roundId/settle', element: <SettleScreen /> },
     ],
