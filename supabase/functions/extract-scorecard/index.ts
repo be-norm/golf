@@ -72,69 +72,31 @@ async function bumpDailyCount(uid: string): Promise<number> {
   return (await res.json()) as number
 }
 
-// --- extraction schema + prompt --------------------------------------------
-// Structured-outputs JSON schema. Every property is listed in `required` and
-// objects set additionalProperties:false (both required by strict mode); we
-// allow null for anything the card may not show. All real validation (dense
-// stroke-index permutation, par clamping, hole renumbering, neutral-tee
-// fallback) happens client-side in buildRemoteCourse — this schema only shapes
-// the model's output.
-const SCHEMA = {
-  type: 'object',
-  additionalProperties: false,
-  properties: {
-    name: { type: 'string' },
-    location: { type: ['string', 'null'] },
-    holeCount: { type: 'integer', enum: [9, 18] },
-    holes: {
-      type: 'array',
-      items: {
-        type: 'object',
-        additionalProperties: false,
-        properties: {
-          number: { type: 'integer' },
-          par: { type: 'integer' },
-          handicapIndex: { type: ['integer', 'null'] },
-        },
-        required: ['number', 'par', 'handicapIndex'],
-      },
-    },
-    teeSets: {
-      type: 'array',
-      items: {
-        type: 'object',
-        additionalProperties: false,
-        properties: {
-          name: { type: 'string' },
-          color: { type: ['string', 'null'] },
-          rating: { type: ['number', 'null'] },
-          slope: { type: ['integer', 'null'] },
-          yardages: { type: 'array', items: { type: ['integer', 'null'] } },
-        },
-        required: ['name', 'color', 'rating', 'slope', 'yardages'],
-      },
-    },
-  },
-  required: ['name', 'location', 'holeCount', 'holes', 'teeSets'],
-} as const
+// --- extraction prompt ------------------------------------------------------
+// We ask for raw JSON rather than using structured-output schema enforcement:
+// buildRemoteCourse on the client does all the real normalization (dense
+// stroke-index permutation, par clamp, hole renumber, neutral-tee fallback),
+// so a strict schema buys little and adds a failure surface. Opus follows an
+// explicit shape + "JSON only" reliably; the parser below is tolerant anyway.
+const PROMPT = `You are reading photo(s) of a golf scorecard. Extract the course data and respond with ONLY a single JSON object — no prose, no markdown, no code fences.
 
-const PROMPT = `You are reading photo(s) of a golf scorecard. Extract the course data as JSON.
+Use exactly this shape:
+{
+  "name": string,                 // course/club name printed on the card
+  "location": string | null,      // "City, ST" if shown, else null
+  "holeCount": 9 | 18,            // number of holes the card scores
+  "holes": [                      // one entry per hole, in playing order
+    { "number": integer, "par": integer, "handicapIndex": integer | null }
+  ],
+  "teeSets": [                    // one entry per tee/color column
+    { "name": string, "color": string | null, "rating": number | null, "slope": integer | null, "yardages": (integer | null)[] }
+  ]
+}
 
-- name: the course/club name printed on the card.
-- location: "City, ST" if shown, else null.
-- holeCount: 9 or 18 (the number of holes the card scores).
-- holes: one entry per hole, in order. par is the hole's par. handicapIndex is the
-  hole's stroke index / handicap rating (the "HDCP" or "Handicap" row) — use the MEN'S
-  row if both men's and women's are shown; null if not printed.
-- teeSets: one entry per tee/color column (e.g. Black, Blue, White, Gold, Red, and any
-  named combo like "Blue/White"). For each: name (the tee's name/color label), color
-  (a CSS color hex or name if implied by the label, else null), rating (Course Rating,
-  e.g. 71.2, else null), slope (Slope Rating, e.g. 128, else null), and yardages (one
-  yardage per hole, in hole order, aligned to the holes array; use null for any hole
-  whose yardage you cannot read).
-
-Read carefully and align every per-hole array to the hole order. If a value isn't on the
-card, use null rather than guessing. Do not invent tees or holes that aren't printed.`
+Guidance:
+- handicapIndex is the hole's stroke index (the "HDCP"/"Handicap" row); use the MEN'S row if both men's and women's are shown; null if not printed.
+- A tee set is each named tee/color column (e.g. Black, Blue, White, Gold, Red, and named combos like "Blue/White"). name = its label; color = a CSS color name/hex if implied, else null; rating = Course Rating (e.g. 71.2); slope = Slope Rating (e.g. 128); yardages = one yardage per hole, aligned to the holes order, null where unreadable.
+- Align every per-hole array to the hole order. If a value isn't on the card, use null rather than guessing. Do not invent tees or holes that aren't printed.`
 
 interface ImageInput {
   media_type?: string
@@ -200,7 +162,6 @@ Deno.serve(async (req: Request) => {
       body: JSON.stringify({
         model: MODEL,
         max_tokens: 8000,
-        output_config: { format: { type: 'json_schema', name: 'course_scorecard', schema: SCHEMA } },
         messages: [{ role: 'user', content }],
       }),
     })
@@ -210,7 +171,9 @@ Deno.serve(async (req: Request) => {
 
   if (!res.ok) {
     const detail = await res.text().catch(() => '')
-    return json({ error: `vision request failed (${res.status})`, detail: detail.slice(0, 400) }, 502)
+    console.error('anthropic error', res.status, detail)
+    // Surface the real Anthropic message so failures are diagnosable from the app.
+    return json({ error: `vision request failed (${res.status}): ${detail.slice(0, 300)}` }, 502)
   }
 
   const data = (await res.json()) as {
@@ -227,7 +190,7 @@ Deno.serve(async (req: Request) => {
   try {
     draft = JSON.parse(text)
   } catch {
-    // Structured outputs should return clean JSON; be tolerant if it's fenced.
+    // Tolerate stray prose / code fences around the JSON object.
     const match = text.match(/\{[\s\S]*\}/)
     if (!match) return json({ error: 'scan returned unreadable data' }, 422)
     try {
