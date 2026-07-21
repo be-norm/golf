@@ -100,6 +100,23 @@ export function GameConfigCard({ engine, playable, players, draft, onToggle, onC
               {draft.handicap.mode === 'net' ? 'Net' : 'Gross'}
             </button>
           </div>
+
+          {draft.handicap.mode === 'net' && (
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="font-medium">Allowance</p>
+                <p className="text-xs text-stone-400">% of course handicap given</p>
+              </div>
+              <Stepper
+                value={draft.handicap.allowancePct}
+                min={50}
+                max={100}
+                step={5}
+                onChange={(v) => onChange({ ...draft, handicap: { ...draft.handicap, allowancePct: v } })}
+                format={(v) => `${v}%`}
+              />
+            </div>
+          )}
         </div>
       )}
     </div>

@@ -238,8 +238,11 @@ export function ScoringScreen() {
             return (
               <div key={g.gameId}>
                 <div className="mb-2.5 flex items-baseline justify-between">
-                  <h3 className="font-display text-xs uppercase text-felt-300">
+                  <h3 className="font-display flex items-baseline gap-2 text-xs uppercase text-felt-300">
                     {gameName(g.type)}
+                    {g.handicap.mode === 'net' && g.handicap.allowancePct !== 100 && (
+                      <span className="text-[10px] text-stone-400">{g.handicap.allowancePct}%</span>
+                    )}
                   </h3>
                   <button
                     aria-label={`${g.type} rules`}
