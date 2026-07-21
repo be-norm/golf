@@ -159,7 +159,7 @@ export function SetupScreen() {
       schemaVersion: 1,
       userId: activeUserId,
     })
-    navigate(`/round/${roundId}`, { replace: true })
+    navigate(`/round/${roundId}/start`, { replace: true })
   }
 
   return (
