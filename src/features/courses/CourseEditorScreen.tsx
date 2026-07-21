@@ -5,6 +5,7 @@ import type { Course, TeeSet } from '../../engine/core/types'
 import { courseRepo } from '../../db/repos'
 import { newId } from '../../db/ids'
 import { enqueuePushCourse } from '../../remote/outbox'
+import { isStrokeIndexPermutation } from '../../engine/core/tees'
 import { useAuth } from '../../auth/AuthProvider'
 import { BigButton } from '../../components/BigButton'
 import { selectOnFocus } from '../../components/inputs'
@@ -40,6 +41,8 @@ export function CourseEditorScreen() {
   // A scorecard scan navigates here with a pre-filled draft to review.
   const scannedDraft = (location.state as { draft?: Course } | null)?.draft
   const [draft, setDraft] = useState<Course | undefined>(() => scannedDraft)
+  // Which par/SI row the holes table edits: the course-wide default, or a tee id.
+  const [teeTab, setTeeTab] = useState<'default' | string>('default')
 
   if (!isNew && existing === undefined) return null
   const course = draft ?? (isNew ? blankCourse(18) : (existing ?? undefined))
@@ -59,9 +62,32 @@ export function CourseEditorScreen() {
   const updateTee = (idx: number, patch: Partial<TeeSet>) =>
     update({ teeSets: course.teeSets.map((t, i) => (i === idx ? { ...t, ...patch } : t)) })
 
-  // SI must be a permutation of 1..N
-  const siSorted = [...course.holes.map((h) => h.strokeIndex)].sort((a, b) => a - b)
-  const siValid = siSorted.every((si, i) => si === i + 1)
+  // The holes table edits either the course-wide default (HoleCore) or one tee's
+  // own per-hole row (`teeTab`); a tee with no row shows the default values as
+  // its starting point, and editing materializes its array.
+  const teeIdx = course.teeSets.findIndex((t) => t.id === teeTab)
+  const activeTee = teeIdx >= 0 ? course.teeSets[teeIdx] : undefined
+  const activePars = activeTee?.pars ?? course.holes.map((h) => h.par)
+  const activeSIs = activeTee?.strokeIndexes ?? course.holes.map((h) => h.strokeIndex)
+
+  const setHolePar = (i: number, par: number) => {
+    if (!activeTee) return updateHole(i, { par })
+    const pars = [...activePars]
+    pars[i] = par
+    updateTee(teeIdx, { pars })
+  }
+  const setHoleSI = (i: number, strokeIndex: number) => {
+    if (!activeTee) return updateHole(i, { strokeIndex })
+    const strokeIndexes = [...activeSIs]
+    strokeIndexes[i] = strokeIndex
+    updateTee(teeIdx, { strokeIndexes })
+  }
+
+  const activeSiValid = isStrokeIndexPermutation(activeSIs)
+  // Save requires every stroke-index row (default + any per-tee rows) valid.
+  const siValid =
+    isStrokeIndexPermutation(course.holes.map((h) => h.strokeIndex)) &&
+    course.teeSets.every((t) => !t.strokeIndexes || isStrokeIndexPermutation(t.strokeIndexes))
   const nameValid = course.name.trim().length > 0
   const teesValid = course.teeSets.length > 0 && course.teeSets.every((t) => t.name.trim())
 
@@ -191,8 +217,37 @@ export function CourseEditorScreen() {
           <h2 className="font-display text-[10px] uppercase text-stone-400">
             Holes — par & stroke index
           </h2>
-          {!siValid && <span className="text-xs text-flag-500">SI must use 1–{course.holeCount} once each</span>}
+          {!activeSiValid && (
+            <span className="text-xs text-flag-500">SI must use 1–{course.holeCount} once each</span>
+          )}
         </div>
+        {/* Which row to edit: the course-wide default, or a specific tee's own
+            par/SI (when the card rates tees separately). */}
+        <div className="mb-2 flex flex-wrap gap-1">
+          {(['default', ...course.teeSets.map((t) => t.id)] as const).map((id) => {
+            const tee = id === 'default' ? undefined : course.teeSets.find((t) => t.id === id)
+            const isActive = id === 'default' ? !activeTee : activeTee?.id === id
+            const hasOwn = !!(tee?.strokeIndexes || tee?.pars)
+            return (
+              <button
+                key={id}
+                onClick={() => setTeeTab(id)}
+                className={`rounded-lg px-3 py-1.5 text-xs font-semibold ring-1 ${
+                  isActive ? 'bg-felt-800 ring-felt-500' : 'bg-stone-900 ring-stone-700 text-stone-400'
+                }`}
+              >
+                {id === 'default' ? 'Default' : (tee?.name || 'Tee')}
+                {hasOwn && <span className="ml-1 text-felt-400">•</span>}
+              </button>
+            )
+          })}
+        </div>
+        {activeTee && (
+          <p className="mb-2 text-xs text-stone-500">
+            Editing the {activeTee.name || 'tee'} tee's own par & SI. Tees without their own row use
+            Default.
+          </p>
+        )}
         <div className="overflow-hidden rounded-2xl ring-1 ring-stone-800">
           <table className="w-full text-center text-sm tabular-nums">
             <thead className="bg-stone-900 text-xs uppercase tracking-wide text-stone-500">
@@ -211,9 +266,9 @@ export function CourseEditorScreen() {
                       {[3, 4, 5].map((p) => (
                         <button
                           key={p}
-                          onClick={() => updateHole(i, { par: p })}
+                          onClick={() => setHolePar(i, p)}
                           className={`size-9 rounded-lg text-sm font-bold ${
-                            hole.par === p
+                            activePars[i] === p
                               ? 'bg-felt-700 text-white'
                               : 'bg-stone-800 text-stone-400'
                           }`}
@@ -230,11 +285,11 @@ export function CourseEditorScreen() {
                       onFocus={selectOnFocus}
                       min={1}
                       max={course.holeCount}
-                      value={hole.strokeIndex}
+                      value={activeSIs[i]}
                       aria-label={`hole ${hole.number} stroke index`}
-                      onChange={(e) => updateHole(i, { strokeIndex: Number(e.target.value) })}
+                      onChange={(e) => setHoleSI(i, Number(e.target.value))}
                       className={`min-h-9 w-14 rounded-lg bg-stone-800 px-2 text-center ring-1 focus:outline-none ${
-                        course.holes.filter((h) => h.strokeIndex === hole.strokeIndex).length > 1
+                        activeSIs.filter((s) => s === activeSIs[i]).length > 1
                           ? 'ring-flag-600 text-flag-500'
                           : 'ring-stone-700'
                       }`}

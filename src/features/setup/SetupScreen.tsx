@@ -4,6 +4,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import '../../engine/games'
 import { getEngine, listEngines } from '../../engine/catalog'
 import { courseHandicap } from '../../engine/core/handicap'
+import { applyTee, teePar } from '../../engine/core/tees'
 import type { Course, GameConfig, RoundHoles, TeeSet } from '../../engine/core/types'
 import { courseRepo, playerRepo, roundRepo } from '../../db/repos'
 import { LOCAL_USER, newId } from '../../db/ids'
@@ -33,8 +34,8 @@ const nextDraftId = () => `draft-${++draftCounter}-${Math.random().toString(36).
 
 function computeCourseHandicap(index: number, course: Course | undefined, tee: TeeSet | undefined): number {
   if (!course || !tee) return Math.round(index)
-  const par = course.holes.reduce((a, h) => a + h.par, 0)
-  return courseHandicap(index, tee.slope, tee.rating, par)
+  // Use the selected tee's own par (a "4/3" hole scores as its tee-specific par).
+  return courseHandicap(index, tee.slope, tee.rating, teePar(course, tee))
 }
 
 export function SetupScreen() {
@@ -148,7 +149,9 @@ export function SetupScreen() {
     await roundRepo.put({
       id: roundId,
       courseId: course.id,
-      courseSnapshot: course,
+      // Freeze the PLAYED tee's stroke index / par into the snapshot so the
+      // engine (which reads courseSnapshot.holes) scores off the right tee.
+      courseSnapshot: applyTee(course, tee),
       teeSetId,
       holes,
       players: roundPlayers,
