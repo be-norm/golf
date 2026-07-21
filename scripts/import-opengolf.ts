@@ -10,7 +10,7 @@
  * archived at data/opengolfapi-us.ndjson.gz; this script is the transform.
  */
 import { readFileSync } from 'node:fs'
-import { buildRemoteCourse } from '../src/remote/transform'
+import { buildRemoteCourse, usableHoleRows } from '../src/remote/transform'
 
 const SUPABASE_URL = 'https://xbdsssnjphbxequhlazu.supabase.co'
 const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
@@ -34,14 +34,18 @@ const lines = readFileSync(path, 'utf8').split('\n').filter(Boolean)
 const rows: object[] = []
 for (const line of lines) {
   const p = (JSON.parse(line) as DumpFeature).properties
-  const sc = p.scorecard ?? []
-  if ((p.holes !== 9 && p.holes !== 18) || sc.length !== p.holes) continue
+  // Tolerate junk/duplicate rows (keep the real 9 or 18 using the declared count).
+  const sc = usableHoleRows(
+    (p.scorecard ?? []).map((h) => ({ number: h.hole, par: h.par, handicap_index: h.handicap_index })),
+    p.holes,
+  )
+  if (sc.length !== 9 && sc.length !== 18) continue
   const course = buildRemoteCourse({
     id: p.id,
     name: p.name,
     city: p.city,
     state: p.state,
-    holes: sc.map((h) => ({ number: h.hole, par: h.par, handicapIndex: h.handicap_index })),
+    holes: sc.map((h) => ({ number: h.number, par: h.par, handicapIndex: h.handicap_index })),
   })
   rows.push({
     id: course.id,

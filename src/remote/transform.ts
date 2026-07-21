@@ -20,6 +20,24 @@ export interface RawTee {
 }
 
 /**
+ * Drop spurious hole rows some providers include — junk trailing entries or
+ * duplicate hole numbers — using the provider's own hole count, so a clean 9 or
+ * 18 survives instead of the whole course being rejected. (OpenGolfAPI's Penmar,
+ * for example, is a 9-hole course whose scorecard array carries two junk extra
+ * rows, which the old exact-length check rejected outright.)
+ */
+export function usableHoleRows<T extends { number: number }>(rows: T[], holeCount?: number): T[] {
+  const target = holeCount === 9 || holeCount === 18 ? holeCount : null
+  const seen = new Set<number>()
+  return rows.filter((h) => {
+    if (target !== null && (h.number < 1 || h.number > target)) return false
+    if (seen.has(h.number)) return false
+    seen.add(h.number)
+    return true
+  })
+}
+
+/**
  * Normalize messy source scorecards into our invariant-holding shape:
  * holes renumbered 1..N in source order, stroke indexes repaired into a
  * dense permutation (rank by claimed index, stable by position).

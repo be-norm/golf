@@ -4,7 +4,37 @@ import { describe, expect, it, vi } from 'vitest'
 // (createClient at load) — stub it so the test doesn't need real env.
 vi.mock('./supabase', () => ({ supabase: {} }))
 
-import { mergeCourseHits, type CourseSearchHit } from './courseSearch'
+import { golfApiName, isDoubledNine, mergeCourseHits, type CourseSearchHit } from './courseSearch'
+
+describe('isDoubledNine (GolfCourseAPI 9-hole stored as 18)', () => {
+  const nine = [281, 355, 139, 298, 208, 436, 342, 162, 361].map((yardage) => ({ par: 4, yardage }))
+  it('detects the nine played twice (front == back)', () => {
+    expect(isDoubledNine([...nine, ...nine])).toBe(true)
+  })
+  it('is false for a genuine 18 with distinct nines', () => {
+    const rows = Array.from({ length: 18 }, (_, i) => ({ par: 4, yardage: 300 + i }))
+    expect(isDoubledNine(rows)).toBe(false)
+  })
+  it('is false when not exactly 18 rows', () => {
+    expect(isDoubledNine(nine)).toBe(false)
+  })
+})
+
+describe('golfApiName', () => {
+  it('uses a single name when club == course', () => {
+    expect(golfApiName('Penmar Municipal Golf Course', 'Penmar Municipal Golf Course')).toBe(
+      'Penmar Municipal Golf Course',
+    )
+  })
+  it('joins club and course when they differ', () => {
+    expect(golfApiName('Broadmoor', 'East Course')).toBe('Broadmoor — East Course')
+  })
+  it('falls back to whichever side is present', () => {
+    expect(golfApiName(undefined, 'X')).toBe('X')
+    expect(golfApiName('Y', undefined)).toBe('Y')
+    expect(golfApiName('', '  ')).toBe('')
+  })
+})
 
 const hit = (
   id: string,
