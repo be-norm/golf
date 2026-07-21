@@ -15,6 +15,13 @@ export interface TeeSet {
   rating: number
   slope: number
   yardages?: number[]
+  /** Per-hole stroke index for THIS tee (1 = hardest), when the card/API rates
+   *  tees separately. Falls back to HoleCore.strokeIndex when absent. Length
+   *  matches the course's holes; a valid 1..n permutation. */
+  strokeIndexes?: number[]
+  /** Per-hole par for THIS tee, when it differs by tee (e.g. a short hole that
+   *  plays as a par 3 from a forward tee). Falls back to HoleCore.par. */
+  pars?: number[]
 }
 
 export interface Course {

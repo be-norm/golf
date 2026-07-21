@@ -13,6 +13,10 @@ export interface RawTee {
   rating?: number | null
   slope?: number | null
   yardages?: (number | undefined)[]
+  /** This tee's own per-hole stroke-index row, when rated per tee. */
+  strokeIndexes?: (number | undefined)[]
+  /** This tee's own per-hole par, when it varies by tee. */
+  pars?: (number | undefined)[]
 }
 
 /**
@@ -46,6 +50,11 @@ export function buildRemoteCourse(input: {
 }): Course {
   const holes = normalizeHoles(input.holes)
   const par = holes.reduce((a, h) => a + h.par, 0)
+  const n = holes.length
+  // All-or-nothing per-tee arrays, aligned to the (renumbered) hole order:
+  // stroke indexes are re-ranked into a clean 1..n permutation; pars clamped 3–6.
+  const complete = (xs: (number | undefined)[] | undefined): xs is number[] =>
+    !!xs && xs.length === n && xs.every((x) => typeof x === 'number')
   const teeSets: TeeSet[] =
     input.tees && input.tees.length > 0
       ? input.tees.map((t, i) => ({
@@ -54,8 +63,12 @@ export function buildRemoteCourse(input: {
           color: t.color ?? undefined,
           rating: t.rating ?? par,
           slope: t.slope ?? 113,
-          yardages: t.yardages?.every((y) => y !== undefined)
-            ? (t.yardages as number[])
+          yardages: complete(t.yardages) ? t.yardages : undefined,
+          strokeIndexes: complete(t.strokeIndexes)
+            ? rankStrokeIndexes(t.strokeIndexes)
+            : undefined,
+          pars: complete(t.pars)
+            ? t.pars.map((p) => (p >= 3 && p <= 6 ? p : 4))
             : undefined,
         }))
       : [{ id: 'tee-standard', name: 'Standard', rating: par, slope: 113 }]

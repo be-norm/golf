@@ -22,6 +22,8 @@ interface ScanDraft {
     rating?: number | null
     slope?: number | null
     yardages?: (number | null)[]
+    strokeIndexes?: (number | null)[]
+    pars?: (number | null)[]
   }[]
 }
 
@@ -71,6 +73,8 @@ export async function scanScorecard(files: File[]): Promise<Course> {
       rating: t.rating ?? undefined,
       slope: t.slope ?? undefined,
       yardages: t.yardages?.map((y) => y ?? undefined),
+      strokeIndexes: t.strokeIndexes?.map((s) => s ?? undefined),
+      pars: t.pars?.map((p) => p ?? undefined),
     })),
   })
 

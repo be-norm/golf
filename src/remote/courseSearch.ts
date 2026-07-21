@@ -245,6 +245,9 @@ async function importFromGolfCourseApi(hit: CourseSearchHit): Promise<Course> {
     rating: t.course_rating,
     slope: t.slope_rating,
     yardages: t.holes?.map((h) => h.yardage ?? undefined),
+    // GolfCourseAPI rates each tee separately, so per-hole handicap/par are per tee.
+    strokeIndexes: t.holes?.map((h) => h.handicap ?? undefined),
+    pars: t.holes?.map((h) => h.par ?? undefined),
   }))
   const built = buildRemoteCourse({
     id: hit.id, // keep the namespaced id so re-imports dedupe locally

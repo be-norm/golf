@@ -89,13 +89,17 @@ Use exactly this shape:
     { "number": integer, "par": integer, "handicapIndex": integer | null }
   ],
   "teeSets": [                    // one entry per tee/color column
-    { "name": string, "color": string | null, "rating": number | null, "slope": integer | null, "yardages": (integer | null)[] }
+    { "name": string, "color": string | null, "rating": number | null, "slope": integer | null,
+      "yardages": (integer | null)[], "strokeIndexes": (integer | null)[], "pars": (integer | null)[] }
   ]
 }
 
 Guidance:
-- handicapIndex is the hole's stroke index (the "HDCP"/"Handicap" row); use the MEN'S row if both men's and women's are shown; null if not printed.
-- A tee set is each named tee/color column (e.g. Black, Blue, White, Gold, Red, and named combos like "Blue/White"). name = its label; color = a CSS color name/hex if implied, else null; rating = Course Rating (e.g. 71.2); slope = Slope Rating (e.g. 128); yardages = one yardage per hole, aligned to the holes order, null where unreadable.
+- Top-level "holes": par is the hole's primary par; handicapIndex is a representative stroke index for the hole (use the back/men's Handicap row if several are shown; null if none).
+- A tee set is each named tee/color column (e.g. Black, Blue, White, Gold, Red, and named combos like "Blue/White"). name = its label; color = a CSS color name/hex if implied, else null; rating = Course Rating (e.g. 71.2); slope = Slope Rating (e.g. 128).
+- yardages = one yardage per hole for THIS tee, aligned to the holes order, null where unreadable.
+- strokeIndexes = THIS tee's own Handicap/stroke-index row. Many cards print a separate "Handicap" row under each tee and they often DIFFER between tees — read each tee's own row. If the card has just one shared Handicap row, use it for every tee. One value per hole, aligned to holes order.
+- pars = THIS tee's par per hole. Usually identical across tees, but a hole printed like "4/3" plays as a different par depending on the tee's length — assign the value matching THIS tee's yardage (a short forward-tee hole can be a par 3 where the back tees are par 4). One value per hole, aligned to holes order.
 - Align every per-hole array to the hole order. If a value isn't on the card, use null rather than guessing. Do not invent tees or holes that aren't printed.`
 
 interface ImageInput {
