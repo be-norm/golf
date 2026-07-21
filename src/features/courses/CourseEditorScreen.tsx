@@ -1,9 +1,11 @@
 import { useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router'
+import { Link, useLocation, useNavigate, useParams } from 'react-router'
 import { useLiveQuery } from 'dexie-react-hooks'
 import type { Course, TeeSet } from '../../engine/core/types'
 import { courseRepo } from '../../db/repos'
 import { newId } from '../../db/ids'
+import { enqueuePushCourse } from '../../remote/outbox'
+import { useAuth } from '../../auth/AuthProvider'
 import { BigButton } from '../../components/BigButton'
 import { selectOnFocus } from '../../components/inputs'
 
@@ -29,11 +31,15 @@ export function CourseEditorScreen() {
   const { courseId } = useParams<{ courseId: string }>()
   const isNew = courseId === undefined
   const navigate = useNavigate()
+  const location = useLocation()
+  const { isGuest, activeUserId } = useAuth()
   const existing = useLiveQuery(
     () => (isNew ? Promise.resolve(null) : courseRepo.get(courseId)),
     [courseId],
   )
-  const [draft, setDraft] = useState<Course>()
+  // A scorecard scan navigates here with a pre-filled draft to review.
+  const scannedDraft = (location.state as { draft?: Course } | null)?.draft
+  const [draft, setDraft] = useState<Course | undefined>(() => scannedDraft)
 
   if (!isNew && existing === undefined) return null
   const course = draft ?? (isNew ? blankCourse(18) : (existing ?? undefined))
@@ -60,11 +66,19 @@ export function CourseEditorScreen() {
   const teesValid = course.teeSets.length > 0 && course.teeSets.every((t) => t.name.trim())
 
   const save = async () => {
+    // Publish to the shared library only for genuinely user-authored courses:
+    // a brand-new course (manual or scanned) or one that was already 'user'.
+    // Editing an imported (seed/API) course saves locally but is NOT republished.
+    const publishable = isNew || existing?.source === 'user'
     await courseRepo.put({
       ...course,
       name: course.name.trim(),
       source: 'user',
     })
+    if (!isGuest && publishable) {
+      const saved = await courseRepo.get(course.id)
+      if (saved) await enqueuePushCourse(activeUserId, saved)
+    }
     navigate('/courses')
   }
 
