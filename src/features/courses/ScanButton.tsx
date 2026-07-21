@@ -50,16 +50,17 @@ export function ScanButton({ className = '' }: { className?: string }) {
       </button>
       {!busy && (
         <p className="mt-1 text-xs text-stone-500">
-          Lay the card flat, avoid glare. For 18 holes, shoot the front & back nine as two
-          separate close-ups — sharper numbers scan more accurately.
+          Lay the card flat, avoid glare. One photo is fine — for an 18-hole card, take separate
+          close-ups of the front and back nine and select both here for sharper numbers.
         </p>
       )}
       {error && <p className="mt-2 text-sm text-flag-500">{error}</p>}
+      {/* No `capture` attribute: it forces a single camera shot and overrides
+          `multiple` on iOS. The plain picker lets you take one OR select two. */}
       <input
         ref={input}
         type="file"
         accept="image/*"
-        capture="environment"
         multiple
         hidden
         onChange={(e) => void onFiles(e.target.files)}
