@@ -10,7 +10,6 @@ import { LOCAL_USER } from '../../db/ids'
 import { enqueueDeleteRound } from '../../remote/outbox'
 import { useRound } from '../scoring/useRound'
 import { BigButton } from '../../components/BigButton'
-import { GameSummary } from '../../components/GameSummary'
 import { DetailLines } from '../../components/DetailLines'
 import { buildExport, downloadExport } from './exportRound'
 
@@ -18,7 +17,6 @@ export function SettleScreen() {
   const { roundId } = useParams<{ roundId: string }>()
   const navigate = useNavigate()
   const view = useRound(roundId)
-  const [expanded, setExpanded] = useState<string>()
   const [confirmDelete, setConfirmDelete] = useState(false)
 
   if (view === undefined) return null
@@ -157,38 +155,26 @@ export function SettleScreen() {
         {round.games.map((g) => {
           const d = derivations.get(g.gameId)
           if (!d) return null
-          const open = expanded === g.gameId
           return (
-            <div key={g.gameId} className="pixel border-stone-700 bg-stone-900/70">
-              <button
-                className="flex w-full flex-col gap-1.5 px-4 py-3 text-left"
-                onClick={() => setExpanded(open ? undefined : g.gameId)}
-              >
-                <span className="flex w-full items-baseline justify-between gap-2">
-                  <span className="font-display flex items-baseline gap-2 text-xs uppercase text-felt-300">
-                    {getEngine(g.type)?.meta.name ?? g.type}
-                    {g.handicap.mode === 'net' && g.handicap.allowancePct !== 100 && (
-                      <span className="text-stone-400">{g.handicap.allowancePct}%</span>
-                    )}
-                  </span>
-                  <span className="shrink-0 text-stone-500">{open ? '▼' : '▶'}</span>
-                </span>
-                <GameSummary derivation={d} />
-              </button>
-              {open && (
-                <div className="border-t-2 border-stone-800 px-4 py-3">
-                  {d.detailLines && d.detailLines.length > 0 && (
-                    <div className="mb-3">
-                      <DetailLines lines={d.detailLines} valueClass="text-stone-300" />
-                    </div>
-                  )}
-                  <ul className="space-y-1 text-lg text-stone-300">
-                    {d.settlement.lines.map((line, i) => (
-                      <li key={i}>{line.label}</li>
-                    ))}
-                    {d.settlement.lines.length === 0 && <li className="text-stone-500">No money moved.</li>}
-                  </ul>
-                </div>
+            <div key={g.gameId} className="pixel border-stone-700 bg-stone-900/70 px-4 py-3">
+              <div className="font-display mb-2 flex items-baseline gap-2 text-xs uppercase text-felt-300">
+                {getEngine(g.type)?.meta.name ?? g.type}
+                {g.handicap.mode === 'net' && g.handicap.allowancePct !== 100 && (
+                  <span className="text-stone-400">{g.handicap.allowancePct}%</span>
+                )}
+              </div>
+              {/* Nassau ships a per-bet ledger (F9/B9/18 + presses) — the complete
+                  breakdown. Games without one fall back to their money lines. */}
+              {d.detailLines && d.detailLines.length > 0 ? (
+                <DetailLines lines={d.detailLines} valueClass="text-stone-300" />
+              ) : d.settlement.lines.length > 0 ? (
+                <ul className="space-y-1 text-lg text-stone-300">
+                  {d.settlement.lines.map((line, i) => (
+                    <li key={i}>{line.label}</li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-stone-500">No money moved.</p>
               )}
             </div>
           )
