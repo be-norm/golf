@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
 import { motion } from 'motion/react'
+import '../../engine/games'
+import { getEngine } from '../../engine/catalog'
 import { formatCents, formatCentsSigned, minimalTransfers } from '../../engine/core/money'
 import { eventStore } from '../../db/eventStore'
 import { roundRepo } from '../../db/repos'
@@ -43,6 +45,18 @@ export function SettleScreen() {
     }
   }
   const transfers = minimalTransfers(combined)
+  // group transfers by who collects: one header per creditor (with their total),
+  // debtors listed beneath — reads cleanly when one player collects from several
+  const collectors = [
+    ...transfers.reduce((m, t) => {
+      const g = m.get(t.toPlayerId) ?? { total: 0, from: [] as { id: string; cents: number }[] }
+      g.total += t.cents
+      g.from.push({ id: t.fromPlayerId, cents: t.cents })
+      return m.set(t.toPlayerId, g)
+    }, new Map<string, { total: number; from: { id: string; cents: number }[] }>()),
+  ]
+    .map(([toId, g]) => ({ toId, ...g }))
+    .sort((a, b) => b.total - a.total)
   const ranked = [...round.players].sort(
     (a, b) => (combined[b.playerId] ?? 0) - (combined[a.playerId] ?? 0),
   )
@@ -108,16 +122,31 @@ export function SettleScreen() {
         </ul>
       </section>
 
-      {transfers.length > 0 && (
+      {collectors.length > 0 && (
         <section className="pixel border-stone-700 bg-stone-900/70 p-5">
           <h2 className="font-display mb-3 text-[10px] uppercase text-stone-400">Settle up</h2>
-          <ul className="space-y-2">
-            {transfers.map((t) => (
-              <li key={`${t.fromPlayerId}-${t.toPlayerId}`} className="flex items-center gap-2 text-lg">
-                <span className="font-medium">{nameOf.get(t.fromPlayerId)}</span>
-                <span className="text-stone-500">▶ pays ▶</span>
-                <span className="font-medium">{nameOf.get(t.toPlayerId)}</span>
-                <span className="font-display ml-auto text-xs text-coin-400">{formatCents(t.cents)}</span>
+          <ul className="space-y-4">
+            {collectors.map((c) => (
+              <li key={c.toId}>
+                <div className="flex items-baseline justify-between gap-3">
+                  <span className="text-lg font-medium">{nameOf.get(c.toId)} collects</span>
+                  <span className="font-display shrink-0 text-lg tabular-nums text-coin-400">
+                    {formatCents(c.total)}
+                  </span>
+                </div>
+                <ul className="mt-1.5 space-y-1 border-l-2 border-stone-800 pl-3">
+                  {c.from.map((f) => (
+                    <li key={f.id} className="flex items-baseline justify-between gap-3 text-stone-300">
+                      <span className="min-w-0 truncate">
+                        <span className="mr-1 text-stone-600">←</span>
+                        {nameOf.get(f.id)}
+                      </span>
+                      <span className="font-display shrink-0 text-sm tabular-nums text-stone-400">
+                        {formatCents(f.cents)}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
               </li>
             ))}
           </ul>
@@ -132,18 +161,19 @@ export function SettleScreen() {
           return (
             <div key={g.gameId} className="pixel border-stone-700 bg-stone-900/70">
               <button
-                className="flex w-full items-center justify-between px-4 py-3"
+                className="flex w-full flex-col gap-1.5 px-4 py-3 text-left"
                 onClick={() => setExpanded(open ? undefined : g.gameId)}
               >
-                <span className="font-display flex items-baseline gap-2 text-[10px] uppercase text-felt-300">
-                  {g.type}
-                  {g.handicap.mode === 'net' && g.handicap.allowancePct !== 100 && (
-                    <span className="text-stone-400">{g.handicap.allowancePct}%</span>
-                  )}
+                <span className="flex w-full items-baseline justify-between gap-2">
+                  <span className="font-display flex items-baseline gap-2 text-xs uppercase text-felt-300">
+                    {getEngine(g.type)?.meta.name ?? g.type}
+                    {g.handicap.mode === 'net' && g.handicap.allowancePct !== 100 && (
+                      <span className="text-stone-400">{g.handicap.allowancePct}%</span>
+                    )}
+                  </span>
+                  <span className="shrink-0 text-stone-500">{open ? '▼' : '▶'}</span>
                 </span>
-                <span className="flex items-baseline gap-2 text-lg text-stone-400">
-                  <GameSummary derivation={d} /> {open ? '▼' : '▶'}
-                </span>
+                <GameSummary derivation={d} />
               </button>
               {open && (
                 <div className="border-t-2 border-stone-800 px-4 py-3">
