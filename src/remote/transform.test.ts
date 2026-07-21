@@ -1,5 +1,24 @@
 import { describe, expect, it } from 'vitest'
-import { buildRemoteCourse } from './transform'
+import { buildRemoteCourse, usableHoleRows } from './transform'
+
+describe('usableHoleRows', () => {
+  it('drops junk trailing rows using the declared count (Penmar: 11 rows, holes=9)', () => {
+    const rows = Array.from({ length: 11 }, (_, i) => ({ number: i + 1, par: 4 }))
+    expect(usableHoleRows(rows, 9).map((r) => r.number)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9])
+  })
+  it('keeps a clean 18 untouched', () => {
+    const rows = Array.from({ length: 18 }, (_, i) => ({ number: i + 1, par: 4 }))
+    expect(usableHoleRows(rows, 18)).toHaveLength(18)
+  })
+  it('dedupes duplicate hole numbers', () => {
+    const rows = [{ number: 1 }, { number: 1 }, { number: 2 }]
+    expect(usableHoleRows(rows, 9).map((r) => r.number)).toEqual([1, 2])
+  })
+  it('with no usable count, only dedupes by number (keeps out-of-range)', () => {
+    const rows = [{ number: 1 }, { number: 2 }, { number: 10 }]
+    expect(usableHoleRows(rows).map((r) => r.number)).toEqual([1, 2, 10])
+  })
+})
 
 const holes = [
   { number: 1, par: 4, handicapIndex: 1 },

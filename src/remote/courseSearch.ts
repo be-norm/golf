@@ -1,7 +1,7 @@
 import type { Course } from '../engine/core/types'
 import { courseRepo } from '../db/repos'
 import { supabase } from './supabase'
-import { buildRemoteCourse, type RawTee } from './transform'
+import { buildRemoteCourse, usableHoleRows, type RawTee } from './transform'
 
 export interface CourseSearchHit {
   id: string
@@ -68,6 +68,24 @@ export function mergeCourseHits(groups: {
 const normKey = (name: string, location: string) =>
   `${name.toLowerCase().replace(/[^a-z0-9]/g, '')}|${location.toLowerCase().replace(/[^a-z0-9]/g, '')}`
 
+/** GolfCourseAPI stores some 9-hole courses as the nine played twice (front nine
+ *  == back nine). Detect it so we import 9 holes, not a mislabeled 18. */
+export function isDoubledNine(rows: { par?: number; yardage?: number | null }[]): boolean {
+  if (rows.length !== 18) return false
+  return Array.from({ length: 9 }).every(
+    (_, i) => rows[i]?.par === rows[i + 9]?.par && rows[i]?.yardage === rows[i + 9]?.yardage,
+  )
+}
+
+/** GolfCourseAPI display name — join club + course only when they differ, so an
+ *  identical pair doesn't become "Penmar Municipal … — Penmar Municipal …". */
+export function golfApiName(club?: string, course?: string): string {
+  const cl = club?.trim()
+  const co = course?.trim()
+  if (cl && co && cl !== co) return `${cl} — ${co}`
+  return co || cl || ''
+}
+
 // --- per-source searches (each best-effort → []) ----------------------------
 
 async function librarySearch(q: string): Promise<CourseSearchHit[]> {
@@ -111,11 +129,11 @@ async function openGolfSearch(q: string): Promise<CourseSearchHit[]> {
   }
 }
 
-// GolfCourseAPI (api.golfcourseapi.com). Free, email-issued key.
-// NOTE: response field names below are from the documented schema but were not
-// verified against a live key — confirm `courses[].{id,club_name,course_name,
-// location.city/state}` and the detail `course.tees.male[].{tee_name,
-// course_rating,slope_rating,holes[].{par,yardage,handicap}}` when a key is set.
+// GolfCourseAPI (api.golfcourseapi.com). Free, email-issued key. Shape confirmed
+// against live responses: search → courses[].{id,club_name,course_name,
+// location.{city,state}}; detail → course.tees.{male,female}[].{tee_name,
+// course_rating,slope_rating,holes[].{par,yardage,handicap}}. Note some 9-hole
+// courses come back as the nine doubled (18 rows) — handled by isDoubledNine.
 interface GolfApiSearchCourse {
   id: number | string
   club_name?: string
@@ -134,7 +152,7 @@ async function golfCourseApiSearch(q: string): Promise<CourseSearchHit[]> {
     const data = (await res.json()) as { courses?: GolfApiSearchCourse[] }
     return (data.courses ?? []).map((c) => ({
       id: `gca:${c.id}`, // namespace so it never collides with a UUID library/opengolf id
-      name: [c.club_name, c.course_name].filter(Boolean).join(' — ') || (c.course_name ?? ''),
+      name: golfApiName(c.club_name, c.course_name),
       location: [c.location?.city, c.location?.state].filter(Boolean).join(', '),
       origin: 'golfcourseapi' as const,
     }))
@@ -179,7 +197,9 @@ async function importFromOpenGolf(hit: CourseSearchHit): Promise<Course> {
     }[]
     holes_data?: { number: number; par: number; handicap_index?: number | null }[]
   }
-  const holesData = detail.holes_data ?? []
+  // Some records carry junk trailing rows (Penmar: holes:9 but an 11-row array);
+  // keep the real holes using the provider's own count instead of hard-rejecting.
+  const holesData = usableHoleRows(detail.holes_data ?? [], detail.holes)
   if (holesData.length !== 9 && holesData.length !== 18) {
     throw new Error('course has no usable scorecard — add it manually instead')
   }
@@ -232,7 +252,11 @@ async function importFromGolfCourseApi(hit: CourseSearchHit): Promise<Course> {
   // holes come from a tee's per-hole array (par + stroke index are the same
   // across tees); take the longest tee so a short/partial tee doesn't truncate.
   const holesTee = [...tees].sort((a, b) => (b.holes?.length ?? 0) - (a.holes?.length ?? 0))[0]
-  const holes = (holesTee?.holes ?? []).map((h, i) => ({
+  const holeRows = holesTee?.holes ?? []
+  // A 9-hole course stored as the nine played twice → collapse to 9, so it isn't
+  // mislabeled 18 holes. `keep` also trims every tee's per-hole arrays to match.
+  const keep = isDoubledNine(holeRows) ? 9 : holeRows.length
+  const holes = holeRows.slice(0, keep).map((h, i) => ({
     number: i + 1,
     par: h.par ?? 4,
     handicapIndex: h.handicap ?? null,
@@ -244,14 +268,14 @@ async function importFromGolfCourseApi(hit: CourseSearchHit): Promise<Course> {
     name: t.tee_name ?? 'Tee',
     rating: t.course_rating,
     slope: t.slope_rating,
-    yardages: t.holes?.map((h) => h.yardage ?? undefined),
+    yardages: t.holes?.slice(0, keep).map((h) => h.yardage ?? undefined),
     // GolfCourseAPI rates each tee separately, so per-hole handicap/par are per tee.
-    strokeIndexes: t.holes?.map((h) => h.handicap ?? undefined),
-    pars: t.holes?.map((h) => h.par ?? undefined),
+    strokeIndexes: t.holes?.slice(0, keep).map((h) => h.handicap ?? undefined),
+    pars: t.holes?.slice(0, keep).map((h) => h.par ?? undefined),
   }))
   const built = buildRemoteCourse({
     id: hit.id, // keep the namespaced id so re-imports dedupe locally
-    name: [course?.club_name, course?.course_name].filter(Boolean).join(' — ') || hit.name,
+    name: golfApiName(course?.club_name, course?.course_name) || hit.name,
     city: course?.location?.city,
     state: course?.location?.state,
     holes,
