@@ -33,6 +33,16 @@ export function PlayersScreen() {
   }
 
   const addFromGhin = async (hit: GhinPlayerHit) => {
+    // Dedupe by GHIN number: re-adding an already-saved golfer refreshes their
+    // handicap instead of creating a duplicate roster row.
+    const existing = (roster ?? []).find((p) => p.ghinNumber === hit.ghinNumber)
+    if (existing) {
+      if (hit.handicapIndex != null && hit.handicapIndex !== existing.handicapIndex) {
+        await playerRepo.update(existing.id, { handicapIndex: hit.handicapIndex })
+        await pushPlayer(existing.id)
+      }
+      return
+    }
     const p = await playerRepo.create(
       activeUserId,
       hit.fullName,
