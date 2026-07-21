@@ -72,12 +72,30 @@ function decodeJwtPayload(token: string): Record<string, unknown> | null {
   }
 }
 
-function isAuthenticatedCaller(req: Request): boolean {
+/**
+ * `ok` — a signed-in, allowlisted user.
+ * `unauthenticated` — no/invalid token, the anon key, or an anonymous user.
+ * `forbidden` — a real signed-in user who isn't on the GHIN allowlist.
+ *
+ * GHIN_ALLOWED_UIDS is a comma-separated list of auth uids; when set, only
+ * those users may search (keeps random signups off the shared GHIN login).
+ * When unset, any authenticated user is allowed (safe default so a missing
+ * secret can't lock everyone out).
+ */
+function callerStatus(req: Request): 'ok' | 'unauthenticated' | 'forbidden' {
   const auth = req.headers.get('Authorization')
   const token = auth?.startsWith('Bearer ') ? auth.slice(7) : null
-  if (!token) return false
+  if (!token) return 'unauthenticated'
   const payload = decodeJwtPayload(token)
-  return payload?.role === 'authenticated' && payload.is_anonymous !== true
+  if (!payload || payload.role !== 'authenticated' || payload.is_anonymous === true) {
+    return 'unauthenticated'
+  }
+  const allow = (Deno.env.get('GHIN_ALLOWED_UIDS') ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+  if (allow.length === 0) return 'ok'
+  return typeof payload.sub === 'string' && allow.includes(payload.sub) ? 'ok' : 'forbidden'
 }
 
 // --- GHIN session -----------------------------------------------------------
@@ -199,7 +217,11 @@ function normalize(g: RawGolfer): GhinPlayerHit {
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
   if (req.method !== 'POST') return json({ error: 'method not allowed' }, 405)
-  if (!isAuthenticatedCaller(req)) return json({ error: 'sign in to search GHIN' }, 401)
+  const caller = callerStatus(req)
+  if (caller === 'unauthenticated') return json({ error: 'sign in to search GHIN' }, 401)
+  if (caller === 'forbidden') {
+    return json({ error: 'this account is not authorized for GHIN lookup' }, 403)
+  }
 
   let params: SearchRequest
   try {
