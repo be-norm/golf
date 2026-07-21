@@ -3,12 +3,14 @@ interface StepperProps {
   onChange: (value: number) => void
   min?: number
   max?: number
+  /** increment per tap (default 1) */
+  step?: number
   format?: (value: number) => string
 }
 
-export function Stepper({ value, onChange, min, max, format }: StepperProps) {
-  const dec = () => onChange(min !== undefined ? Math.max(min, value - 1) : value - 1)
-  const inc = () => onChange(max !== undefined ? Math.min(max, value + 1) : value + 1)
+export function Stepper({ value, onChange, min, max, step = 1, format }: StepperProps) {
+  const dec = () => onChange(min !== undefined ? Math.max(min, value - step) : value - step)
+  const inc = () => onChange(max !== undefined ? Math.min(max, value + step) : value + step)
   return (
     <div className="flex items-center gap-1.5">
       <button

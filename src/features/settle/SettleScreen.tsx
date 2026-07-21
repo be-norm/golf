@@ -135,7 +135,12 @@ export function SettleScreen() {
                 className="flex w-full items-center justify-between px-4 py-3"
                 onClick={() => setExpanded(open ? undefined : g.gameId)}
               >
-                <span className="font-display text-[10px] uppercase text-felt-300">{g.type}</span>
+                <span className="font-display flex items-baseline gap-2 text-[10px] uppercase text-felt-300">
+                  {g.type}
+                  {g.handicap.mode === 'net' && g.handicap.allowancePct !== 100 && (
+                    <span className="text-stone-400">{g.handicap.allowancePct}%</span>
+                  )}
+                </span>
                 <span className="flex items-baseline gap-2 text-lg text-stone-400">
                   <GameSummary derivation={d} /> {open ? '▼' : '▶'}
                 </span>
