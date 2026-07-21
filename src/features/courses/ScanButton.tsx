@@ -48,6 +48,12 @@ export function ScanButton({ className = '' }: { className?: string }) {
       >
         {busy ? 'Reading scorecard…' : '📷 Scan scorecard'}
       </button>
+      {!busy && (
+        <p className="mt-1 text-xs text-stone-500">
+          Lay the card flat, avoid glare. For 18 holes, shoot the front & back nine as two
+          separate close-ups — sharper numbers scan more accurately.
+        </p>
+      )}
       {error && <p className="mt-2 text-sm text-flag-500">{error}</p>}
       <input
         ref={input}

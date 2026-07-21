@@ -85,9 +85,11 @@ export function CourseEditorScreen() {
 
   const activeSiValid = isStrokeIndexPermutation(activeSIs)
   // Save requires every stroke-index row (default + any per-tee rows) valid.
+  const invalidTee = course.teeSets.find(
+    (t) => t.strokeIndexes && !isStrokeIndexPermutation(t.strokeIndexes),
+  )
   const siValid =
-    isStrokeIndexPermutation(course.holes.map((h) => h.strokeIndex)) &&
-    course.teeSets.every((t) => !t.strokeIndexes || isStrokeIndexPermutation(t.strokeIndexes))
+    isStrokeIndexPermutation(course.holes.map((h) => h.strokeIndex)) && !invalidTee
   const nameValid = course.name.trim().length > 0
   const teesValid = course.teeSets.length > 0 && course.teeSets.every((t) => t.name.trim())
 
@@ -217,9 +219,13 @@ export function CourseEditorScreen() {
           <h2 className="font-display text-[10px] uppercase text-stone-400">
             Holes — par & stroke index
           </h2>
-          {!activeSiValid && (
+          {!activeSiValid ? (
             <span className="text-xs text-flag-500">SI must use 1–{course.holeCount} once each</span>
-          )}
+          ) : invalidTee ? (
+            <span className="text-xs text-flag-500">
+              Fix {invalidTee.name || 'a tee'}’s SI — 1–{course.holeCount} once each
+            </span>
+          ) : null}
         </div>
         {/* Which row to edit: the course-wide default, or a specific tee's own
             par/SI (when the card rates tees separately). */}

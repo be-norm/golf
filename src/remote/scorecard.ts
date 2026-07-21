@@ -27,6 +27,56 @@ interface ScanDraft {
   }[]
 }
 
+// Anthropic downsamples images past ~2576px on the long edge anyway, so we do it
+// client-side: smaller upload (well under the function's request-size limit), no
+// loss of detail vs. the server-side downsample, and it normalizes any
+// canvas-decodable format to JPEG.
+const MAX_EDGE = 2576
+
+/** Prepare one image for upload — resize/re-encode to JPEG, falling back to the
+ *  untouched file if anything about the canvas path fails (so a resize bug can
+ *  never break scanning). */
+function prepareImage(file: File): Promise<{ media_type: string; data: string }> {
+  return resizeToJpeg(file).catch(() => fileToImage(file))
+}
+
+function resizeToJpeg(file: File): Promise<{ media_type: string; data: string }> {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file)
+    const img = new Image()
+    img.onerror = () => {
+      URL.revokeObjectURL(url)
+      reject(new Error('decode failed'))
+    }
+    img.onload = () => {
+      URL.revokeObjectURL(url)
+      const scale = Math.min(1, MAX_EDGE / Math.max(img.width, img.height))
+      const canvas = document.createElement('canvas')
+      canvas.width = Math.max(1, Math.round(img.width * scale))
+      canvas.height = Math.max(1, Math.round(img.height * scale))
+      const ctx = canvas.getContext('2d')
+      if (!ctx) return reject(new Error('no 2d context'))
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+      canvas.toBlob(
+        (blob) => {
+          if (!blob) return reject(new Error('encode failed'))
+          const reader = new FileReader()
+          reader.onerror = () => reject(new Error('could not read image'))
+          reader.onload = () => {
+            const result = reader.result as string
+            const comma = result.indexOf(',')
+            resolve({ media_type: 'image/jpeg', data: comma >= 0 ? result.slice(comma + 1) : result })
+          }
+          reader.readAsDataURL(blob)
+        },
+        'image/jpeg',
+        0.9,
+      )
+    }
+    img.src = url
+  })
+}
+
 function fileToImage(file: File): Promise<{ media_type: string; data: string }> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
@@ -46,7 +96,7 @@ function fileToImage(file: File): Promise<{ media_type: string; data: string }> 
 export async function scanScorecard(files: File[]): Promise<Course> {
   const chosen = files.slice(0, 2)
   if (chosen.length === 0) throw new Error('no image selected')
-  const images = await Promise.all(chosen.map(fileToImage))
+  const images = await Promise.all(chosen.map(prepareImage))
 
   const { data, error } = await supabase.functions.invoke<{ draft?: ScanDraft }>(
     'extract-scorecard',
