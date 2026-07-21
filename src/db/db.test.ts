@@ -4,12 +4,12 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import '../engine/games/index'
 import { deriveRound } from '../engine/catalog'
 import { makePlayers, makeRound } from '../engine/test/harness'
-import type { Round, RoundStatus } from '../engine/core/types'
+import type { Course, Round, RoundStatus } from '../engine/core/types'
 import { EventStore } from './eventStore'
 import { LOCAL_USER, newId, resetDeviceIdCache } from './ids'
 import { PlayerRepo, RoundRepo } from './repos'
 import { GolfDB } from './schema'
-import { seedCourses } from './seed'
+import { pruneSeededCourses } from './seed'
 
 let testDbCounter = 0
 let currentDbName = ''
@@ -221,21 +221,36 @@ describe('v1 → v2 migration', () => {
   })
 })
 
-describe('seedCourses', () => {
-  it('is idempotent and never clobbers user edits', async () => {
+function makeCourse(id: string, source: Course['source']): Course {
+  return {
+    id,
+    name: `Course ${id}`,
+    holeCount: 18,
+    holes: Array.from({ length: 18 }, (_, i) => ({ number: i + 1, par: 4, strokeIndex: i + 1 })),
+    teeSets: [{ id: 'tee-white', name: 'White', rating: 70, slope: 120 }],
+    source,
+    updatedAt: '2026-07-20T00:00:00.000Z',
+    revision: 0,
+  }
+}
+
+describe('pruneSeededCourses', () => {
+  it('removes pristine seed courses, keeps user/remote, and is a one-shot', async () => {
     const db = freshDb()
-    await seedCourses(db)
-    const first = await db.courses.toArray()
-    expect(first.length).toBeGreaterThan(0)
+    await db.courses.bulkPut([
+      makeCourse('seed-1', 'seed'),
+      makeCourse('seed-2', 'seed'),
+      makeCourse('picked', 'remote'), // cached from search
+      makeCourse('mine', 'user'), // hand-created (or an edited seed)
+    ])
 
-    // user edits a seeded course
-    const edited = { ...first[0]!, name: 'My Edited Course', source: 'user' as const }
-    await db.courses.put(edited)
+    await pruneSeededCourses(db)
+    const after = await db.courses.toArray()
+    expect(after.map((c) => c.id).sort()).toEqual(['mine', 'picked'])
 
-    // re-seed (e.g. after SEED_VERSION bump) must not clobber it
-    await db.meta.delete('seedVersion')
-    await seedCourses(db)
-    const after = await db.courses.get(edited.id)
-    expect(after?.name).toBe('My Edited Course')
+    // gated by a meta flag: a later stray seed row isn't re-pruned
+    await db.courses.put(makeCourse('seed-late', 'seed'))
+    await pruneSeededCourses(db)
+    expect(await db.courses.get('seed-late')).toBeDefined()
   })
 })

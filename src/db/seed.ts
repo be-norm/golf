@@ -1,32 +1,19 @@
-import type { Course } from '../engine/core/types'
 import { db as defaultDb, type GolfDB } from './schema'
-import templatePar72 from '../../data/courses/template-par-72.json'
-import broadmoor from '../../data/courses/broadmoor-country-club.json'
-import woodWind from '../../data/courses/wood-wind-golf-course.json'
-
-/** Bump when bundled courses change to re-run the seed. */
-export const SEED_VERSION = 3
-
-export const bundledCourses: Course[] = [
-  broadmoor as Course,
-  woodWind as Course,
-  templatePar72 as Course,
-]
 
 /**
- * Load bundled courses into Dexie on first run (idempotent).
- * Never overwrites a course the user has edited (source !== 'seed').
+ * Courses are opt-in — nothing is pre-saved. A course is cached into the local
+ * library only when the user picks it from search (importCourseHit) or creates
+ * one. This one-time cleanup removes the previously auto-seeded "standard"
+ * courses (including the "Template — Par 72" demo) from existing devices, but
+ * only pristine seeds (`source === 'seed'`): a seed the user edited became
+ * `user`/`remote` and is kept. Idempotent via a meta flag. Past rounds are
+ * unaffected — each freezes its own `courseSnapshot` (invariant #4).
  */
-export async function seedCourses(db: GolfDB = defaultDb): Promise<void> {
-  const seeded = await db.meta.get('seedVersion')
-  if (seeded && Number(seeded.value) >= SEED_VERSION) return
-
+export async function pruneSeededCourses(db: GolfDB = defaultDb): Promise<void> {
+  if (await db.meta.get('coursesDeseeded')) return
   await db.transaction('rw', db.courses, db.meta, async () => {
-    for (const course of bundledCourses) {
-      const existing = await db.courses.get(course.id)
-      if (existing && existing.source !== 'seed') continue
-      await db.courses.put(course)
-    }
-    await db.meta.put({ key: 'seedVersion', value: String(SEED_VERSION) })
+    const seededIds = await db.courses.filter((c) => c.source === 'seed').primaryKeys()
+    await db.courses.bulkDelete(seededIds)
+    await db.meta.put({ key: 'coursesDeseeded', value: '1' })
   })
 }
