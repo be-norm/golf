@@ -5,7 +5,7 @@ import { roundRepo, playerRepo } from '../db/repos'
 import type { Player, Round } from '../engine/core/types'
 import type { RoundEvent } from '../engine/core/events'
 import { supabase } from './supabase'
-import { enqueuePushPlayer, enqueuePushRound, flushOutbox } from './outbox'
+import { enqueuePushCourse, enqueuePushPlayer, enqueuePushRound, flushOutbox } from './outbox'
 
 /**
  * Owner-scoped cloud restore. Snapshot model: each completed round is a
@@ -106,6 +106,13 @@ export async function claimLocalData(userId: string): Promise<{ rounds: number; 
   for (const r of claimed.rounds) {
     if (r.status === 'completed') await enqueuePushRound(userId, { ...r, userId })
   }
+
+  // Courses aren't owner-partitioned (they're a shared library), so there's no
+  // guest sentinel to rewrite — just publish the ones this device authored so
+  // they reach the account (and every other user). Best-effort, same as above.
+  const userCourses = await db.courses.filter((c) => c.source === 'user').toArray()
+  for (const c of userCourses) await enqueuePushCourse(userId, c)
+
   return { rounds: claimed.rounds.length, players: claimed.players.length }
 }
 

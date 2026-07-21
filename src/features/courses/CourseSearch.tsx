@@ -91,6 +91,11 @@ export function CourseSearch({ localIds, onImported, placeholder }: Props) {
                   <span className="min-w-0 truncate">
                     <span className="text-lg font-semibold">{h.name}</span>
                     {h.location && <span className="ml-2 text-stone-400">{h.location}</span>}
+                    {h.source === 'user' && (
+                      <span className="ml-2 whitespace-nowrap text-xs text-felt-400">
+                        · added by a golfer
+                      </span>
+                    )}
                   </span>
                   <span className="ml-2 shrink-0 text-lg text-felt-400">
                     {localIds.has(h.id) ? 'saved ✓' : importing === h.id ? '…' : '+ add'}

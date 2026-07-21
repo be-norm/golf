@@ -12,6 +12,7 @@ import { useAuth } from '../../auth/AuthProvider'
 import { BigButton } from '../../components/BigButton'
 import { selectOnFocus } from '../../components/inputs'
 import { CourseSearch } from '../courses/CourseSearch'
+import { ScanButton } from '../courses/ScanButton'
 import { PlayerSearch } from '../players/PlayerSearch'
 import type { GhinPlayerHit } from '../../remote/ghinSearch'
 import { RulesSheet } from '../games/RulesSheet'
@@ -211,6 +212,7 @@ export function SetupScreen() {
               </button>
             ))}
           </div>
+          <ScanButton />
           <Link to="/courses" className="text-sm text-felt-400">
             Manage courses →
           </Link>

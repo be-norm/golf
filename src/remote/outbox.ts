@@ -2,7 +2,7 @@ import { db } from '../db/schema'
 import type { OutboxItem } from '../db/schema'
 import { getDeviceId, newId } from '../db/ids'
 import { eventStore } from '../db/eventStore'
-import type { Player, Round } from '../engine/core/types'
+import type { Course, Player, Round } from '../engine/core/types'
 import type { RoundEvent } from '../engine/core/events'
 import { supabase } from './supabase'
 
@@ -31,6 +31,10 @@ interface DeletePlayerPayload {
   userId: string
   playerId: string
 }
+interface PushCoursePayload {
+  userId: string
+  course: Course
+}
 
 export async function enqueuePushRound(userId: string, round: Round): Promise<void> {
   const events = await eventStore.list(round.id)
@@ -39,6 +43,15 @@ export async function enqueuePushRound(userId: string, round: Round): Promise<vo
 
 export async function enqueuePushPlayer(userId: string, player: Player): Promise<void> {
   await put('pushPlayer', { userId, player })
+}
+
+/**
+ * Publish a user-authored course to the shared library so every user can find
+ * it. Only ever called for source:'user' courses owned by a signed-in user;
+ * RLS pins the row's created_by to the caller.
+ */
+export async function enqueuePushCourse(userId: string, course: Course): Promise<void> {
+  await put('pushCourse', { userId, course })
 }
 
 export async function enqueueDeleteRound(userId: string, roundId: string): Promise<void> {
@@ -152,6 +165,28 @@ async function send(item: OutboxItem, deviceId: string): Promise<boolean> {
         .update({ deleted_at: now, updated_at: now })
         .eq('user_id', userId)
         .eq('id', playerId)
+      return !error
+    }
+    case 'pushCourse': {
+      const { userId, course } = item.payload as PushCoursePayload
+      // Shared, publicly-readable library row. created_by = the owner (RLS
+      // pins it); source/status forced to what the insert policy allows.
+      const { error } = await supabase.from('courses').upsert(
+        {
+          id: course.id,
+          name: course.name,
+          location: course.location ?? null,
+          hole_count: course.holeCount,
+          data: course,
+          status: 'published',
+          source: 'user',
+          source_id: null,
+          created_by: userId,
+          revision: course.revision,
+          updated_at: course.updatedAt,
+        },
+        { onConflict: 'id' },
+      )
       return !error
     }
     default:

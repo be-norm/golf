@@ -2,6 +2,7 @@ import { Link, useNavigate } from 'react-router'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { courseRepo } from '../../db/repos'
 import { CourseSearch } from './CourseSearch'
+import { ScanButton } from './ScanButton'
 
 export function CourseListScreen() {
   const navigate = useNavigate()
@@ -19,12 +20,15 @@ export function CourseListScreen() {
 
       <CourseSearch localIds={new Set(courses?.map((c) => c.id))} />
 
-      <Link
-        to="/courses/new"
-        className="pixel-press font-display block border-felt-600 bg-felt-900/60 px-4 py-4 text-center text-xs uppercase"
-      >
-        + New course
-      </Link>
+      <div className="grid grid-cols-2 gap-2">
+        <Link
+          to="/courses/new"
+          className="pixel-press font-display block border-felt-600 bg-felt-900/60 px-4 py-4 text-center text-xs uppercase"
+        >
+          + New course
+        </Link>
+        <ScanButton />
+      </div>
 
       <section>
         <h2 className="font-display mb-2 text-[10px] uppercase text-stone-400">My library</h2>
@@ -54,10 +58,14 @@ export function CourseListScreen() {
         Course search includes data from{' '}
         <a href="https://opengolfapi.org" className="underline">
           OpenGolfAPI
-        </a>
-        , available under{' '}
+        </a>{' '}
+        (
         <a href="https://opendatacommons.org/licenses/odbl/1-0/" className="underline">
           ODbL
+        </a>
+        ) and{' '}
+        <a href="https://golfcourseapi.com" className="underline">
+          GolfCourseAPI
         </a>
         .
       </footer>

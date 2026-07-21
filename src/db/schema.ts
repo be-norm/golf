@@ -6,7 +6,7 @@ import { LOCAL_USER } from './ids'
 export interface OutboxItem {
   id: string
   /** Owner-scoped cloud sync ops; each payload carries its own userId. */
-  kind: 'pushRound' | 'pushPlayer' | 'deleteRound' | 'deletePlayer'
+  kind: 'pushRound' | 'pushPlayer' | 'deleteRound' | 'deletePlayer' | 'pushCourse'
   payload: unknown
   createdAt: string
   attempts: number
