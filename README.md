@@ -4,7 +4,7 @@ A minimal, fast, offline-first way to track golf money games between friends.
 Pick a game (Skins, Nassau, Wolf, Vegas — more coming), enter players and handicaps,
 score hole-by-hole on one phone. The app does all the math.
 
-**Live:** https://be-norm.github.io/golf/ — open on your phone and Add to Home Screen.
+**Live:** https://golf.mainspring.fyi/ — open on your phone and Add to Home Screen.
 
 ## Development
 
