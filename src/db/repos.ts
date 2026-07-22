@@ -21,6 +21,13 @@ export class CourseRepo {
       revision: course.revision + 1,
     })
   }
+
+  /** Remove a course from this device's library. Local only — the shared
+   *  Supabase library and any frozen round snapshots are untouched, and the
+   *  course stays re-importable via search. */
+  async delete(id: string): Promise<void> {
+    await this.db.courses.delete(id)
+  }
 }
 
 export class PlayerRepo {
