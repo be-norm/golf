@@ -327,7 +327,7 @@ export function CourseEditorScreen() {
             <div className="flex items-center gap-2">
               <button
                 onClick={() => void remove()}
-                className="min-h-11 flex-1 rounded-xl bg-stone-900 text-sm font-semibold text-flag-500 ring-1 ring-flag-600"
+                className="min-h-11 min-w-0 flex-1 truncate rounded-xl bg-stone-900 px-3 text-sm font-semibold text-flag-500 ring-1 ring-flag-600"
               >
                 Delete {course.name.trim() || 'this course'}?
               </button>
