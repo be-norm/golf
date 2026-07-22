@@ -1,3 +1,5 @@
+import type { Uuid } from './types'
+
 export interface SummaryPart {
   /** small gold metadata chip, e.g. "H4"; empty string renders value-only */
   label: string
@@ -34,4 +36,14 @@ export function latestHoleSummary(
 /** Render summary parts to the plain fallback string (GameSummary styles the parts). */
 export function summaryString(parts: SummaryPart[]): string {
   return parts.map((p) => (p.label ? `${p.label}: ${p.value}` : p.value)).join(' · ')
+}
+
+/** A player's first name, for compact bar/summary chips — '' if the name is blank. */
+export function firstName(name: string | undefined): string {
+  return (name ?? '').split(' ')[0] ?? ''
+}
+
+/** Join player names into an "A & B" list — the shared idiom for team/tie labels. */
+export function joinNames(ids: readonly Uuid[], nameOf: ReadonlyMap<Uuid, string>): string {
+  return ids.map((id) => nameOf.get(id) ?? '').join(' & ')
 }

@@ -55,6 +55,11 @@ function arbitraryRoundAndEvents() {
           handicap,
         })
       }
+      if (playerCount === 3) {
+        // Six Point is threesome-only; join the fuzz for zero-sum / determinism
+        // / retraction coverage like the other money games.
+        games.push({ type: 'sixPoint', config: { pointCents: 25 }, handicap })
+      }
       if (playerCount === 4) {
         games.push({
           type: 'vegas',

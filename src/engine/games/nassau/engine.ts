@@ -3,6 +3,7 @@ import type { GameEngine, GameDerivation, InputRequest, StandingLine } from '../
 import type { RoundContext } from '../../core/context'
 import type { GameScopedEvent } from '../../core/events'
 import { addLine, emptySettlement, type Settlement } from '../../core/money'
+import { firstName } from '../../core/summary'
 import { teamsSchema, nonEmptyPartitionProblems } from '../../core/teams'
 import type { GameConfig, HandicapSettings, RoundPlayer, Uuid } from '../../core/types'
 
@@ -201,8 +202,8 @@ function derive(
 
   // Every bet — parents and presses — reported the way a golfer tracks it:
   // who's up, by how much, holes left; dormie/closed-out/final when apt.
-  const firstName = (id: Uuid) => (nameOf.get(id) ?? '').split(' ')[0]
-  const sideShort = (side: 'a' | 'b') => (side === 'a' ? sideA : sideB).map(firstName).join(' & ')
+  const sideShort = (side: 'a' | 'b') =>
+    (side === 'a' ? sideA : sideB).map((id) => firstName(nameOf.get(id))).join(' & ')
   const segLabel = (seg: Segment): string =>
     // a collapsed 9-hole nassau's single bet is the nine that was played
     seg === 'overall'
