@@ -3,7 +3,7 @@ import type { GameEngine, GameDerivation, StandingLine } from '../../catalog'
 import type { RoundContext } from '../../core/context'
 import type { GameScopedEvent } from '../../core/events'
 import { addLine, emptySettlement, type Settlement } from '../../core/money'
-import { latestHoleSummary, summaryString } from '../../core/summary'
+import { firstName, joinNames, latestHoleSummary, summaryString } from '../../core/summary'
 import { teamsSchema, teamPartitionProblems } from '../../core/teams'
 import type { GameConfig, HandicapSettings, RoundPlayer, Uuid } from '../../core/types'
 
@@ -185,7 +185,7 @@ function derive(
 
   // Bar recaps the latest decided hole — "H6 · 26 v 44 ×2 → Ben & Rob +36".
   const teamShort = (side: 'a' | 'b') =>
-    teams[side].map((id) => (nameOf.get(id) ?? '').split(' ')[0]).join(' & ')
+    teams[side].map((id) => firstName(nameOf.get(id))).join(' & ')
   const summaryParts = latestHoleSummary(
     ctx.holesPlayed,
     (hole) => {
@@ -202,7 +202,7 @@ function derive(
 
   // holeSummary states the outcome, then a "↳" cause line for anything that
   // changed the pairing — so the ledger explains WHY, not just what.
-  const names = (ids: Uuid[]) => ids.map((id) => nameOf.get(id)).join(' & ')
+  const names = (ids: Uuid[]) => joinNames(ids, nameOf)
   const holeSummary = (hole: number): string[] => {
     const r = holeResults.find((h) => h.hole === hole)
     if (!r) return []

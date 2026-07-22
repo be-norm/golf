@@ -99,8 +99,14 @@ Best drive, then own ball in; best ball counts.
 ### 16. Nines (5-3-1) — Tier 2, strokes-only
 Exactly 3 players; 9 points/hole by rank (5/3/1); ties combine-and-split (4-4-1, 5-2-2, 3-3-3).
 
-### 17. Split Sixes (4-2-0) — Tier 2–3, strokes-only
-As Nines with 6 points/hole: 4-2-0; 3-3-0; 4-1-1; 2-2-2.
+### 17. Split Sixes / Six Point (4-2-0) `[shipped]` — Tier 2–3, strokes-only
+Exactly 3 players; 6 points/hole by rank. Distinct → 4-2-0; two tie for low → 3-3-0;
+one low + two tied → 4-1-1; three-way tie → 2-2-2 (moves no money).
+- **Impl:** rank slots [4,2,0], tied players share the average of the slots they span
+  (so all four splits fall out of one rule; every average is a whole number).
+- **Money:** `(points − 2) × perPointStake` per player — zero-sum against the 2-point
+  average by construction. Config: perPointStake, gross/net via handicap policy.
+- A finalized hole missing any of the three scores is void (six points need all three).
 
 ---
 
