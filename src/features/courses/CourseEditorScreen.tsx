@@ -43,6 +43,7 @@ export function CourseEditorScreen() {
   const [draft, setDraft] = useState<Course | undefined>(() => scannedDraft)
   // Which par/SI row the holes table edits: the course-wide default, or a tee id.
   const [teeTab, setTeeTab] = useState<'default' | string>('default')
+  const [confirmDelete, setConfirmDelete] = useState(false)
 
   if (!isNew && existing === undefined) return null
   const course = draft ?? (isNew ? blankCourse(18) : (existing ?? undefined))
@@ -107,6 +108,11 @@ export function CourseEditorScreen() {
       const saved = await courseRepo.get(course.id)
       if (saved) await enqueuePushCourse(activeUserId, saved)
     }
+    navigate('/courses')
+  }
+
+  const remove = async () => {
+    await courseRepo.delete(course.id)
     navigate('/courses')
   }
 
@@ -308,7 +314,7 @@ export function CourseEditorScreen() {
         </div>
       </section>
 
-      <div className="mt-auto pb-2">
+      <div className="mt-auto space-y-3 pb-2">
         <BigButton
           className="w-full"
           disabled={!nameValid || !siValid || !teesValid}
@@ -316,6 +322,30 @@ export function CourseEditorScreen() {
         >
           Save course
         </BigButton>
+        {!isNew &&
+          (confirmDelete ? (
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => void remove()}
+                className="min-h-11 min-w-0 flex-1 truncate rounded-xl bg-stone-900 px-3 text-sm font-semibold text-flag-500 ring-1 ring-flag-600"
+              >
+                Delete {course.name.trim() || 'this course'}?
+              </button>
+              <button
+                onClick={() => setConfirmDelete(false)}
+                className="min-h-11 rounded-xl px-4 text-sm text-stone-400 ring-1 ring-stone-700"
+              >
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => setConfirmDelete(true)}
+              className="w-full py-2 text-center text-sm text-flag-500"
+            >
+              Delete course
+            </button>
+          ))}
       </div>
     </main>
   )

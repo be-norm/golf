@@ -7,7 +7,7 @@ import { makePlayers, makeRound } from '../engine/test/harness'
 import type { Course, Round, RoundStatus } from '../engine/core/types'
 import { EventStore } from './eventStore'
 import { LOCAL_USER, newId, resetDeviceIdCache } from './ids'
-import { PlayerRepo, RoundRepo } from './repos'
+import { CourseRepo, PlayerRepo, RoundRepo } from './repos'
 import { GolfDB } from './schema'
 import { pruneSeededCourses } from './seed'
 
@@ -233,6 +233,20 @@ function makeCourse(id: string, source: Course['source']): Course {
     revision: 0,
   }
 }
+
+describe('CourseRepo', () => {
+  it('saves, reads, and deletes a course from the library', async () => {
+    const repo = new CourseRepo(freshDb())
+    await repo.put(makeCourse('c1', 'user'))
+    await repo.put(makeCourse('c2', 'remote'))
+    expect(await repo.get('c1')).toBeDefined()
+    expect(await repo.list()).toHaveLength(2)
+
+    await repo.delete('c1')
+    expect(await repo.get('c1')).toBeUndefined()
+    expect((await repo.list()).map((c) => c.id)).toEqual(['c2'])
+  })
+})
 
 describe('pruneSeededCourses', () => {
   it('removes pristine seed courses, keeps user/remote, and is a one-shot', async () => {
