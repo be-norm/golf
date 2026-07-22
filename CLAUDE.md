@@ -44,7 +44,8 @@ Full plan/architecture history: see `docs/` and the games catalog in `docs/games
 ## Infra
 
 - GitHub repo `be-norm/golf`; CI + GitHub Pages deploy on green main (`.github/workflows/ci.yml`)
-- Deployed at https://be-norm.github.io/golf/ (Vite `base: '/golf/'` — keep SW scope in sync)
+- Deployed at https://golf.mainspring.fyi/ via GitHub Pages custom domain (Vite `base: '/'`;
+  `public/CNAME` pins the domain across Actions redeploys — keep SW scope in sync)
 - Supabase project `golf`, ref `xbdsssnjphbxequhlazu`, org `ben-personal` (free tier).
   DB password in untracked `.env.local`. Course data source: OpenGolfAPI (ODbL — keep
   attribution + provenance columns; publish transformed dump).
