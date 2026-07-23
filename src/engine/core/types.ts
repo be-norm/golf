@@ -6,6 +6,15 @@ export interface HoleCore {
   par: number
   /** 18-hole stroke index: 1 = hardest */
   strokeIndex: number
+  /**
+   * Set only when a course is played more than once around — a nine twice, via
+   * `doubleNine`. `hole` is the hole on the physical card this one replays and
+   * `nth` is which time around, so the scorekeeper standing on the 5th tee for
+   * the second time isn't asked for "hole 14" with no explanation. Absent on an
+   * ordinary course, where `number` IS the hole. Display only: scoring, money
+   * and the event log all key off `number`.
+   */
+  loop?: { hole: number; nth: number }
 }
 
 export interface TeeSet {
@@ -59,8 +68,15 @@ export interface RoundPlayer {
   playerId: Uuid
   /** snapshotted so a round stays self-contained */
   name: string
+  /** what the player reported at setup; kept as a record, never re-derived */
   handicapIndex?: number
-  /** the number the engine actually uses; negative = plus handicap */
+  /**
+   * The number the engine actually uses; negative = plus handicap. It is the
+   * course handicap for the course AS RATED — an 18-hole number on an 18-hole
+   * course, a 9-hole number on a 9-hole course (`courseHandicapForTee`) — and
+   * the engine scales it to the holes actually played. Authoritative: editing
+   * it (first-tee adjustments) changes the strokes; the index does not.
+   */
   courseHandicap: number
   teeSetId?: Uuid
 }

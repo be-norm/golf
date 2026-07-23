@@ -178,6 +178,25 @@ describe('RoundRepo', () => {
     expect(await repo.liveRound()).toBeDefined()
   })
 
+  it('adjusts a course handicap only while the event log is empty', async () => {
+    const db = freshDb()
+    const repo = new RoundRepo(db)
+    const store = new EventStore(db)
+    const r = { ...roundRow(U1, 'live', '2026-01-01T00:00:00Z'), players: makePlayers([{ name: 'Bogey', ch: 18 }]) }
+    await repo.put(r)
+
+    expect(await repo.setCourseHandicap(r.id, 'p-bogey', 10)).toBe(true)
+    expect((await repo.get(r.id))!.players[0]!.courseHandicap).toBe(10)
+
+    // once a score exists the handicap is settled money — the write must lose,
+    // not silently re-derive every hole already played (CLAUDE.md invariant #2)
+    await store.append(r.id, [{ type: 'score/set', playerId: 'p-bogey', hole: 1, gross: 5 }])
+    expect(await repo.setCourseHandicap(r.id, 'p-bogey', 2)).toBe(false)
+    expect((await repo.get(r.id))!.players[0]!.courseHandicap).toBe(10)
+
+    expect(await repo.setCourseHandicap('no-such-round', 'p-bogey', 4)).toBe(false)
+  })
+
   it('hard-deletes a round and its event log in one transaction', async () => {
     const db = freshDb()
     const repo = new RoundRepo(db)

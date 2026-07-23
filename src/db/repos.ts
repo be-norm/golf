@@ -135,6 +135,37 @@ export class RoundRepo {
       .toArray()
   }
 
+  /**
+   * Set one player's course handicap. Read-modify-write inside a transaction so
+   * two quick edits can't clobber each other through a stale in-memory round.
+   *
+   * Handicaps live on the round doc, not the event log, so changing one silently
+   * re-derives every settlement — which is only honest on a round that has
+   * nothing derived yet. That's enforced HERE, in the same transaction, not just
+   * by the UI hiding the control: an empty log is the invariant (CLAUDE.md #2),
+   * and a write racing the first score must lose. Returns whether it applied.
+   */
+  async setCourseHandicap(
+    roundId: string,
+    playerId: string,
+    courseHandicap: number,
+  ): Promise<boolean> {
+    return this.db.transaction('rw', this.db.rounds, this.db.round_events, async () => {
+      const round = await this.db.rounds.get(roundId)
+      if (!round) return false
+      const scored = await this.db.round_events.where('roundId').equals(roundId).count()
+      if (scored > 0) return false
+      await this.db.rounds.put({
+        ...round,
+        players: round.players.map((p) =>
+          p.playerId === playerId ? { ...p, courseHandicap } : p,
+        ),
+        updatedAt: new Date().toISOString(),
+      })
+      return true
+    })
+  }
+
   /** Hard-delete a round and its event log. Deleting a whole round is outside
    *  the append-only event invariant (that governs edits WITHIN a round). */
   async delete(id: string): Promise<void> {

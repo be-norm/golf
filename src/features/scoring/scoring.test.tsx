@@ -4,7 +4,8 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { createMemoryRouter, RouterProvider } from 'react-router'
 import '../../engine/games'
-import { makePlayers, makeRound } from '../../engine/test/harness'
+import { makeCourse, makePlayers, makeRound } from '../../engine/test/harness'
+import { doubleNine } from '../../engine/core/tees'
 import { db } from '../../db/schema'
 import { eventStore } from '../../db/eventStore'
 import { routes } from '../../app/routes'
@@ -35,6 +36,39 @@ describe('ScoringScreen', () => {
     })
     const events = await eventStore.list(round.id)
     expect(events[0]).toMatchObject({ type: 'score/set', playerId: 'p-ben', hole: 1, gross: 4 })
+  })
+
+  /** A nine played twice around, as SetupScreen freezes it: card holes 1–18,
+   *  where 14 is physically the 5th tee, second time round. */
+  async function twiceAroundRound(id: string) {
+    const nine = makeCourse([4, 4, 3, 4, 3, 4, 4, 4, 3], [6, 2, 8, 4, 9, 1, 5, 3, 7])
+    const round = makeRound({
+      course: doubleNine(nine),
+      players: makePlayers([{ name: 'Ben' }, { name: 'Alice' }]),
+      games: [{ type: 'skins', config: { stakeCents: 100, carryover: true } }],
+    })
+    round.id = id
+    await db.rounds.put(round)
+    return round
+  }
+
+  it('names the loop on the second time round', async () => {
+    const round = await twiceAroundRound('round-two-loops')
+    const router = createMemoryRouter(routes, { initialEntries: [`/round/${round.id}?hole=14`] })
+    render(<RouterProvider router={router} />)
+
+    expect(await screen.findByText('2nd time round · hole 5')).toBeInTheDocument()
+    // par/SI still come from the card — only the wayfinding changed
+    expect(screen.getByText('par 3 · si 18')).toBeInTheDocument()
+  })
+
+  it('says nothing the first time round — hole 5 is just hole 5', async () => {
+    const round = await twiceAroundRound('round-two-loops-first')
+    const router = createMemoryRouter(routes, { initialEntries: [`/round/${round.id}?hole=5`] })
+    render(<RouterProvider router={router} />)
+
+    await screen.findByText('Hole')
+    expect(screen.queryByText(/time round/)).not.toBeInTheDocument()
   })
 
   it('undo retracts the last event', async () => {

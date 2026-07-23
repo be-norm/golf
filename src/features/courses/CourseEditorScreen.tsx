@@ -5,10 +5,16 @@ import type { Course, TeeSet } from '../../engine/core/types'
 import { courseRepo } from '../../db/repos'
 import { newId } from '../../db/ids'
 import { enqueuePushCourse } from '../../remote/outbox'
-import { isStrokeIndexPermutation } from '../../engine/core/tees'
+import { isStrokeIndexPermutation, looksLikeEighteenHoleRating } from '../../engine/core/tees'
 import { useAuth } from '../../auth/AuthProvider'
 import { BigButton } from '../../components/BigButton'
 import { selectOnFocus } from '../../components/inputs'
+
+/** A rating is for the holes the card covers, so a nine's is about half an 18's —
+ *  seeding 70.0 on a 9-hole course would hand out ~34 phantom strokes. */
+function defaultTee(holeCount: 9 | 18): Omit<TeeSet, 'id' | 'name'> {
+  return { rating: holeCount === 9 ? 35.0 : 70.0, slope: 120 }
+}
 
 function blankCourse(holeCount: 9 | 18): Course {
   return {
@@ -21,7 +27,7 @@ function blankCourse(holeCount: 9 | 18): Course {
       par: 4,
       strokeIndex: i + 1,
     })),
-    teeSets: [{ id: newId(), name: 'White', rating: 70.0, slope: 120 }],
+    teeSets: [{ id: newId(), name: 'White', ...defaultTee(holeCount) }],
     source: 'user',
     updatedAt: new Date().toISOString(),
     revision: 0,
@@ -92,7 +98,12 @@ export function CourseEditorScreen() {
   const siValid =
     isStrokeIndexPermutation(course.holes.map((h) => h.strokeIndex)) && !invalidTee
   const nameValid = course.name.trim().length > 0
-  const teesValid = course.teeSets.length > 0 && course.teeSets.every((t) => t.name.trim())
+  // Block save on a rating in the wrong dimension, same as a bad SI row: both
+  // mean "this course would compute wrong handicaps", and this course publishes
+  // to the shared library. The per-tee warning below shows which tee to fix.
+  const misratedTee = course.teeSets.find((t) => looksLikeEighteenHoleRating(course, t))
+  const teesValid =
+    course.teeSets.length > 0 && course.teeSets.every((t) => t.name.trim()) && !misratedTee
 
   const save = async () => {
     // Publish to the shared library only for genuinely user-authored courses:
@@ -162,7 +173,7 @@ export function CourseEditorScreen() {
           {course.teeSets.map((tee, i) => (
             <div
               key={tee.id}
-              className="flex items-center gap-2 rounded-2xl bg-stone-900/60 p-3 ring-1 ring-stone-800"
+              className="flex flex-wrap items-center gap-2 rounded-2xl bg-stone-900/60 p-3 ring-1 ring-stone-800"
             >
               <input
                 value={tee.name}
@@ -202,6 +213,15 @@ export function CourseEditorScreen() {
                   ✕
                 </button>
               )}
+              {/* Same heuristic the importers repair by — but here we block save
+                  rather than silently rewrite a number the user typed, so a bad
+                  rating can't publish to the shared library. */}
+              {looksLikeEighteenHoleRating(course, tee) && (
+                <p className="w-full text-xs text-flag-500">
+                  That looks like an 18-hole rating — a 9-hole card's rating is about half. Fix it to
+                  save.
+                </p>
+              )}
             </div>
           ))}
           <button
@@ -210,7 +230,7 @@ export function CourseEditorScreen() {
               update({
                 teeSets: [
                   ...course.teeSets,
-                  { id: newId(), name: '', rating: 70.0, slope: 120 },
+                  { id: newId(), name: '', ...defaultTee(course.holeCount) },
                 ],
               })
             }

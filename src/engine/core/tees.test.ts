@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import type { Course, TeeSet } from './types'
-import { applyTee, isStrokeIndexPermutation, teePar } from './tees'
+import {
+  applyTee,
+  doubleNine,
+  isStrokeIndexPermutation,
+  looksLikeEighteenHoleRating,
+  teePar,
+} from './tees'
 
 // 4-hole fixture (holeCount is unused by these pure helpers). Hole 2 is the
 // "4/3" case: par 4 by default, par 3 from a forward tee.
@@ -58,6 +64,83 @@ describe('applyTee', () => {
   it('returns the course unchanged for an undefined tee or a tee with no rows', () => {
     expect(applyTee(base, undefined)).toBe(base)
     expect(applyTee(base, tee({}))).toBe(base)
+  })
+})
+
+describe('doubleNine', () => {
+  // Penmar-shaped nine: par 33, a 9-hole rating, its own SI row on one tee.
+  const pars = [4, 4, 3, 4, 3, 4, 4, 4, 3] // 33
+  const sis = [6, 2, 8, 4, 9, 1, 5, 3, 7] // 1..9, deliberately not in hole order
+  const nine: Course = {
+    ...base,
+    holeCount: 9,
+    holes: pars.map((par, i) => ({ number: i + 1, par, strokeIndex: sis[i]! })),
+    teeSets: [
+      tee({
+        rating: 33.4,
+        slope: 103,
+        strokeIndexes: sis,
+        pars,
+        yardages: [281, 355, 139, 298, 150, 320, 300, 340, 120],
+      }),
+    ],
+  }
+
+  it('mirrors the nine into an 18-hole course', () => {
+    const out = doubleNine(nine)
+    expect(out.holeCount).toBe(18)
+    expect(out.holes.map((h) => h.number)).toEqual([...Array(18)].map((_, i) => i + 1))
+    // second loop plays the same holes: par 33 + 33 = 66
+    expect(out.holes.map((h) => h.par).slice(9)).toEqual(nine.holes.map((h) => h.par))
+    expect(teePar(out, out.teeSets[0])).toBe(66)
+  })
+
+  it('splits each 9-hole stroke index into 2s−1 (first loop) / 2s (second)', () => {
+    const out = doubleNine(nine)
+    const sis = out.holes.map((h) => h.strokeIndex)
+    expect(isStrokeIndexPermutation(sis)).toBe(true)
+    // hole 6 is the nine's SI 1 → SI 1 first time around, SI 2 second time
+    expect(sis[5]).toBe(1)
+    expect(sis[14]).toBe(2)
+    // first loop takes every odd index, second every even one
+    expect(sis.slice(0, 9).every((si) => si % 2 === 1)).toBe(true)
+    expect(sis.slice(9).every((si) => si % 2 === 0)).toBe(true)
+    // and the tee's own row gets the same treatment, so applyTee still accepts it
+    expect(isStrokeIndexPermutation(out.teeSets[0]!.strokeIndexes!)).toBe(true)
+    expect(applyTee(out, out.teeSets[0]).holes.map((h) => h.strokeIndex)).toEqual(sis)
+  })
+
+  it('doubles the tee rating (an 18-hole rating is two loops) but not the slope', () => {
+    const out = doubleNine(nine)
+    expect(out.teeSets[0]!.rating).toBe(66.8)
+    expect(out.teeSets[0]!.slope).toBe(103)
+    expect(out.teeSets[0]!.yardages).toHaveLength(18)
+    expect(out.teeSets[0]!.pars).toHaveLength(18)
+    expect(out.teeSets[0]!.id).toBe(nine.teeSets[0]!.id) // tee ids survive → still selectable
+  })
+
+  it('records which hole each card number physically is', () => {
+    const out = doubleNine(nine)
+    // card 14 is the 5th hole, second time round — what the scorecard shows
+    expect(out.holes[13]!.loop).toEqual({ hole: 5, nth: 2 })
+    expect(out.holes[4]!.loop).toEqual({ hole: 5, nth: 1 })
+    expect(out.holes.every((h) => h.loop!.hole === ((h.number - 1) % 9) + 1)).toBe(true)
+  })
+
+  it('leaves an 18-hole course alone', () => {
+    expect(doubleNine(base)).toBe(base)
+    expect(base.holes.every((h) => h.loop === undefined)).toBe(true)
+  })
+})
+
+describe('looksLikeEighteenHoleRating', () => {
+  const nine = { ...base, holeCount: 9 as const } // par 16 over its 4 holes
+  it('flags a rating ~10+ over the nine’s own par', () => {
+    expect(looksLikeEighteenHoleRating(nine, tee({ rating: 63.4 }))).toBe(true)
+    expect(looksLikeEighteenHoleRating(nine, tee({ rating: 18 }))).toBe(false) // plausible
+  })
+  it('never flags an 18-hole course', () => {
+    expect(looksLikeEighteenHoleRating(base, tee({ rating: 71.2 }))).toBe(false)
   })
 })
 

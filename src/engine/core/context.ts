@@ -57,8 +57,11 @@ export function buildRoundContext(round: Round, effective: readonly RoundEvent[]
 
   // Playing 9 holes of an 18-hole course halves the (post-allowance) course
   // handicap before allocation — the WHS convention when no dedicated 9-hole
-  // rating exists. True 9-hole courses already carry 9-hole ratings, so their
-  // course handicap is used as-is.
+  // rating exists. A true 9-hole course is left alone: its stored handicap is
+  // ALREADY a 9-hole number, computed off 9-hole rating/slope from half the
+  // index (`courseHandicapForTee`, handicap.ts). Halving here too would double-
+  // discount it. A nine played twice around arrives as an 18-hole snapshot
+  // (`doubleNine`, tees.ts) and takes the 18-hole path.
   const nineOfEighteen = holesPlayed.length <= 9 && course.holeCount === 18
 
   // Precompute per-game, per-player stroke allocation over the holes played.

@@ -1,3 +1,6 @@
+import { teePar } from './tees'
+import type { Course, TeeSet } from './types'
+
 /** WHS course handicap: HI × (slope ÷ 113) + (rating − par), rounded to nearest integer. */
 export function courseHandicap(
   handicapIndex: number,
@@ -6,6 +9,32 @@ export function courseHandicap(
   par: number,
 ): number {
   return Math.round(handicapIndex * (slope / 113) + (rating - par))
+}
+
+/**
+ * Course handicap for a course as it is RATED — the one place a Handicap Index
+ * becomes the number a round freezes into `RoundPlayer.courseHandicap`.
+ *
+ * An 18-hole course's rating/slope take the 18-hole index. A 9-hole course
+ * carries 9-hole rating/slope, so WHS halves the index first (the 9-hole
+ * Handicap Index) — without that, a nine hands out roughly double the strokes.
+ *
+ * Playing 9 of an 18-hole course is a DIFFERENT adjustment: there the course
+ * handicap is halved, not the index, because (rating − par) is an 18-hole term.
+ * That one belongs to the engine — see `nineOfEighteen` in context.ts.
+ */
+export function courseHandicapForTee(
+  handicapIndex: number,
+  course: Course,
+  tee: TeeSet | undefined,
+): number {
+  // The dimension is a property of the COURSE, so it applies even on the
+  // fallback path — a nine with no resolvable tee still plays off half the
+  // index, never the full one.
+  const effectiveIndex = course.holeCount === 9 ? handicapIndex / 2 : handicapIndex
+  // no tee to rate against → the (scaled) index itself is the best answer
+  if (!tee) return Math.round(effectiveIndex)
+  return courseHandicap(effectiveIndex, tee.slope, tee.rating, teePar(course, tee))
 }
 
 /** Playing handicap after a percentage allowance, rounded to nearest integer. */

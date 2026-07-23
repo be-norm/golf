@@ -1,5 +1,28 @@
 import { rankStrokeIndexes } from '../engine/core/handicap'
+import { looksLikeEighteenHoleRating } from '../engine/core/tees'
 import type { Course, HoleCore, TeeSet } from '../engine/core/types'
+
+/**
+ * Halve any tee rating that reads as the course's 18-hole rating on a 9-hole
+ * card (`looksLikeEighteenHoleRating`) — a doubled nine from GolfCourseAPI (18
+ * rows collapsed to 9, rating untouched), a scan that read the 18-hole row, or a
+ * library doc published before this guard existed.
+ *
+ * Applied on every path a course enters the library from OUTSIDE (both API
+ * imports and the shared-library import). Deliberately not in courseRepo.put:
+ * the course editor writes through that, and there a bad rating is flagged for
+ * the user to fix rather than silently rewritten. So a hand-typed 18-hole rating
+ * can still be saved (and published) — the warning is the only guard there.
+ */
+export function normalizeTeeRatings(course: Course): Course {
+  if (course.holeCount !== 9) return course
+  return {
+    ...course,
+    teeSets: course.teeSets.map((t) =>
+      looksLikeEighteenHoleRating(course, t) ? { ...t, rating: t.rating / 2 } : t,
+    ),
+  }
+}
 
 export interface RawHole {
   number: number
@@ -91,7 +114,7 @@ export function buildRemoteCourse(input: {
         }))
       : [{ id: 'tee-standard', name: 'Standard', rating: par, slope: 113 }]
 
-  return {
+  return normalizeTeeRatings({
     id: input.id,
     name: input.name,
     location: [input.city, input.state].filter(Boolean).join(', ') || undefined,
@@ -101,5 +124,5 @@ export function buildRemoteCourse(input: {
     source: 'remote',
     updatedAt: new Date().toISOString(),
     revision: 1,
-  }
+  })
 }

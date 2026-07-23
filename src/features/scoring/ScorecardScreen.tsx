@@ -4,6 +4,7 @@ import { buildHoleLedger } from '../../engine/ledger'
 import { formatCentsSigned } from '../../engine/core/money'
 import { GameSummary } from '../../components/GameSummary'
 import { useRound } from './useRound'
+import { holeLoop, ordinal } from './holeLoop'
 
 /**
  * The full picture: classic scorecard grids on top (tap a cell to correct),
@@ -28,9 +29,21 @@ export function ScorecardScreen() {
   const { round, ctx, derivations } = view
   const nameOf = new Map(round.players.map((p) => [p.playerId, p.name]))
   const activeGame = round.games.find((g) => g.gameId === selectedGameId) ?? round.games[0]
+  const loopOf = (holes: number[]) =>
+    holes[0] === undefined ? undefined : holeLoop(round.courseSnapshot, holes[0])
 
-  const half = (holes: number[]) => (
-    <div className="pixel overflow-x-auto border-stone-700 bg-stone-900/70">
+  const half = (holes: number[]) => {
+    const loop = loopOf(holes)
+    return (
+    <div>
+      {/* Two loops of a nine — the columns keep the card's 1–18 numbering, so
+          name each half rather than leave "10–18" looking like unplayed holes. */}
+      {loop && (
+        <h2 className="font-display mb-1 text-[10px] uppercase text-coin-400">
+          {ordinal(loop.nth)} time round
+        </h2>
+      )}
+      <div className="pixel overflow-x-auto border-stone-700 bg-stone-900/70">
       <table className="w-full text-center text-sm tabular-nums">
         <thead>
           <tr className="text-stone-400">
@@ -95,8 +108,10 @@ export function ScorecardScreen() {
           })}
         </tbody>
       </table>
+      </div>
     </div>
-  )
+    )
+  }
 
   const front = ctx.holesPlayed.filter((h) => h <= 9)
   const back = ctx.holesPlayed.filter((h) => h > 9)

@@ -1,7 +1,7 @@
 import type { Course } from '../engine/core/types'
 import { courseRepo } from '../db/repos'
 import { supabase } from './supabase'
-import { buildRemoteCourse, usableHoleRows, type RawTee } from './transform'
+import { buildRemoteCourse, normalizeTeeRatings, usableHoleRows, type RawTee } from './transform'
 
 export interface CourseSearchHit {
   id: string
@@ -173,8 +173,14 @@ export async function importCourseHit(hit: CourseSearchHit): Promise<Course> {
 async function importFromLibrary(hit: CourseSearchHit): Promise<Course> {
   const { data, error } = await supabase.from('courses').select('data').eq('id', hit.id).single()
   if (error || !data) throw new Error('course fetch failed')
-  const course = data.data as Course
-  await courseRepo.put({ ...course, source: 'remote', revision: 0 })
+  // The library is the one import path that skips buildRemoteCourse — a doc
+  // published before the 9-hole rating guard existed would otherwise keep an
+  // 18-hole rating forever, on every device that imports it.
+  // Return the NORMALIZED course (not the raw library doc), matching what we
+  // cached — bar courseRepo.put's own revision bump / updatedAt stamp, same as
+  // the other import paths below.
+  const course = { ...normalizeTeeRatings(data.data as Course), source: 'remote' as const, revision: 0 }
+  await courseRepo.put(course)
   return course
 }
 
