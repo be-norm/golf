@@ -14,6 +14,7 @@ import { enqueuePushRound } from '../../remote/outbox'
 import { LOCAL_USER } from '../../db/ids'
 import { RulesSheet } from '../games/RulesSheet'
 import { useRound } from './useRound'
+import { holeLoop, ordinal } from './holeLoop'
 import { ScoreRow } from './ScoreRow'
 
 export function ScoringScreen() {
@@ -66,6 +67,7 @@ export function ScoringScreen() {
 
   const { round, ctx, derivations } = view
   const currentHole = hole ?? derivedHole ?? ctx.holesPlayed[0]!
+  const loop = holeLoop(round.courseSnapshot, currentHole)
   const holeIdx = ctx.holesPlayed.indexOf(currentHole)
   // stroke dots show the first NET game's allocation (games[0] was arbitrary)
   const primaryGame = round.games.find((g) => g.handicap.mode === 'net') ?? round.games[0]
@@ -148,6 +150,14 @@ export function ScoringScreen() {
             <p className="font-display animate-stamp text-5xl text-white [text-shadow:4px_4px_0_rgb(0_0_0/0.6)]">
               {currentHole}
             </p>
+            {/* Two loops of a nine: say which tee they're actually standing on.
+                The first time round needs no explaining — the card number and
+                the hole are the same. */}
+            {loop && loop.nth > 1 && (
+              <p className="font-display mt-1 text-[10px] uppercase text-coin-400">
+                {ordinal(loop.nth)} time round · hole {loop.hole}
+              </p>
+            )}
             <p className="mt-2 text-lg text-stone-400">
               par {ctx.par(currentHole)} · si {ctx.strokeIndex(currentHole)}
             </p>

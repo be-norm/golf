@@ -1,23 +1,29 @@
 import { describe, expect, it } from 'vitest'
 import { buildRoundContext } from './context'
-import { makePlayers, makeRound } from '../test/harness'
-import type { HandicapSettings } from './types'
+import { makeCourse, makePlayers, makeRound } from '../test/harness'
+import type { Course, HandicapSettings } from './types'
 
 /**
  * Handicap-allowance allocation, verified by hand. The default test course
  * carries unique 18-hole stroke indexes 1..18, so a player's stroke on a hole
  * is decided purely by that hole's SI rank vs. their playing handicap.
  *
- * Pipeline order (context.ts): courseHandicap → applyAllowance(pct) →
+ * Pipeline order (context.ts): courseHandicapForTee (9-hole courses halve the
+ * INDEX there, before the round ever sees it) → applyAllowance(pct) →
  * 9-of-18 halving → off-low subtraction → allocateStrokes.
  */
 const GAME = 'game-1'
 
-function ctxFor(courseHandicaps: Record<string, number>, handicap: HandicapSettings, holes?: 'front9') {
+function ctxFor(
+  courseHandicaps: Record<string, number>,
+  handicap: HandicapSettings,
+  holes?: 'front9',
+  course?: Course,
+) {
   const players = makePlayers(
     Object.entries(courseHandicaps).map(([name, ch]) => ({ name, ch })),
   )
-  const round = makeRound({ players, holes, games: [{ type: 'skins', config: {}, handicap }] })
+  const round = makeRound({ players, holes, course, games: [{ type: 'skins', config: {}, handicap }] })
   const ctx = buildRoundContext(round, [])
   const strokesTotal = (name: string) =>
     ctx.holesPlayed.reduce((s, h) => s + ctx.strokesFor(GAME, round.players.find((p) => p.name === name)!.playerId, h), 0)
@@ -73,6 +79,23 @@ describe('allowance % → stroke allocation', () => {
     expect(eighty.strokesTotal('Bogey')).toBe(8)
     const full = ctxFor({ Scratch: 0, Bogey: 20 }, { mode: 'net', allowancePct: 100, reference: 'offLow' }, 'front9')
     expect(full.strokesTotal('Bogey')).toBe(10)
+  })
+
+  it('does NOT halve again on a true 9-hole course', () => {
+    // A nine's stored CH is already a 9-hole number — courseHandicapForTee
+    // halved the INDEX against the nine's own rating/slope — so the engine
+    // allocates it as-is. Halving here too (the 9-of-18 rule) would give 4.
+    const nine = makeCourse([4, 4, 3, 4, 3, 4, 4, 4, 3], [6, 2, 8, 4, 9, 1, 5, 3, 7])
+    const { strokesTotal, strokesOn } = ctxFor(
+      { Scratch: 0, Mid: 8 },
+      { mode: 'net', allowancePct: 100, reference: 'offLow' },
+      'front9',
+      nine,
+    )
+    expect(strokesTotal('Mid')).toBe(8)
+    // one stroke on the 8 hardest; hole 5 (SI 9, the easiest) is the odd one out
+    expect(strokesOn('Mid', 5)).toBe(0)
+    expect(strokesOn('Mid', 6)).toBe(1) // SI 1
   })
 
   it('gross mode ignores the allowance entirely', () => {

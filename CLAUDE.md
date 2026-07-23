@@ -19,8 +19,11 @@ Full plan/architecture history: see `docs/` and the games catalog in `docs/games
    `game/event`, `round/completed`, `round/reopened`, `meta/retract`). Standings are derived
    by full replay through pure reducers. Never mutate or delete events — undo is a
    `meta/retract` compensation event. `EventStore.append` is the only write path for events.
-   One sanctioned exception: round IMPORT (`importRound`) atomically replaces an entire
-   round's validated log — a restore, never an edit of a live log.
+   Two sanctioned exceptions, both outside a live log rather than edits within one:
+   round IMPORT (`importRound`) atomically replaces an entire round's validated log — a
+   restore; and a first-tee handicap adjustment (`roundRepo.setCourseHandicap`) rewrites
+   `Round.players` only while the log is EMPTY, enforced in the transaction, so nothing
+   derived can change under it.
    Game-event payloads are validated against each engine's `eventKinds` schema in
    `deriveRound`; events that fail validation are inert.
 3. **Money is integer cents.** Every game settlement must be zero-sum (asserted in tests).
@@ -28,7 +31,13 @@ Full plan/architecture history: see `docs/` and the games catalog in `docs/games
    editing a course never changes a played round.
 5. **Offline is the default.** The app must be fully functional with zero connectivity;
    Supabase (course library, round archive) is opportunistic only.
-6. **Sync-ready IDs.** Locally-minted entity IDs are UUIDv7; rows carry `updatedAt`.
+6. **Handicaps carry a dimension.** `RoundPlayer.courseHandicap` is the handicap for the course
+   *as rated*: 18-hole on an 18-hole course, 9-hole on a 9-hole course (halve the INDEX, per WHS —
+   `courseHandicapForTee`). Scaling it to the holes actually played is the engine's job
+   (`nineOfEighteen` halves the course handicap for 9 of 18 — a different adjustment, because
+   rating − par is an 18-hole term). A tee's rating shares that dimension: a 9-hole card carrying
+   an 18-hole rating inflates every handicap by ~30, so imports normalize it (`normalizeTeeRatings`).
+7. **Sync-ready IDs.** Locally-minted entity IDs are UUIDv7; rows carry `updatedAt`.
    Exception: courses imported from OpenGolfAPI keep the provider's UUID as their id —
    deliberate, so the same course dedupes across devices and the shared library
    (provenance lives in `source`/`source_id`). Tee-set ids are course-scoped slugs.

@@ -156,6 +156,12 @@ Outright low collects ace value from all; outright high pays deuce value to all 
   games need a carryover toggle. Point tables should be config-driven — sources disagree.
 - **9-hole rounds:** most games scale directly; Nassau collapses to one bet; Quota halves the
   base; Sixes becomes 3-3-3; 4-player Wolf uses trailing-player rule for the 9th hole.
+- **9-hole handicaps** are two different adjustments, and mixing them up doubles or halves every
+  payout. A true 9-hole course takes HALF the index against the nine's own rating/slope
+  (`courseHandicapForTee`, core/handicap.ts). Playing 9 of an 18-hole course instead halves the
+  post-allowance *course handicap*, since (rating − par) is an 18-hole term (`nineOfEighteen`,
+  core/context.ts). A nine played twice around tees off as a doubled 18-hole snapshot
+  (`doubleNine`, core/tees.ts) and so takes the full index.
 - **Team-score formats** (Scramble, Chapman, Foursomes) need team-score entry instead of
   per-player strokes — an input-model extension, deliberately deferred.
 

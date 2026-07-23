@@ -1,10 +1,10 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router'
 import { useLiveQuery } from 'dexie-react-hooks'
 import '../../engine/games'
 import { getEngine, listEngines } from '../../engine/catalog'
-import { courseHandicap } from '../../engine/core/handicap'
-import { applyTee, teePar } from '../../engine/core/tees'
+import { courseHandicapForTee } from '../../engine/core/handicap'
+import { applyTee, doubleNine } from '../../engine/core/tees'
 import type { Course, GameConfig, RoundHoles, TeeSet } from '../../engine/core/types'
 import { courseRepo, playerRepo, roundRepo } from '../../db/repos'
 import { LOCAL_USER, newId } from '../../db/ids'
@@ -33,9 +33,10 @@ let draftCounter = 0
 const nextDraftId = () => `draft-${++draftCounter}-${Math.random().toString(36).slice(2, 8)}`
 
 function computeCourseHandicap(index: number, course: Course | undefined, tee: TeeSet | undefined): number {
-  if (!course || !tee) return Math.round(index)
-  // Use the selected tee's own par (a "4/3" hole scores as its tee-specific par).
-  return courseHandicap(index, tee.slope, tee.rating, teePar(course, tee))
+  if (!course) return Math.round(index)
+  // Uses the selected tee's own par (a "4/3" hole scores as its tee-specific
+  // par) and halves the index on a 9-hole course — see courseHandicapForTee.
+  return courseHandicapForTee(index, course, tee)
 }
 
 export function SetupScreen() {
@@ -55,6 +56,54 @@ export function SetupScreen() {
   const [rulesFor, setRulesFor] = useState<string>()
 
   const course = courses?.find((c) => c.id === courseId)
+
+  // Pick a course + its first tee, and reset the hole range to that course's
+  // default — a nine to its nine, an eighteen to the full round. Without the
+  // reset a 'front9' left over from a previously-selected 9-hole course would
+  // silently tee an 18-hole course off as a partial round ('front9' is valid
+  // for both, so `playedHoles` wouldn't correct it).
+  const selectCourse = (c: Course) => {
+    setCourseId(c.id)
+    setTeeSetId(c.teeSets[0]?.id)
+    setHoles(c.holeCount === 9 ? 'front9' : 'full18')
+  }
+
+  const holeOptions: [RoundHoles, string][] =
+    course?.holeCount === 9
+      ? [
+          ['front9', '9 holes'],
+          ['full18', '18 (twice around)'],
+        ]
+      : [
+          ['full18', '18 holes'],
+          ['front9', 'Front 9'],
+          ['back9', 'Back 9'],
+        ]
+  // `courses` is a live query, so the selected course can change shape under a
+  // stale selection (a 'back9' left over from an 18-hole record would tee off
+  // with ZERO playable holes). Always play a range this course actually offers.
+  const playedHoles = holeOptions.some(([v]) => v === holes) ? holes : holeOptions[0]![0]
+
+  // A nine played twice around scores as an 18-hole course. `played` is the
+  // course as it will actually be played — the handicap chips and the frozen
+  // snapshot both read from it, so what you see on this screen is what tees off.
+  const playTwice = course?.holeCount === 9 && playedHoles === 'full18'
+  const played = useMemo(
+    () => (course && playTwice ? doubleNine(course) : course),
+    [course, playTwice],
+  )
+  const playedTee = played?.teeSets.find((t) => t.id === teeSetId)
+
+  // Handicaps get quietly scaled for a nine; say so rather than let the numbers
+  // look wrong.
+  const holesNote =
+    course?.holeCount === 9
+      ? playTwice
+        ? 'Two loops of the nine — full 18-hole handicaps.'
+        : "Nine-hole handicaps: half your index, off the nine's own rating."
+      : playedHoles === 'full18'
+        ? undefined
+        : 'Nine of eighteen — everyone plays off half their course handicap.'
 
   const addPlayer = (name: string) => {
     const trimmed = name.trim()
@@ -92,11 +141,7 @@ export function SetupScreen() {
   const draftRoundPlayers = players.map((p) => ({
     playerId: p.draftId,
     name: p.name,
-    courseHandicap: computeCourseHandicap(
-      p.handicapIndex,
-      course,
-      course?.teeSets.find((t) => t.id === teeSetId),
-    ),
+    courseHandicap: computeCourseHandicap(p.handicapIndex, played, playedTee),
   }))
 
   const problems =
@@ -112,8 +157,9 @@ export function SetupScreen() {
       : []
 
   const teeOff = async () => {
-    if (!course || !teeSetId) return
-    const tee = course.teeSets.find((t) => t.id === teeSetId)
+    // guard on the RESOLVED tee, not just the id: an unresolvable id would fall
+    // through to the un-rated handicap path and drop the tee's par/SI overlay
+    if (!course || !played || !playedTee) return
     const draftToReal = new Map<string, string>()
     const roundPlayers = await Promise.all(
       players.map(async (p) => {
@@ -121,7 +167,7 @@ export function SetupScreen() {
         if (p.ghinNumber && !player.ghinNumber) {
           await playerRepo.update(player.id, { ghinNumber: p.ghinNumber })
         }
-        const ch = computeCourseHandicap(p.handicapIndex, course, tee)
+        const ch = computeCourseHandicap(p.handicapIndex, played, playedTee)
         await playerRepo.rememberHandicap(player.id, p.handicapIndex, ch)
         draftToReal.set(p.draftId, player.id)
         // Keep the synced roster current — push the just-learned handicap so the
@@ -151,9 +197,11 @@ export function SetupScreen() {
       courseId: course.id,
       // Freeze the PLAYED tee's stroke index / par into the snapshot so the
       // engine (which reads courseSnapshot.holes) scores off the right tee.
-      courseSnapshot: applyTee(course, tee),
-      teeSetId,
-      holes,
+      // `played` is already doubled when a nine is being played twice around;
+      // courseId still points at the 9-hole course in the library.
+      courseSnapshot: applyTee(played, playedTee),
+      teeSetId: playedTee.id,
+      holes: playedHoles,
       players: roundPlayers,
       games: gameConfigs,
       status: 'live',
@@ -189,21 +237,13 @@ export function SetupScreen() {
           <CourseSearch
             localIds={new Set(courses?.map((c) => c.id))}
             placeholder="Search any course…"
-            onImported={(c) => {
-              setCourseId(c.id)
-              setTeeSetId(c.teeSets[0]?.id)
-              if (c.holeCount === 9) setHoles('front9')
-            }}
+            onImported={(c) => selectCourse(c)}
           />
           <div className="space-y-2">
             {courses?.map((c: Course) => (
               <button
                 key={c.id}
-                onClick={() => {
-                  setCourseId(c.id)
-                  setTeeSetId(c.teeSets[0]?.id)
-                  if (c.holeCount === 9) setHoles('front9')
-                }}
+                onClick={() => selectCourse(c)}
                 className={`block w-full px-4 py-4 text-left ${
                   c.id === courseId
                     ? 'pixel border-felt-300 bg-felt-700'
@@ -243,30 +283,25 @@ export function SetupScreen() {
                   ))}
                 </div>
               </div>
-              {course.holeCount === 18 && (
-                <div>
-                  <h2 className="font-display mb-2 text-[10px] uppercase text-stone-400">Holes</h2>
-                  <div className="flex gap-2">
-                    {(
-                      [
-                        ['full18', '18 holes'],
-                        ['front9', 'Front 9'],
-                        ['back9', 'Back 9'],
-                      ] as const
-                    ).map(([value, label]) => (
-                      <button
-                        key={value}
-                        onClick={() => setHoles(value)}
-                        className={`px-4 py-2.5 text-lg ${
-                          holes === value ? 'pixel border-felt-300 bg-felt-700' : 'pixel border-stone-700 bg-stone-900/70'
-                        }`}
-                      >
-                        {label}
-                      </button>
-                    ))}
-                  </div>
+              <div>
+                <h2 className="font-display mb-2 text-[10px] uppercase text-stone-400">Holes</h2>
+                <div className="flex gap-2">
+                  {holeOptions.map(([value, label]) => (
+                    <button
+                      key={value}
+                      onClick={() => setHoles(value)}
+                      className={`px-4 py-2.5 text-lg ${
+                        playedHoles === value
+                          ? 'pixel border-felt-300 bg-felt-700'
+                          : 'pixel border-stone-700 bg-stone-900/70'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
                 </div>
-              )}
+                {holesNote && <p className="mt-2 text-xs text-stone-500">{holesNote}</p>}
+              </div>
             </>
           )}
         </section>
@@ -369,12 +404,7 @@ export function SetupScreen() {
                     />
                   </label>
                   <span className="font-display min-w-16 text-center text-[10px] text-felt-300">
-                    HCP{' '}
-                    {computeCourseHandicap(
-                      p.handicapIndex,
-                      course,
-                      course?.teeSets.find((t) => t.id === teeSetId),
-                    )}
+                    HCP {computeCourseHandicap(p.handicapIndex, played, playedTee)}
                   </span>
                 </div>
               </li>

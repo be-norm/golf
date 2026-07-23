@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import fc from 'fast-check'
-import { allocateStrokes, applyAllowance, courseHandicap, rankStrokeIndexes } from './handicap'
+import {
+  allocateStrokes,
+  applyAllowance,
+  courseHandicap,
+  courseHandicapForTee,
+  rankStrokeIndexes,
+} from './handicap'
+import { makeCourse } from '../test/harness'
+import type { Course, TeeSet } from './types'
 
 describe('courseHandicap (WHS)', () => {
   it('matches the WHS formula', () => {
@@ -8,6 +16,47 @@ describe('courseHandicap (WHS)', () => {
     expect(courseHandicap(10.4, 125, 71.2, 72)).toBe(11)
     // plus handicap
     expect(courseHandicap(-2.0, 113, 72.0, 72)).toBe(-2)
+  })
+})
+
+describe('courseHandicapForTee', () => {
+  const rated = (pars: number[], tee: Partial<TeeSet>): Course => {
+    const course = makeCourse(
+      pars,
+      pars.map((_, i) => i + 1),
+    )
+    return { ...course, teeSets: [{ ...course.teeSets[0]!, ...tee }] }
+  }
+  const eighteen = rated(Array<number>(18).fill(4), {}) // par 72, 71.2/125
+  // Penmar: 9 holes, par 33, slope 103, no published rating (falls back to par).
+  const penmar = rated([4, 4, 3, 4, 3, 4, 4, 4, 3], { rating: 33, slope: 103 })
+
+  it('takes the full index on an 18-hole course', () => {
+    expect(courseHandicapForTee(10.4, eighteen, eighteen.teeSets[0])).toBe(11)
+  })
+
+  it('halves the index on a 9-hole course (WHS 9-hole handicap)', () => {
+    // (16.5 ÷ 2) × (103/113) + (33 − 33) = 7.52 → 8.
+    // The bug this replaced used the FULL index and handed out 15 strokes.
+    expect(courseHandicapForTee(16.5, penmar, penmar.teeSets[0])).toBe(8)
+  })
+
+  it('halves plus handicaps on a nine too', () => {
+    // (−4 ÷ 2) × (103/113) = −1.82 → −2
+    expect(courseHandicapForTee(-4, penmar, penmar.teeSets[0])).toBe(-2)
+  })
+
+  it('uses the tee’s own par (a 4/3 hole scores as its tee-specific par)', () => {
+    // a forward tee where hole 8 plays as a par 3 → par 32, rating still 33
+    const forward: TeeSet = { ...penmar.teeSets[0]!, pars: [4, 4, 3, 4, 3, 4, 4, 3, 3] }
+    expect(courseHandicapForTee(16.5, penmar, forward)).toBe(9) // 7.52 + 1
+  })
+
+  it('still halves on a nine when no tee resolves', () => {
+    // The unrated fallback must not smuggle the full index back in — that IS
+    // the bug, just via the branch that skips the rating.
+    expect(courseHandicapForTee(16.5, penmar, undefined)).toBe(8) // 16.5/2 → 8.25 → 8
+    expect(courseHandicapForTee(10.4, eighteen, undefined)).toBe(10)
   })
 })
 
