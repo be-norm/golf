@@ -59,6 +59,28 @@ Full plan/architecture history: see `docs/` and the games catalog in `docs/games
   DB password in untracked `.env.local`. Course data source: OpenGolfAPI (ODbL — keep
   attribution + provenance columns; publish transformed dump).
 
+## Native app (planned — read before touching PWA or auth surface)
+
+Store distribution via **Capacitor** is planned (iOS first). Plan of record:
+`docs/native-app-plan.md`. `src/**` ships into the shell unchanged, so ordinary feature
+work needs no adaptation — but two constraints apply to work done before the conversion:
+
+- **Don't invest in service-worker / install UX.** Service workers do not run in
+  Capacitor's iOS WKWebView; `UpdateToast` and `InstallHint` get gated off natively.
+  Polish there is work that will be discarded.
+- **Don't enable `VITE_GOOGLE_AUTH`.** Shipping a third-party social login obligates
+  Sign in with Apple (App Store guideline 4.8). Email + guest only until that's budgeted.
+
+One store requirement is on the *near* side of the conversion — build it web-first, where
+it's easier to test: **in-app account deletion** (guideline 5.1.1(v), mandatory because the
+app creates accounts).
+
+**Auth sends no email links today, and that's what keeps it native-safe.** Confirmation is
+off (`supabase/config.toml`: `enable_confirmations = false`), so `signUp` returns a session
+directly, and there's no password-reset flow. A link can't return a session to
+`capacitor://localhost`, so if you ever add email confirmation, password reset, or email
+change, use a 6-digit code (`{{ .Token }}` + `verifyOtp`) rather than a link.
+
 ## Auth & sync
 
 - **Guest-first, not login-walled.** Supabase Auth (email/password; Google is behind
