@@ -70,8 +70,8 @@ export function AccountScreen() {
         <section className="pixel border-stone-700 bg-stone-900/70 p-4">
           <h2 className="font-display mb-2 text-[10px] uppercase text-stone-400">Danger zone</h2>
           <p className="text-lg text-stone-400">
-            Deleting your account removes it and your synced rounds permanently. This can’t be
-            undone.
+            Deleting your account signs you out and removes your synced rounds. Deletion finishes
+            within 30 days.
           </p>
           <BigButton
             variant="danger"
@@ -107,10 +107,17 @@ export function AccountScreen() {
       <Sheet open={confirmOpen} onClose={() => !busy && setConfirmOpen(false)}>
         <h2 className="font-display text-sm uppercase text-flag-500">Delete account?</h2>
         <p className="mt-3 text-lg text-stone-300">
-          This permanently deletes your account and every round synced to it. Rounds you tracked
-          before signing in stay on this device.
+          This deletes your account and every round synced to it. Rounds you tracked before signing
+          in stay on this device.
         </p>
-        <p className="mt-2 text-lg text-stone-400">This cannot be undone.</p>
+        {/* Apple 5.1.1(v) allows deletion that takes time, but requires telling
+            the user how long. It doubles as the honest description of the grace
+            period: reinstatement is possible by hand until the purge runs. */}
+        <p className="mt-2 text-lg text-stone-400">
+          You can sign up again with the same email straight away. Deletion completes within 30
+          days — if it was a mistake, contact support before then and we may be able to bring your
+          rounds back.
+        </p>
         {error && <p className="mt-3 text-lg text-flag-500">{error}</p>}
         <div className="mt-5 flex flex-col gap-2">
           <BigButton variant="danger" disabled={busy} onClick={() => void onDelete()}>

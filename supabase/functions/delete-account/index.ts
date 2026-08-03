@@ -11,6 +11,19 @@
 // the user published are deliberately NOT deleted: `courses.created_by` is
 // `on delete set null`, so the shared library survives with authorship cleared.
 //
+// The 30-day grace period: because the delete is hard (which is what frees the
+// email for an immediate re-signup), the data is copied into
+// `deleted_account_archives` BEFORE the user is removed — that table has no FK
+// to auth.users, so it survives the cascade. An admin can reinstate from it by
+// re-keying onto the person's new uid. A nightly cron purges it at 30 days.
+// Supabase's own soft-delete is deliberately not used: it SHA256-hashes the
+// email and is documented as "not reversible", so it would block re-signup
+// while destroying exactly the data reinstatement needs.
+//
+// Archiving is best-effort by design: a failure there must not stop the
+// deletion. The user asked to be deleted, and honouring that outranks our
+// ability to undo it.
+//
 // Deno runtime (Supabase Edge Functions). Not part of the Vite app build.
 
 const cors = {
@@ -41,6 +54,55 @@ function decodeJwtPayload(token: string): Record<string, unknown> | null {
   }
 }
 
+/**
+ * Copy the user's rows into `deleted_account_archives` so an admin can reinstate
+ * an accidental deletion inside the retention window.
+ *
+ * Swallows its own failures: the caller asked to be deleted, and a snapshot we
+ * keep for OUR convenience must never be the reason that doesn't happen. A
+ * failed archive costs the undo, not the deletion.
+ */
+async function archive(
+  url: string,
+  serviceKey: string,
+  uid: string,
+  email: string,
+): Promise<void> {
+  const headers = {
+    Authorization: `Bearer ${serviceKey}`,
+    apikey: serviceKey,
+    'Content-Type': 'application/json',
+  }
+  try {
+    const [rounds, players] = await Promise.all([
+      fetch(`${url}/rest/v1/round_archives?user_id=eq.${uid}&select=round_id,data`, { headers })
+        .then((r) => (r.ok ? r.json() : []))
+        .catch(() => []),
+      fetch(`${url}/rest/v1/players?user_id=eq.${uid}&select=*`, { headers })
+        .then((r) => (r.ok ? r.json() : []))
+        .catch(() => []),
+    ])
+
+    // Nothing worth keeping — skip the row rather than bank an empty archive
+    // that still holds the email for 30 days.
+    if (!rounds?.length && !players?.length) return
+
+    await fetch(`${url}/rest/v1/deleted_account_archives`, {
+      method: 'POST',
+      // The same person deleting twice (a retry, or delete → re-signup →
+      // delete) must not 409 on the uid primary key.
+      headers: { ...headers, Prefer: 'resolution=merge-duplicates' },
+      body: JSON.stringify({
+        original_user_id: uid,
+        email,
+        payload: { rounds, players },
+      }),
+    })
+  } catch {
+    // Deliberately silent — see the note above.
+  }
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
   if (req.method !== 'POST') return json({ error: 'method not allowed' }, 405)
@@ -60,6 +122,9 @@ Deno.serve(async (req: Request) => {
   const url = Deno.env.get('SUPABASE_URL')
   const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
   if (!url || !serviceKey) return json({ error: 'server misconfigured' }, 500)
+
+  const email = typeof payload?.email === 'string' ? payload.email : ''
+  await archive(url, serviceKey, uid, email)
 
   // The uid comes from the caller's own verified token, never from the request
   // body — a user can only ever delete themselves.

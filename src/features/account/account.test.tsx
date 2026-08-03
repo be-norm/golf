@@ -59,7 +59,7 @@ describe('AccountScreen', () => {
     await userEvent.click(await screen.findByRole('button', { name: /delete account/i }))
 
     // The sheet is open, but nothing has happened yet.
-    expect(await screen.findByText(/this cannot be undone/i)).toBeInTheDocument()
+    expect(await screen.findByText(/deletion completes within 30 days/i)).toBeInTheDocument()
     expect(deleteAccountMock).not.toHaveBeenCalled()
 
     await userEvent.click(screen.getByRole('button', { name: /cancel/i }))
@@ -86,6 +86,18 @@ describe('AccountScreen', () => {
     // the user has to know whether their data is actually gone.
     expect(await screen.findByText(/could not delete your account/i)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /yes, delete everything/i })).toBeEnabled()
+  })
+
+  it('tells the user how long deletion takes before they confirm', async () => {
+    authMock.setSession(SIGNED_IN)
+    renderAccount()
+    await userEvent.click(await screen.findByRole('button', { name: /delete account/i }))
+
+    // Apple 5.1.1(v) accepts deletion that takes time to complete, but only if
+    // the user is told how long — so the window is a requirement, not flavour.
+    expect(await screen.findByText(/deletion completes within 30 days/i)).toBeInTheDocument()
+    // The email frees up immediately, so re-signup must not look blocked.
+    expect(screen.getByText(/sign up again with the same email/i)).toBeInTheDocument()
   })
 
   it('shows no danger zone for a guest', async () => {
