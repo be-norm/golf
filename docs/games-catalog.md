@@ -141,6 +141,8 @@ Last 3-putter holds the snake; fixed or doubling pot.
 
 ### 22. Banker — Tier 2–3. Inputs: banker rotation, per-opponent wagers, presses.
 Rotating banker plays simultaneous 1v1 hole matches vs everyone at chosen stakes.
+Wagers and presses are optional player-initiated actions (`availableActions`), not blocking
+prompts — see the two-channels note below.
 
 ### 23. Defender — Tier 3, strokes-only. 3 players rotating 1-v-2 best ball; ±2/0.
 
@@ -150,6 +152,9 @@ Outright low collects ace value from all; outright high pays deuce value to all 
 ### 25. Trouble — Tier 3. Inputs: trouble events (water, OB, 3-putt, tree, whiff...). Inverse junk.
 
 ### 26. Hammer — Tier 2. Inputs: hammer throws + accept/fold. Hole value doubles per accepted hammer.
+The clean case for both channels at once: the **throw** is optional and player-initiated
+(`availableActions`), the **accept/fold** is blocking (`requiredInputs`) — until it's answered
+the hole has no value. Modelling the throw as a prompt would nag on every hole.
 
 ### 27. Umbrella — Tier 3. 2v2, 6-point categories per hole; sweep = double.
 
@@ -164,6 +169,18 @@ Outright low collects ace value from all; outright high pays deuce value to all 
 - **Derivable vs not:** birdies/eagles, hole winners, stableford/quota points are all derivable
   from gross + par + SI + CH. Wolf picks, BBB winners, junk awards, putts, hammer/press/wager
   decisions, and team-format team scores are not — they arrive as `game/event`s.
+- **Two channels for those events, and picking the wrong one is a real bug.** Sort every
+  non-derivable input by whether the hole can compute without it:
+  - **Blocking → `requiredInputs` / `InputRequest`.** The hole is stuck until someone answers
+    (Wolf's pick, a hammer accept/fold, BBB's point winners). Right to interrupt scoring.
+  - **Optional, player-initiated → `availableActions` / `GameAction`.** Legal but not required
+    (a Nassau press, a hammer throw, a Banker wager). These live behind a button and only
+    *badge* when the game's convention says act now (`recommended`).
+
+  Availability ("this is legal") is true on most holes; recommendation ("do it now") is rare.
+  Nassau shipped them on one channel and nagged "Press?" on every hole while never saying why
+  (MAI-34). A `GameAction` carries its own argument — `detail` (why it's offered) and `effect`
+  (what taking it creates, quoted at what it costs the side being invited).
 - **Every game needs:** gross/net toggle + allowance, bet unit, ties policy; most per-hole money
   games need a carryover toggle. Point tables should be config-driven — sources disagree.
 - **9-hole rounds:** most games scale directly; Nassau collapses to one bet; Quota halves the
