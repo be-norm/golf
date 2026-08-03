@@ -10,6 +10,7 @@ import { CourseListScreen } from '../features/courses/CourseListScreen'
 import { CourseEditorScreen } from '../features/courses/CourseEditorScreen'
 import { DiagnosticsScreen } from '../features/diagnostics/DiagnosticsScreen'
 import { PlayersScreen } from '../features/players/PlayersScreen'
+import { AccountScreen } from '../features/account/AccountScreen'
 
 export const routes: RouteObject[] = [
   {
@@ -19,6 +20,7 @@ export const routes: RouteObject[] = [
       { path: '/setup', element: <SetupScreen /> },
       { path: '/players', element: <PlayersScreen /> },
       { path: '/courses', element: <CourseListScreen /> },
+      { path: '/account', element: <AccountScreen /> },
       { path: '/diagnostics', element: <DiagnosticsScreen /> },
       { path: '/courses/new', element: <CourseEditorScreen /> },
       { path: '/courses/:courseId/edit', element: <CourseEditorScreen /> },

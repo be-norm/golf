@@ -1,0 +1,47 @@
+name: Purge deleted-account archives
+
+# Bounded retention is what makes account deletion compliant rather than a
+# disguised deactivation (App Store guideline 5.1.1(v)). pg_cron is the primary
+# trigger where the plan supports it; this is the fallback that works on any
+# tier. Both call the same `purge_deleted_account_archives()` function, so
+# running both is harmless -- the second just purges zero rows.
+#
+# Requires repo secrets SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY. The function
+# is execute-granted to service_role only, so the anon key will not work here.
+#
+# NOTE: GitHub disables scheduled workflows in repos with no activity for 60
+# days. If this repo ever goes quiet, confirm this job is still running -- a
+# silently disabled purge is the failure mode that matters.
+
+on:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  purge:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call purge function
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          if [ -z "$SUPABASE_URL" ] || [ -z "$SERVICE_ROLE_KEY" ]; then
+            echo "::error::SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY not set — archives are NOT being purged."
+            exit 1
+          fi
+
+          # --fail-with-body so an HTTP error is a failed job, not a green run
+          # that quietly purged nothing.
+          purged=$(curl --fail-with-body -sS -X POST \
+            "$SUPABASE_URL/rest/v1/rpc/purge_deleted_account_archives" \
+            -H "apikey: $SERVICE_ROLE_KEY" \
+            -H "Authorization: Bearer $SERVICE_ROLE_KEY" \
+            -H "Content-Type: application/json" \
+            -d '{}')
+
+          echo "Purged $purged expired archive(s)."
