@@ -1,8 +1,8 @@
 import { z } from 'zod'
-import type { GameEngine, GameDerivation, InputRequest, StandingLine } from '../../catalog'
+import type { GameAction, GameEngine, GameDerivation, InputRequest, StandingLine } from '../../catalog'
 import type { RoundContext } from '../../core/context'
 import type { GameScopedEvent } from '../../core/events'
-import { addLine, emptySettlement, type Settlement } from '../../core/money'
+import { addLine, emptySettlement, formatCents, type Settlement } from '../../core/money'
 import { firstName } from '../../core/summary'
 import { teamsSchema, nonEmptyPartitionProblems } from '../../core/teams'
 import type { GameConfig, HandicapSettings, RoundPlayer, Uuid } from '../../core/types'
@@ -79,14 +79,24 @@ function derive(
     else holeResult.set(hole, a < b ? 1 : b < a ? -1 : 0)
   }
 
-  // Manual presses dedupe by segment+hole: tapping the offer twice (or a
-  // re-imported duplicate event) must not create a double-stake bet.
   const manualPresses = new Map<string, { hole: number; segment: Segment }>()
   for (const e of events) {
     if (e.kind !== 'nassau/press') continue
     const data = e.data as { hole: number; segment: Segment }
     manualPresses.set(`${data.segment}-${data.hole}`, data)
   }
+
+  // PRESS IDENTITY — there is exactly ONE press bet per (segment, startHole),
+  // whatever created it. A press IS that pair: a parent and its own presses
+  // being down all point at the same new bet over the same holes for the same
+  // stake, so a parent-triggered auto-press, a press-triggered auto-press and a
+  // hand-tapped press landing on the same segment and hole are one bet, not
+  // three. Without this, two bets with identical spans and identical ledger
+  // labels both settle and the group pays a press they only wrote down once —
+  // and zero-sum still holds, so the property fuzz never sees it (MAI-34).
+  // Manual presses are registered first, so a hand-tapped press wins the slot.
+  const pressStarts = new Set<string>()
+  const pressKey = (segment: Segment, hole: number) => `${segment}-${hole}`
 
   const bets: Bet[] = (['front', 'back', 'overall'] as const)
     .filter((seg) => spans[seg].length > 0)
@@ -103,6 +113,7 @@ function derive(
 
   for (const press of manualPresses.values()) {
     if (!spans[press.segment].includes(press.hole)) continue
+    pressStarts.add(pressKey(press.segment, press.hole))
     bets.push({
       id: `press-${press.segment}-${press.hole}`,
       segment: press.segment,
@@ -134,6 +145,11 @@ function derive(
         spans[bet.segment].some((h) => h > hole)
       ) {
         const nextHole = spans[bet.segment].find((h) => h > hole)!
+        // one bet per (segment, startHole) — a parent and one of its own
+        // presses can both cross ±2 on this same hole, and both want to open
+        // the same press
+        if (pressStarts.has(pressKey(bet.segment, nextHole))) continue
+        pressStarts.add(pressKey(bet.segment, nextHole))
         bets.push({
           id: `auto-${bet.id}-@${nextHole}`,
           segment: bet.segment,
@@ -226,11 +242,41 @@ function derive(
     return `${status} · ${b.holesRemaining} to play`
   }
 
-  // play order: each nine's bet followed by its presses, overall last
+  /**
+   * The deficit that justifies pressing a segment at `asOf`: the worst position
+   * ANY live bet in that segment is in, as of the last hole decided before it.
+   *
+   * Shared by the press offer and the ledger's press explanation, deliberately.
+   * A press is very often triggered by another PRESS going 2 down while the
+   * parent bet sits all square, so reading the parent alone would report "AS"
+   * as the reason a press exists. And two copies of the press rule drifting
+   * apart is exactly what MAI-34 was — one helper, two call sites.
+   */
+  const pressDeficit = (
+    segment: Segment,
+    asOf: number,
+  ): { trailing: 'a' | 'b'; by: number } | null => {
+    const decided = spans[segment].filter((h) => h < asOf && (holeResult.get(h) ?? null) !== null)
+    const at = decided[decided.length - 1]
+    if (at === undefined) return null
+    let worst = 0
+    for (const b of bets) {
+      if (b.segment !== segment || b.startHole >= asOf) continue
+      const d = b.history.get(at)
+      if (d !== undefined && Math.abs(d) > Math.abs(worst)) worst = d
+    }
+    if (worst === 0) return null
+    return { trailing: worst > 0 ? 'b' : 'a', by: Math.abs(worst) }
+  }
+
+  // play order: each nine's bet followed by its presses, overall last.
+  // Presses sort by the hole they START from, not by press depth — a press of a
+  // press can begin BEFORE a later press of the parent, and a ledger that lists
+  // "@3 · @7 · @5" reads as a mistake to the person holding the phone.
   const ordered = (['front', 'back', 'overall'] as const).flatMap((seg) =>
     bets
       .filter((b) => b.segment === seg)
-      .sort((a, b) => a.depth - b.depth || a.startHole - b.startHole),
+      .sort((a, b) => a.startHole - b.startHole || a.depth - b.depth),
   )
   const detailLines = ordered.map((b) => ({
     label: betLabel(b),
@@ -260,33 +306,49 @@ function derive(
     )
     .join(' · ')
 
-  // Manual-press affordance: on the active frontier hole, a side that is down
-  // in a live bet may press (optional chip — never blocks scoring). Segments
-  // already pressed at this hole are not offered again.
-  const requiredInputs = (): InputRequest[] => {
-    if (autoPress) return []
+  // Nassau blocks on nothing: every hole computes from scores alone.
+  const requiredInputs = (): InputRequest[] => []
+
+  /**
+   * The press offer. AVAILABILITY, not recommendation — a press is legal
+   * whenever a side is behind, which is most holes, so this lives behind a
+   * button and only `recommended` (the traditional 2 down) gets badged.
+   *
+   * Offered on the frontier hole, i.e. while the group is standing on that tee,
+   * and the press runs from there. Deliberately independent of `autoPress`:
+   * auto covers the convention, this covers judgment (knowing your man is
+   * fading, knowing you own the back nine) — reasons no threshold can see.
+   * One offer per segment, since a press IS (segment, startHole) however many
+   * of that segment's bets are down.
+   */
+  const availableActions = (): GameAction[] => {
     const frontier = ctx.holesPlayed.find((h) => holeResult.get(h) === null)
     if (frontier === undefined) return []
-    const pressable = bets.filter(
-      (b) =>
-        b.diff !== 0 &&
-        spans[b.segment].includes(frontier) &&
-        frontier > b.startHole &&
-        !manualPresses.has(`${b.segment}-${frontier}`),
-    )
-    if (pressable.length === 0) return []
-    const segments = [...new Set(pressable.map((b) => b.segment))]
-    return [
-      {
-        id: `nassau-press-${frontier}`,
+    const actions: GameAction[] = []
+    for (const seg of ['front', 'back', 'overall'] as const) {
+      if (!spans[seg].includes(frontier)) continue
+      if (pressStarts.has(pressKey(seg, frontier))) continue
+      const down = pressDeficit(seg, frontier)
+      // all square: nothing to catch up on, and no side owns the decision
+      if (!down) continue
+      const toPlay = spans[seg].filter(
+        (h) => h >= frontier && (holeResult.get(h) ?? null) === null,
+      ).length
+      const last = spans[seg][spans[seg].length - 1]!
+      const span = frontier === last ? `hole ${last}` : `holes ${frontier}–${last}`
+      actions.push({
+        id: `nassau-press-${seg}-${frontier}`,
         gameId: game.gameId,
         hole: frontier,
-        prompt: 'Press?',
-        optional: true,
-        options: segments.map((seg) => ({ value: seg, label: `Press ${SEGMENT_LABEL[seg]}` })),
+        label: `Press ${segLabel(seg)}`,
+        detail: `${sideShort(down.trailing)} ${down.by} down · ${toPlay} to play`,
+        effect: `New ${formatCents(stakeCents)} bet · ${span}`,
+        recommended: down.by >= 2,
         eventKind: 'nassau/press',
-      },
-    ]
+        data: { hole: frontier, segment: seg },
+      })
+    }
+    return actions
   }
 
   // Per-hole narration for the money ledger: who won the hole, how the bet
@@ -299,9 +361,16 @@ function derive(
   for (const h of ctx.holesPlayed) {
     for (const b of bets) {
       if (b.depth > 0 && b.startHole === h) {
-        // explain WHY the press exists: auto-presses fire at 2 down, manual
-        // presses are the trailing side choosing to double down
-        const why = b.id.startsWith('auto-') ? '2 down → auto-press' : 'trailing side pressed'
+        // explain WHY the press exists, in the terms the group argued it in:
+        // who was down and by how much — read from the same rule that offered
+        // it, so the ledger and the offer never tell different stories
+        const down = pressDeficit(b.segment, h)
+        const auto = b.id.startsWith('auto-')
+        const why = down
+          ? `${sideShort(down.trailing)} ${down.by} down${auto ? ' → auto-press' : ' → pressed'}`
+          : auto
+            ? 'auto-press'
+            : 'pressed'
         note(h, `${betLabel(b)} starts (${why})`)
       }
     }
@@ -348,6 +417,7 @@ function derive(
     detailLines,
     holeSummary,
     requiredInputs,
+    availableActions,
     settlement,
   }
 }
@@ -364,7 +434,8 @@ export const nassauEngine: GameEngine<NassauConfig> = {
       howToPlay: [
         'Match play: each hole is won, lost, or halved. Lowest net score takes the hole — on a team, only its better ball counts.',
         'The front nine, back nine, and full 18 run as three separate bets at the same stake. A hole feeds its nine AND the overall.',
-        'Fall 2 down on any bet and a press starts (automatic if auto-press is on): a fresh bet at the same stake from the next hole to the end of that segment. Presses can themselves be pressed.',
+        "Down on a bet? Tap PRESS to start a fresh bet at the same stake, running from the next hole to the end of that bet's stretch. Presses can themselves be pressed.",
+        'You may press any bet you are behind on, by any margin — 2 down is the traditional moment, and the button flags it, but the call is yours. With auto-press on, a press also starts by itself at 2 down.',
         'A 9-hole round collapses to a single overall bet.',
       ],
       scoring: [
@@ -376,9 +447,9 @@ export const nassauEngine: GameEngine<NassauConfig> = {
       terms: [
         {
           term: 'Press',
-          def: "A new same-stake bet started when a side is 2 down, running from the next hole to the end of the original bet's stretch.",
+          def: "A new same-stake bet the trailing side starts, running from that hole to the end of the original bet's stretch. Traditionally taken at 2 down, but available whenever you're behind.",
         },
-        { term: 'Auto-press', def: 'A press that starts itself the moment any live bet hits 2 down.' },
+        { term: 'Auto-press', def: 'A press that starts itself the moment any live bet hits 2 down. Optional — you can still press by hand on top of it.' },
         { term: 'Halve', def: 'A tied hole — nobody gains ground on any bet.' },
         { term: 'All square (AS)', def: 'A bet where neither side is up.' },
         { term: 'Push', def: 'A bet that ends tied — no money moves.' },

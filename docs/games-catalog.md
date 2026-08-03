@@ -25,13 +25,21 @@ Each hole worth one skin; outright lowest (gross or net) wins it, any tie = no s
 - Config: stakeCents, carryover, handicap mode (gross / net full / net off-low).
 
 ### 2. Nassau
-**Format:** 2 individuals or 2v2 best-ball. **Tier 1.** Extra inputs: press declarations (unless auto).
+**Format:** 2 individuals or 2v2 best-ball. **Tier 1.** Extra inputs: press declarations (always
+available, independent of auto-press).
 Three equal match-play bets: Front 9, Back 9, Overall 18. Hole won by lower net (best ball in teams);
 +1/0/−1 per hole per relevant bet. Tied segment = push.
 - **Presses:** new bet at same stake from declaration hole to end of parent bet's segment.
-  Convention: only the down side presses, traditionally at 2-down; presses can be pressed.
-  **Auto-press (config):** spawn press whenever any live bet reaches 2-down (one per event,
-  none with 1 hole left).
+  Only the down side presses; presses can be pressed. **Available at ANY deficit, not gated at
+  2-down** — 2-down is the traditional moment and the UI badges it, but a player pressing on
+  read (knowing an opponent is fading, knowing they own the back nine) is the normal case, not
+  an exception. A 1-hole press at the end of a stretch is allowed.
+  **Auto-press (config):** spawn press whenever any live bet reaches 2-down. Manual presses stay
+  available alongside it: auto covers the convention, the button covers judgment.
+- **Press identity — exactly one bet per (segment, startHole), whatever created it.** A parent
+  and its own presses can cross 2-down on the same hole and all point at the same new bet; so
+  can a hand-tapped press. Collapsing them is load-bearing: duplicates settle twice while
+  staying zero-sum, so the property fuzz cannot see the error (MAI-34).
 - Handicaps: 100% of CH difference off the low player (90% each off low ball in four-ball).
 - 9-hole round: collapses to a single match bet.
 - Config: stake per bet, individual vs 2v2, press rules (manual/auto/threshold/re-press), gross/net.
