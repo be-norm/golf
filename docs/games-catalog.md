@@ -25,8 +25,8 @@ Each hole worth one skin; outright lowest (gross or net) wins it, any tie = no s
 - Config: stakeCents, carryover, handicap mode (gross / net full / net off-low).
 
 ### 2. Nassau
-**Format:** 2 individuals or 2v2 best-ball. **Tier 1.** Extra inputs: press declarations (always
-available, independent of auto-press).
+**Format:** 2 individuals or 2v2 best-ball. **Tier 1.** Extra inputs: press declarations (offered
+on the tee about to be played, independent of the auto-press setting).
 Three equal match-play bets: Front 9, Back 9, Overall 18. Hole won by lower net (best ball in teams);
 +1/0/−1 per hole per relevant bet. Tied segment = push.
 - **Presses:** new bet at same stake from declaration hole to end of parent bet's segment.
@@ -40,6 +40,10 @@ Three equal match-play bets: Front 9, Back 9, Overall 18. Hole won by lower net 
   and its own presses can cross 2-down on the same hole and all point at the same new bet; so
   can a hand-tapped press. Collapsing them is load-bearing: duplicates settle twice while
   staying zero-sum, so the property fuzz cannot see the error (MAI-34).
+- **Undo follows ownership, not authorship.** A hand-tapped press can be toggled back off
+  (`meta/retract` over its event). A press auto-press would open anyway cannot — retracting the
+  event would only let the rules re-create the identical bet, so the UI shows it running and
+  inert rather than offering an undo that does nothing.
 - Handicaps: 100% of CH difference off the low player (90% each off low ball in four-ball).
 - 9-hole round: collapses to a single match bet.
 - Config: stake per bet, individual vs 2v2, press rules (manual/auto/threshold/re-press), gross/net.

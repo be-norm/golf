@@ -102,12 +102,12 @@ describe('ScoringScreen', () => {
    * interrupting — and only turns gold when the 2-down convention says act.
    * `holesWon` scripts Ann beating Bob on the given holes so a deficit builds.
    */
-  async function nassauRound(id: string, holesWon: number[]) {
+  async function nassauRound(id: string, holesWon: number[], autoPress = false) {
     // full 18 deliberately: a 9-hole round collapses to ONE bet, so the
     // multi-bet offer (F9 and 18 both live) would never be exercised
     const round = makeRound({
       players: makePlayers([{ name: 'Ann' }, { name: 'Bob' }]),
-      games: [{ type: 'nassau', config: { stakeCents: 500, teams: null, autoPress: false } }],
+      games: [{ type: 'nassau', config: { stakeCents: 500, teams: null, autoPress } }],
     })
     round.id = id
     round.games[0]!.handicap = { mode: 'gross', reference: 'offLow', allowancePct: 100 }
@@ -224,5 +224,27 @@ describe('ScoringScreen', () => {
     await waitFor(async () => {
       expect(await pressButton()).toHaveAccessibleName('press options — 2 available')
     })
+  })
+
+  it('an auto-press shows as running but offers no undo — it is not the player’s', async () => {
+    // auto-press on, 2 down after hole 2 → the rules opened a press at hole 3
+    const round = await nassauRound('round-press-auto', [1, 2], true)
+    const router = createMemoryRouter(routes, { initialEntries: [`/round/${round.id}`] })
+    render(<RouterProvider router={router} />)
+
+    // nothing left to TAKE — both segments are already pressed by the rules
+    const button = await screen.findByRole('button', { name: 'press options — 0 available' })
+    await userEvent.click(button)
+
+    const row = await screen.findByRole('button', { name: /Press F9/ })
+    expect(row).toHaveAttribute('aria-pressed', 'true')
+    expect(row).toBeDisabled()
+    expect(row).toHaveTextContent(/auto/i)
+    expect(row).not.toHaveTextContent(/tap to undo/i)
+
+    // and tapping it changes nothing — no retract, no new events
+    const before = await eventStore.list(round.id)
+    await userEvent.click(row)
+    expect(await eventStore.list(round.id)).toHaveLength(before.length)
   })
 })

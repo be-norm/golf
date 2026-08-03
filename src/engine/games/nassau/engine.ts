@@ -103,6 +103,11 @@ function derive(
   // Manual presses are registered first, so a hand-tapped press wins the slot.
   const pressStarts = new Set<string>()
   const pressKey = (segment: Segment, hole: number) => `${segment}-${hole}`
+  // Slots the RULES would open on their own, whether or not a hand-tapped press
+  // got there first. A press in one of these is not the player's to take back:
+  // retracting their event would just let auto-press re-create the same bet, so
+  // offering an undo there would be a button that visibly does nothing.
+  const autoWanted = new Set<string>()
 
   const bets: Bet[] = (['front', 'back', 'overall'] as const)
     .filter((seg) => spans[seg].length > 0)
@@ -151,6 +156,9 @@ function derive(
         spans[bet.segment].some((h) => h > hole)
       ) {
         const nextHole = spans[bet.segment].find((h) => h > hole)!
+        // recorded even when the slot is already taken — the point is that the
+        // rules WANT a press here, which is what makes it non-undoable
+        autoWanted.add(pressKey(bet.segment, nextHole))
         // one bet per (segment, startHole) — a parent and one of its own
         // presses can both cross ±2 on this same hole, and both want to open
         // the same press
@@ -357,9 +365,13 @@ function derive(
         data: { hole: frontier, segment: seg },
         ...(taken && {
           taken: true,
-          // an auto-press has no event behind it — the rules started it, so
-          // it is not the player's to take back
-          undoEventIds: manualPresses.get(pressKey(seg, frontier))?.eventIds ?? [],
+          // Undoable only when the player's tap is the ONLY reason this bet
+          // exists. An auto-press has no event behind it; and a hand-tapped
+          // press sitting in a slot the rules also want would simply be
+          // re-created the instant it was retracted.
+          undoEventIds: autoWanted.has(pressKey(seg, frontier))
+            ? []
+            : (manualPresses.get(pressKey(seg, frontier))?.eventIds ?? []),
         }),
       })
     }

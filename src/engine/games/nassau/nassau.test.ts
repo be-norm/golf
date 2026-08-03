@@ -351,6 +351,49 @@ describe('nassau — golden fixtures (hand-verified)', () => {
   })
 
   /**
+   * N10d: a press the RULES own is not the player's to take back. An auto-press
+   * shows as running with no undo — and so does a hand-tapped press sitting in
+   * a slot auto-press also wants, because retracting that event would only let
+   * auto re-create the identical bet. Offering an undo there would be a control
+   * that visibly does nothing.
+   */
+  it('N10d: presses auto-press owns are shown running but not undoable', () => {
+    const players = makePlayers([{ name: 'Ann' }, { name: 'Bob' }])
+
+    // (a) plain auto-press: 2 down at h2 → press @3, no event behind it
+    const auto = makeRound({ players, games: [game({ autoPress: true })] })
+    const autoLog = new EventLog()
+    autoLog.scoreByHole(auto, { Ann: [4, 4], Bob: [5, 5] }, [1, 2])
+    const rows = deriveRound(auto, autoLog.events).derivations.get('game-1')!.availableActions!()
+    expect(rows.map((a) => [a.label, a.taken ?? false, a.undoEventIds ?? null])).toEqual([
+      ['Press F9', true, []],
+      ['Press 18', true, []],
+    ])
+    expect(rows.every((a) => !a.recommended)).toBe(true) // nothing left to nudge
+    expect(rows[0]!.effect).toBe('Running $5 bet · holes 3–9')
+
+    // (b) hand-tapped at 1 down, then a score correction makes it 2 down, so
+    // auto now wants the same slot. The tap is no longer what holds the bet up.
+    const fixed = makeRound({ players, games: [game({ autoPress: true })] })
+    const log = new EventLog()
+    log.scoreByHole(fixed, { Ann: [4, 4], Bob: [5, 4] }, [1, 2]) // only 1 down
+    log.append({
+      type: 'game/event',
+      gameId: 'game-1',
+      kind: 'nassau/press',
+      data: { hole: 3, segment: 'front' },
+    })
+    const beforeFix = deriveRound(fixed, log.events).derivations.get('game-1')!.availableActions!()
+    expect(beforeFix[0]!.undoEventIds).toHaveLength(1) // theirs alone — undoable
+
+    log.append({ type: 'score/set', playerId: 'p-bob', hole: 2, gross: 5 }) // now 2 down
+    const afterFix = deriveRound(fixed, log.events).derivations.get('game-1')!.availableActions!()
+    expect(afterFix[0]!.label).toBe('Press F9')
+    expect(afterFix[0]!.taken).toBe(true)
+    expect(afterFix[0]!.undoEventIds).toEqual([]) // auto owns it now — no false promise
+  })
+
+  /**
    * N10b: every live bet is its own offer — pressing one must never drag the
    * others in. You are offered the nine you are STANDING ON plus the overall;
    * the other nine's bet is not live, so it is never in the list (and a
