@@ -87,7 +87,7 @@ export function HomeScreen() {
           ) : (
             <span className="text-stone-500">
               Signed in as <span className="text-felt-300">{displayName}</span> ·{' '}
-              <Link to="/diagnostics" className="text-felt-400">
+              <Link to="/account" className="text-felt-400">
                 Account
               </Link>
             </span>

@@ -5,12 +5,12 @@ import { importRound } from '../settle/exportRound'
 import { LOCAL_USER } from '../../db/ids'
 import { enqueuePushRound } from '../../remote/outbox'
 import { useAuth } from '../../auth/AuthProvider'
-import { AuthSheet } from '../auth/AuthSheet'
 import { BigButton } from '../../components/BigButton'
 
 export function DiagnosticsScreen() {
-  const { activeUserId, isGuest, displayName, signOut } = useAuth()
-  const [authOpen, setAuthOpen] = useState(false)
+  // Account identity, sign-out and deletion live on /account — this screen is
+  // storage, logs and import/export only.
+  const { activeUserId } = useAuth()
   const fileRef = useRef<HTMLInputElement>(null)
   const [importError, setImportError] = useState(false)
   const [entries, setEntries] = useState<DiagnosticEntry[]>(() => readErrorLog())
@@ -35,27 +35,6 @@ export function DiagnosticsScreen() {
         <h1 className="font-display text-xs uppercase text-felt-300">Diagnostics</h1>
         <span className="w-12" />
       </header>
-
-      <section className="pixel border-stone-700 bg-stone-900/70 p-4 text-lg">
-        <h2 className="font-display mb-2 text-[10px] uppercase text-stone-400">Account</h2>
-        {isGuest ? (
-          <>
-            <p className="text-stone-400">Not signed in — your data lives only on this device.</p>
-            <BigButton variant="outline" className="mt-3 w-full" onClick={() => setAuthOpen(true)}>
-              Sign in
-            </BigButton>
-          </>
-        ) : (
-          <>
-            <p>
-              Signed in as <span className="text-felt-300">{displayName}</span>
-            </p>
-            <BigButton variant="outline" className="mt-3 w-full" onClick={() => void signOut()}>
-              Sign out
-            </BigButton>
-          </>
-        )}
-      </section>
 
       <section className="pixel border-stone-700 bg-stone-900/70 p-4 text-lg">
         <p>
@@ -134,7 +113,6 @@ export function DiagnosticsScreen() {
         )}
       </section>
 
-      <AuthSheet open={authOpen} onClose={() => setAuthOpen(false)} />
     </main>
   )
 }

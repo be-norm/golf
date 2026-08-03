@@ -376,6 +376,13 @@ allow_dynamic_registration = false
 enabled = true
 verify_jwt = true
 
+# Account deletion (App Store guideline 5.1.1(v)). Holds the service-role key,
+# so verify_jwt is non-negotiable — the function additionally requires an
+# authenticated (non-anonymous) caller and only ever deletes that caller's uid.
+[functions.delete-account]
+enabled = true
+verify_jwt = true
+
 [edge_runtime]
 enabled = true
 # Supported request policies: `oneshot`, `per_worker`.

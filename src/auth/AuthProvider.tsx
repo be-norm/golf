@@ -3,6 +3,7 @@ import type { Session, User } from '@supabase/supabase-js'
 import { supabase } from '../remote/supabase'
 import { LOCAL_USER } from '../db/ids'
 import { syncNow } from '../remote/sync'
+import { deleteAccount as deleteAccountEverywhere } from '../remote/deleteAccount'
 
 export interface AuthValue {
   session: Session | null
@@ -21,6 +22,9 @@ export interface AuthValue {
   ) => Promise<{ error: string | null; needsConfirmation: boolean }>
   signInWithGoogle: () => Promise<{ error: string | null }>
   signOut: () => Promise<void>
+  /** Irreversibly delete the signed-in account, then wipe this device's copy
+   *  and sign out. Rejects with a user-facing message on failure. */
+  deleteAccount: () => Promise<void>
 }
 
 const AuthContext = createContext<AuthValue | null>(null)
@@ -104,6 +108,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       },
       async signOut() {
         await supabase.auth.signOut()
+      },
+      async deleteAccount() {
+        const uid = user?.id
+        if (!uid) throw new Error('Not signed in.')
+        await deleteAccountEverywhere(uid)
       },
     }
   }, [session, loading])
