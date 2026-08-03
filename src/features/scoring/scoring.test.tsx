@@ -96,4 +96,92 @@ describe('ScoringScreen', () => {
     const events = await eventStore.list(round.id)
     expect(events[1]).toMatchObject({ type: 'meta/retract', targetEventId: events[0]!.id })
   })
+
+  /**
+   * The press affordance (MAI-34). The button is PULL — always tappable, never
+   * interrupting — and only turns gold when the 2-down convention says act.
+   * `holesWon` scripts Ann beating Bob on the given holes so a deficit builds.
+   */
+  async function nassauRound(id: string, holesWon: number[]) {
+    // full 18 deliberately: a 9-hole round collapses to ONE bet, so the
+    // multi-bet offer (F9 and 18 both live) would never be exercised
+    const round = makeRound({
+      players: makePlayers([{ name: 'Ann' }, { name: 'Bob' }]),
+      games: [{ type: 'nassau', config: { stakeCents: 500, teams: null, autoPress: false } }],
+    })
+    round.id = id
+    round.games[0]!.handicap = { mode: 'gross', reference: 'offLow', allowancePct: 100 }
+    await db.rounds.put(round)
+    for (const hole of holesWon) {
+      await eventStore.append(round.id, [
+        { type: 'score/set', playerId: 'p-ann', hole, gross: 4 },
+        { type: 'score/set', playerId: 'p-bob', hole, gross: 5 },
+      ])
+    }
+    return round
+  }
+
+  const pressButton = () => screen.findByRole('button', { name: /press options/ })
+
+  it('press button is tappable with nothing on offer, and says why', async () => {
+    const round = await nassauRound('round-press-level', [])
+    const router = createMemoryRouter(routes, { initialEntries: [`/round/${round.id}`] })
+    render(<RouterProvider router={router} />)
+
+    const button = await pressButton()
+    expect(button).toHaveAccessibleName('press options — 0 available')
+    // never disabled: "why can't I press?" gets an answer, not a dead control
+    expect(button).toBeEnabled()
+
+    await userEvent.click(button)
+    expect(await screen.findByText(/every bet is level/)).toBeInTheDocument()
+  })
+
+  it('offers a press at 1 down, quietly — no gold, no blink', async () => {
+    const round = await nassauRound('round-press-one-down', [1])
+    const router = createMemoryRouter(routes, { initialEntries: [`/round/${round.id}`] })
+    render(<RouterProvider router={router} />)
+
+    const button = await screen.findByRole('button', {
+      name: 'press options — 2 available',
+    })
+    expect(button.className).not.toContain('coin-500')
+    expect(button.querySelector('.animate-blink')).toBeNull()
+
+    await userEvent.click(button)
+    // the sheet answers WHY, and names the hole the press starts from
+    expect(await screen.findByText('Press from hole 2')).toBeInTheDocument()
+    expect(screen.getByText('Bob 1 down · 8 to play')).toBeInTheDocument()
+    expect(screen.getByText('New $5 bet · holes 2–9')).toBeInTheDocument()
+  })
+
+  it('goes gold at 2 down and taking a press appends exactly one event', async () => {
+    const round = await nassauRound('round-press-two-down', [1, 2])
+    const router = createMemoryRouter(routes, { initialEntries: [`/round/${round.id}`] })
+    render(<RouterProvider router={router} />)
+
+    const button = await pressButton()
+    expect(button.className).toContain('border-coin-500')
+    // only the marker blinks, never the whole control
+    expect(button.querySelector('.animate-blink')).not.toBeNull()
+
+    await userEvent.click(button)
+    expect(await screen.findByText('Bob 2 down · 7 to play')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: /Press F9/ }))
+
+    await waitFor(async () => {
+      expect(await eventStore.list(round.id)).toHaveLength(5) // 4 scores + the press
+    })
+    const events = await eventStore.list(round.id)
+    expect(events[4]).toMatchObject({
+      type: 'game/event',
+      kind: 'nassau/press',
+      data: { hole: 3, segment: 'front' },
+    })
+
+    // that segment stops being offered at this hole — the Overall bet remains
+    await waitFor(async () => {
+      expect(await pressButton()).toHaveAccessibleName('press options — 1 available')
+    })
+  })
 })

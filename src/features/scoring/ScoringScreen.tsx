@@ -66,6 +66,7 @@ export function ScoringScreen() {
     () => (view ? [...view.derivations.values()].some((d) => d.availableActions) : false),
     [view],
   )
+  const recommendsAction = actions.some((a) => a.recommended)
 
   if (view === undefined) return null
   if (view === null) {
@@ -216,19 +217,26 @@ export function ScoringScreen() {
       )}
 
       {/* Availability, parked behind a button so it never interrupts; the gold
-          badge is the only push, and only when convention says act (2 down). */}
+          treatment is the only push, and only when convention says act (2 down).
+          Always tappable, including with nothing on offer — "why can't I press?"
+          deserves the sheet's answer, not a dead control. */}
       {offersActions && !allScored && (
         <section className="mb-2 flex justify-end">
           <button
             onClick={() => setActionsOpen(true)}
-            disabled={actions.length === 0}
-            className={`pixel-press font-display px-4 py-2 text-[10px] uppercase disabled:opacity-40 ${
-              actions.some((a) => a.recommended)
-                ? 'animate-blink border-coin-500 bg-coin-500/15 text-coin-400'
-                : 'border-stone-600 bg-stone-800 text-stone-300'
+            aria-label={`press options — ${actions.length} available`}
+            className={`pixel-press font-display px-4 py-2 text-[10px] uppercase ${
+              recommendsAction
+                ? 'border-coin-500 bg-coin-500/15 text-coin-400'
+                : actions.length === 0
+                  ? 'border-stone-700 bg-stone-900 text-stone-500'
+                  : 'border-stone-600 bg-stone-800 text-stone-300'
             }`}
           >
-            ⚡ Press
+            {/* only the marker blinks — house convention (HomeScreen, UpdateToast).
+                A primary control that strobes for ten holes is worse than the
+                interrupting card this replaced. */}
+            {recommendsAction && <span className="animate-blink mr-1">▶</span>}⚡ Press
             {actions.length > 0 && <span className="ml-1.5">· {actions.length}</span>}
           </button>
         </section>
