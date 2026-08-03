@@ -91,19 +91,21 @@ function SharePreview({ round, card }: { round: Round; card: SummaryCard }) {
               className="w-full [image-rendering:pixelated]"
             />
           </div>
-          <div className="mt-4 flex gap-2">
-            {canShareFile(state.file) && (
-              <BigButton className="flex-1" onClick={() => void share(state.file)}>
+          {/* One action, whichever one actually works here. Where the OS can
+              share files, its sheet already carries "Save Image" (→ Photos) —
+              a second button would only offer the worse copy of it: a browser
+              download lands in Files, behind an interstitial, which is not
+              where an image you're about to text anyone belongs. */}
+          <div className="mt-4">
+            {canShareFile(state.file) ? (
+              <BigButton className="w-full" onClick={() => void share(state.file)}>
                 Share
               </BigButton>
+            ) : (
+              <BigButton className="w-full" onClick={() => downloadFile(state.file)}>
+                Save image
+              </BigButton>
             )}
-            <BigButton
-              variant="outline"
-              className="flex-1"
-              onClick={() => downloadFile(state.file)}
-            >
-              Save image
-            </BigButton>
           </div>
         </>
       )}
