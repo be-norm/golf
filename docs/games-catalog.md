@@ -1,13 +1,18 @@
 # Golf Games Catalog — Scoring Engine Specification
 
 Research-verified catalog of golf side games, precise enough to implement as engines.
-The MVP ships Skins, Nassau, Wolf, Vegas; everything else here is the roadmap.
 Each engine lives in `src/engine/games/<type>/` and implements the `GameEngine` contract
 in `src/engine/catalog.ts`.
 
+**Built today (5):** Skins · Nassau · Wolf · Vegas · Six Point. Everything else is roadmap.
+The source of truth is `src/engine/games/index.ts` — if it's registered there it ships, and
+the `[shipped]` tags below should agree. They drifted once; check the registry, not the tags.
+
 Legend:
 - **Net score** = gross − handicap strokes allocated by stroke index (SI).
-- **Extra inputs** = data beyond per-hole gross strokes. "Strokes-only" = fully derivable.
+- **Extra inputs** = data beyond per-hole gross strokes. "Strokes-only" = fully derivable,
+  and by far the cheapest to add: no events, no UI channel, just a reducer and a settlement.
+  An entry listing "Inputs:" needs an event kind and a place for players to answer.
 - **Tier**: 1 = very common, 2 = common, 3 = niche.
 - All money games are zero-sum ledgers settled by pairwise differences.
 
@@ -24,7 +29,7 @@ Each hole worth one skin; outright lowest (gross or net) wins it, any tie = no s
 - **Money:** winner collects stake × (n−1) per skin.
 - Config: stakeCents, carryover, handicap mode (gross / net full / net off-low).
 
-### 2. Nassau
+### 2. Nassau `[shipped]`
 **Format:** 2 individuals or 2v2 best-ball. **Tier 1.** Extra inputs: press declarations (offered
 on the tee about to be played, independent of the auto-press setting).
 Three equal match-play bets: Front 9, Back 9, Overall 18. Hole won by lower net (best ball in teams);
@@ -48,7 +53,7 @@ Three equal match-play bets: Front 9, Back 9, Overall 18. Hole won by lower net 
 - 9-hole round: collapses to a single match bet.
 - Config: stake per bet, individual vs 2v2, press rules (manual/auto/threshold/re-press), gross/net.
 
-### 3. Wolf
+### 3. Wolf `[shipped]`
 **Format:** exactly 4 (3/5 variants), rotating Wolf; Wolf every 4th hole. **Tier 1.**
 Extra inputs: per-hole pick — partner / lone / blind.
 Wolf tees last (config), picks a partner immediately after that player's drive or passes;
@@ -60,7 +65,7 @@ Hole decided by best net ball of each side.
 - Holes 17–18: lowest-points player is Wolf (config alternates).
 - Config: point table, lone/blind multipliers, tie carryover, 17–18 rule, wolf tee position, $/point.
 
-### 4. Vegas
+### 4. Vegas `[shipped]`
 **Format:** exactly 4, two fixed teams. **Tier 1. Strokes-only.**
 Team number = concat(low, high) of the pair's scores (4&5 → 45); low team wins the
 difference in points. `teamNumber = 10*min + max`.
