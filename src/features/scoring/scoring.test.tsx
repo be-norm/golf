@@ -1,6 +1,6 @@
 import 'fake-indexeddb/auto'
 import { describe, expect, it } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { createMemoryRouter, RouterProvider } from 'react-router'
 import '../../engine/games'
@@ -224,6 +224,36 @@ describe('ScoringScreen', () => {
     await waitFor(async () => {
       expect(await pressButton()).toHaveAccessibleName('press options — 2 available')
     })
+  })
+
+  it('two taps landing in the same frame retract once, not twice', async () => {
+    // The undo button survives its own tap (the sheet stays open by design), so
+    // a fast double-tap can land twice before React re-renders. Fired with
+    // fireEvent, synchronously, because that IS the race — awaited clicks let
+    // the row flip back to an offer in between, which is a different (and
+    // correct) story: toggle off, toggle on.
+    const round = await nassauRound('round-press-undo-twice', [1, 2])
+    const router = createMemoryRouter(routes, { initialEntries: [`/round/${round.id}`] })
+    render(<RouterProvider router={router} />)
+
+    await userEvent.click(await pressButton())
+    await userEvent.click(await screen.findByRole('button', { name: /Press F9/ }))
+    await waitFor(async () => {
+      expect(await eventStore.list(round.id)).toHaveLength(5)
+    })
+
+    await userEvent.click(await pressButton())
+    const taken = await screen.findByRole('button', { name: /Press F9/ })
+    fireEvent.click(taken)
+    fireEvent.click(taken) // same frame, row still reads as taken
+
+    await waitFor(async () => {
+      expect(await eventStore.list(round.id)).toHaveLength(6)
+    })
+    const events = await eventStore.list(round.id)
+    // the append-only log outlives the round in every export and archive — one
+    // compensation event, not two
+    expect(events.filter((e) => e.type === 'meta/retract')).toHaveLength(1)
   })
 
   it('an auto-press shows as running but offers no undo — it is not the player’s', async () => {

@@ -391,6 +391,13 @@ describe('nassau — golden fixtures (hand-verified)', () => {
     expect(afterFix[0]!.label).toBe('Press F9')
     expect(afterFix[0]!.taken).toBe(true)
     expect(afterFix[0]!.undoEventIds).toEqual([]) // auto owns it now — no false promise
+
+    // and once hole 3 is played, the LEDGER must agree with the sheet about who
+    // owns that bet. Authorship is ownership, not who tapped first — reading the
+    // bet id would say "pressed" here while the sheet badges the same bet "auto".
+    log.scoreByHole(fixed, { Ann: [4], Bob: [4] }, [3])
+    const d = deriveRound(fixed, log.events).derivations.get('game-1')!
+    expect(d.holeSummary(3)).toContain('F9 press @3 starts (Bob 2 down → auto-press)')
   })
 
   /**
@@ -533,9 +540,9 @@ describe('nassau — golden fixtures (hand-verified)', () => {
     expect(d.requiredInputs()).toEqual([])
 
     // h3: the PARENTS were 2 down (Ann up 2) → Bob is the trailing side
-    expect(d.holeSummary(3)).toContain('Press @3 starts (Bob 2 down → auto-press)')
+    expect(d.holeSummary(3)).toContain('F9 press @3 starts (Bob 2 down → auto-press)')
     // h5: F9 itself is back to all square — the press @3 is what hit 2 down.
     // Reading the parent alone would have printed "AS" as the reason.
-    expect(d.holeSummary(5)).toContain('Press @5 starts (Ann 2 down → auto-press)')
+    expect(d.holeSummary(5)).toContain('F9 press @5 starts (Ann 2 down → auto-press)')
   })
 })

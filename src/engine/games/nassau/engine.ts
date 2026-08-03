@@ -389,16 +389,25 @@ function derive(
     for (const b of bets) {
       if (b.depth > 0 && b.startHole === h) {
         // explain WHY the press exists, in the terms the group argued it in:
-        // who was down and by how much — read from the same rule that offered
-        // it, so the ledger and the offer never tell different stories
+        // who was down and by how much — read from the same rules that drive
+        // the offer, so the ledger and the sheet never tell different stories.
+        // Authorship is OWNERSHIP, not who tapped first: a hand-tapped press in
+        // a slot auto-press also wanted is an auto-press, because it would be
+        // there either way. Reading `b.id` instead would badge that bet "auto"
+        // in the sheet while calling it "pressed" here.
         const down = pressDeficit(b.segment, h)
-        const auto = b.id.startsWith('auto-')
+        const auto = autoWanted.has(pressKey(b.segment, h))
         const why = down
           ? `${sideShort(down.trailing)} ${down.by} down${auto ? ' → auto-press' : ' → pressed'}`
           : auto
             ? 'auto-press'
             : 'pressed'
-        note(h, `${betLabel(b)} starts (${why})`)
+        // NAME THE SEGMENT here, unlike `betLabel`. Several segments can open a
+        // press on the same hole (the front nine and the overall move in
+        // lockstep, so they hit 2 down together), and these notes are a flat
+        // list — two bare "Press @3 starts…" lines with different reasons is
+        // unreadable. detailLines can stay terse because it nests under its bet.
+        note(h, `${segLabel(b.segment)} press @${b.startHole} starts (${why})`)
       }
     }
     const r = holeResult.get(h)

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router'
 import { motion, AnimatePresence } from 'motion/react'
 import { eventStore } from '../../db/eventStore'
@@ -27,6 +27,8 @@ export function ScoringScreen() {
   const [standingsOpen, setStandingsOpen] = useState(false)
   const [rulesFor, setRulesFor] = useState<string>()
   const [actionsOpen, setActionsOpen] = useState(false)
+  // event ids already sent for retraction — see `undoAction`
+  const undoneRef = useRef<Set<string>>(new Set())
 
   // Initial hole, captured ONCE when the view first loads: ?hole= deep link
   // (scorecard tap), else first not-fully-scored hole, else the last hole.
@@ -130,9 +132,16 @@ export function ScoringScreen() {
   // Undo is a compensation event, never a delete (invariant #2). The sheet
   // stays open: toggling a bet off then on again shouldn't cost two taps to
   // re-open the same list.
+  //
+  // Which means, unlike `takeAction`, this button survives its own tap — so two
+  // quick taps would both fire before the re-derive, appending the same retract
+  // twice. Replay tolerates that (targets collect into a Set), but the log is
+  // append-only and syncs: the duplicate would outlive the round in every
+  // export and archive. Guard on what's already been sent, not on render state.
   const undoAction = (action: GameAction) => {
-    const targets = action.undoEventIds ?? []
+    const targets = (action.undoEventIds ?? []).filter((id) => !undoneRef.current.has(id))
     if (targets.length === 0) return
+    targets.forEach((id) => undoneRef.current.add(id))
     void eventStore.append(
       round.id,
       targets.map((targetEventId) => ({ type: 'meta/retract' as const, targetEventId })),
