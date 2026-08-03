@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router'
+import { useLiveQuery } from 'dexie-react-hooks'
 import { clearErrorLog, readErrorLog, type DiagnosticEntry } from '../../pwa/diagnostics'
-import { importRound } from '../settle/exportRound'
+import { buildExport, downloadExport, importRound } from '../settle/exportRound'
 import { LOCAL_USER } from '../../db/ids'
+import { roundRepo } from '../../db/repos'
 import { enqueuePushRound } from '../../remote/outbox'
 import { useAuth } from '../../auth/AuthProvider'
 import { BigButton } from '../../components/BigButton'
@@ -16,6 +18,10 @@ export function DiagnosticsScreen() {
   const [entries, setEntries] = useState<DiagnosticEntry[]>(() => readErrorLog())
   const [storage, setStorage] = useState<string>()
   const [persisted, setPersisted] = useState<boolean>()
+  // Live rounds are listed too — sync only ever carries completed ones, so a
+  // file is the only way to move a round that's still in progress.
+  const rounds = useLiveQuery(() => roundRepo.listRecent(activeUserId, 20), [activeUserId])
+  const [exportId, setExportId] = useState<string>()
 
   useEffect(() => {
     void navigator.storage?.estimate?.().then((e) => {
@@ -48,6 +54,34 @@ export function DiagnosticsScreen() {
 
       <section className="pixel border-stone-700 bg-stone-900/70 p-4">
         <h2 className="font-display mb-2 text-[10px] uppercase text-stone-400">Data</h2>
+        {rounds && rounds.length > 0 && (
+          <div className="mb-4">
+            <select
+              className="pixel mb-2 w-full border-stone-700 bg-stone-800 px-3 py-3 text-lg text-stone-100"
+              value={exportId ?? rounds[0]!.id}
+              onChange={(e) => setExportId(e.target.value)}
+            >
+              {rounds.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.courseSnapshot.name} — {new Date(r.startedAt).toLocaleDateString()}
+                </option>
+              ))}
+            </select>
+            <BigButton
+              variant="outline"
+              className="w-full"
+              onClick={() => {
+                const round = rounds.find((r) => r.id === (exportId ?? rounds[0]!.id))
+                if (round) void buildExport(round).then(downloadExport)
+              }}
+            >
+              Export round to file
+            </BigButton>
+            <p className="mt-2 text-sm text-stone-500">
+              Save a round as .json — a backup, or a bug report a developer can replay.
+            </p>
+          </div>
+        )}
         <input
           ref={fileRef}
           type="file"

@@ -140,6 +140,22 @@ change, use a 6-digit code (`{{ .Token }}` + `verifyOtp`) rather than a link.
   why (MAI-34): a thing that's legal most of the time will interrupt most of the
   time. A `GameAction` carries its own argument — `detail` (why it's offered)
   and `effect` (what taking it creates).
+- **The share card is painted, not screenshotted.** `Share` on the settle screen
+  produces a PNG drawn by hand onto a canvas (`paintSummaryCard.ts`), never a
+  DOM capture — rasterising the live screen means `foreignObject`, and so means
+  fighting Tailwind v4's `oklch()` colours, the woff2 files Vite leaves
+  un-inlined, and iOS Safari, for a design that is rectangles and text.
+  `buildSummaryCard` (`summaryCard.ts`) is the single derivation behind the
+  settle screen AND the painter — both render that one model, so their numbers
+  can't drift. (`ScorecardScreen` still derives its own grid, and marks strokes
+  from the game the user has selected rather than the model's first-net-game
+  rule; that's why the image names the game in its stroke note.) The model
+  carries its own display discriminators — `GamePanel.kind` says ledger-vs-list
+  rather than letting a renderer infer layout from whether a label is empty.
+  Keep the split — numbers in the model (tested), placement
+  in the painter (jsdom has no canvas, so it is deliberately untested; don't add
+  a polyfill dependency to "fix" that). `shareImage.ts` is the only file that
+  touches the Web Share API, and the swap point for `@capacitor/share`.
 
 ## Testing conventions
 

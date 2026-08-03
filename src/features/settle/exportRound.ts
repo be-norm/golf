@@ -3,6 +3,7 @@ import { eventDraftSchema, type RoundEvent } from '../../engine/core/events'
 import type { Round } from '../../engine/core/types'
 import { db } from '../../db/schema'
 import { eventStore } from '../../db/eventStore'
+import { roundFileBase } from './shareImage'
 
 export interface RoundExport {
   format: 'golf-round'
@@ -25,7 +26,7 @@ export function downloadExport(data: RoundExport): void {
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
-  a.download = `golf-${data.round.courseSnapshot.name.replace(/\W+/g, '-')}-${data.round.startedAt.slice(0, 10)}.json`
+  a.download = `${roundFileBase(data.round)}.json`
   a.click()
   URL.revokeObjectURL(url)
 }

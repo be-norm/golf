@@ -1,12 +1,38 @@
 import 'fake-indexeddb/auto'
-import { describe, expect, it } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { createMemoryRouter, RouterProvider } from 'react-router'
 import '../../engine/games'
 import { EventLog, makePlayers, makeRound } from '../../engine/test/harness'
 import { db } from '../../db/schema'
-import { routes } from '../../app/routes'
 import { buildExport, importRound } from './exportRound'
+
+// jsdom has no canvas 2D context, so the painter can't run here — the model it
+// paints is covered in summaryCard.test.ts. What's under test is the plumbing.
+const paintMock = vi.hoisted(() =>
+  vi.fn(async () => new Blob(['\x89PNG'], { type: 'image/png' })),
+)
+const shareMocks = vi.hoisted(() => ({
+  canShare: vi.fn(() => true),
+  download: vi.fn(),
+  share: vi.fn(async (): Promise<'shared' | 'cancelled' | 'failed'> => 'shared'),
+}))
+
+vi.mock('./paintSummaryCard', () => ({ paintSummaryCard: paintMock }))
+vi.mock('./shareImage', async (importOriginal) => ({
+  // roundFileBase stays real — the filename is part of what's asserted
+  ...(await importOriginal<typeof import('./shareImage')>()),
+  canShareFile: () => shareMocks.canShare(),
+  downloadFile: shareMocks.download,
+  shareFile: shareMocks.share,
+}))
+
+const { routes } = await import('../../app/routes')
+
+// jsdom implements neither of these
+URL.createObjectURL = vi.fn(() => 'blob:mock-url')
+URL.revokeObjectURL = vi.fn()
 
 describe('SettleScreen', () => {
   it('shows combined standings and who pays whom', async () => {
@@ -28,6 +54,94 @@ describe('SettleScreen', () => {
     expect(await screen.findByText('Settle up')).toBeInTheDocument()
     expect(screen.getByText(/collects/)).toBeInTheDocument()
     expect(screen.getAllByText('+$1').length).toBeGreaterThan(0)
+  })
+})
+
+describe('sharing the summary image', () => {
+  beforeEach(() => {
+    paintMock.mockClear()
+    shareMocks.canShare.mockClear().mockReturnValue(true)
+    shareMocks.download.mockClear()
+    shareMocks.share.mockClear().mockResolvedValue('shared')
+  })
+
+  async function openShareSheet() {
+    const round = makeRound({
+      players: makePlayers([{ name: 'Ben' }, { name: 'Alice' }]),
+      holes: 'front9',
+      games: [{ type: 'skins', config: { stakeCents: 100, carryover: true } }],
+    })
+    round.id = `round-share-${Math.random().toString(36).slice(2)}`
+    round.status = 'completed'
+    const log = new EventLog(round.id)
+    log.scoreByHole(round, { Ben: [3, 4], Alice: [4, 4] }, [1, 2])
+    await db.rounds.put(round)
+    await db.round_events.bulkAdd(log.events)
+
+    const router = createMemoryRouter(routes, { initialEntries: [`/round/${round.id}/settle`] })
+    render(<RouterProvider router={router} />)
+    const trigger = await screen.findByRole('button', { name: 'Share' })
+    await userEvent.click(trigger)
+    return screen.findByAltText('Round summary')
+  }
+
+  it('replaces the JSON export with a share button', async () => {
+    await openShareSheet()
+    expect(screen.queryByRole('button', { name: 'Export' })).not.toBeInTheDocument()
+    expect(paintMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('offers share and save once the image is painted', async () => {
+    await openShareSheet()
+    // the trigger plus the one inside the sheet
+    expect(screen.getAllByRole('button', { name: 'Share' })).toHaveLength(2)
+    expect(screen.getByRole('button', { name: 'Save image' })).toBeInTheDocument()
+  })
+
+  it('saves a PNG named after the course and date', async () => {
+    await openShareSheet()
+    await userEvent.click(screen.getByRole('button', { name: 'Save image' }))
+    expect(shareMocks.download).toHaveBeenCalledTimes(1)
+    const file = shareMocks.download.mock.calls[0]![0] as File
+    expect(file.name).toBe('golf-Test-National-2026-07-18.png')
+    expect(file.type).toBe('image/png')
+  })
+
+  it('hides the share button when the platform cannot share files', async () => {
+    shareMocks.canShare.mockReturnValue(false)
+    await openShareSheet()
+    // only the trigger remains; save is still offered
+    expect(screen.getAllByRole('button', { name: 'Share' })).toHaveLength(1)
+    expect(screen.getByRole('button', { name: 'Save image' })).toBeInTheDocument()
+  })
+
+  it('falls back to a download when the share sheet fails', async () => {
+    shareMocks.share.mockResolvedValue('failed')
+    await openShareSheet()
+    const [, sheetShare] = screen.getAllByRole('button', { name: 'Share' })
+    await userEvent.click(sheetShare!)
+    await waitFor(() => expect(shareMocks.download).toHaveBeenCalledTimes(1))
+  })
+
+  it('says so when the image cannot be built', async () => {
+    paintMock.mockRejectedValueOnce(new Error('no canvas'))
+    const round = makeRound({
+      players: makePlayers([{ name: 'Ben' }, { name: 'Alice' }]),
+      holes: 'front9',
+      games: [{ type: 'skins', config: { stakeCents: 100, carryover: true } }],
+    })
+    round.id = 'round-share-error'
+    round.status = 'completed'
+    const log = new EventLog(round.id)
+    log.scoreByHole(round, { Ben: [3, 4], Alice: [4, 4] }, [1, 2])
+    await db.rounds.put(round)
+    await db.round_events.bulkAdd(log.events)
+
+    const router = createMemoryRouter(routes, { initialEntries: [`/round/${round.id}/settle`] })
+    render(<RouterProvider router={router} />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Share' }))
+
+    expect(await screen.findByText(/Couldn't build the image/)).toBeInTheDocument()
   })
 })
 
