@@ -91,28 +91,30 @@ describe('sharing the summary image', () => {
     expect(paintMock).toHaveBeenCalledTimes(1)
   })
 
-  it('offers share and save once the image is painted', async () => {
+  it('offers only the OS share sheet where files can be shared', async () => {
     await openShareSheet()
     // the trigger plus the one inside the sheet
     expect(screen.getAllByRole('button', { name: 'Share' })).toHaveLength(2)
+    // no download button: the OS sheet's own "Save Image" is the save path, and
+    // a browser download would put the PNG in Files rather than Photos
+    expect(screen.queryByRole('button', { name: 'Save image' })).not.toBeInTheDocument()
+  })
+
+  it('falls back to a download only where files cannot be shared', async () => {
+    shareMocks.canShare.mockReturnValue(false)
+    await openShareSheet()
+    expect(screen.getAllByRole('button', { name: 'Share' })).toHaveLength(1) // the trigger
     expect(screen.getByRole('button', { name: 'Save image' })).toBeInTheDocument()
   })
 
   it('saves a PNG named after the course and date', async () => {
+    shareMocks.canShare.mockReturnValue(false)
     await openShareSheet()
     await userEvent.click(screen.getByRole('button', { name: 'Save image' }))
     expect(shareMocks.download).toHaveBeenCalledTimes(1)
     const file = shareMocks.download.mock.calls[0]![0] as File
     expect(file.name).toBe('golf-Test-National-2026-07-18.png')
     expect(file.type).toBe('image/png')
-  })
-
-  it('hides the share button when the platform cannot share files', async () => {
-    shareMocks.canShare.mockReturnValue(false)
-    await openShareSheet()
-    // only the trigger remains; save is still offered
-    expect(screen.getAllByRole('button', { name: 'Share' })).toHaveLength(1)
-    expect(screen.getByRole('button', { name: 'Save image' })).toBeInTheDocument()
   })
 
   it('falls back to a download when the share sheet fails', async () => {
