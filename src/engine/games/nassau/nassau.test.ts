@@ -227,6 +227,39 @@ describe('nassau — golden fixtures (hand-verified)', () => {
     expect(Object.values(d.settlement.perPlayerCents).reduce((a, b) => a + b, 0)).toBe(0)
   })
 
+  /**
+   * N8c: the press offer quotes the stake to the side being invited to press.
+   * A lone player books the bet against EACH opponent, so a $5 press costs them
+   * $10 — and 2v1 is the default the moment a third player joins. Saying "$5"
+   * in the line meant to state what you're signing up for is the wrong number.
+   */
+  it('N8c: a lone player is quoted their own exposure, not the pair’s', () => {
+    const players = makePlayers([{ name: 'A' }, { name: 'B' }, { name: 'C' }])
+    const round = makeRound({ players, holes: 'front9', games: [twoVsOne({})] })
+    const log = new EventLog()
+    log.scoreByHole(round, { A: [4, 4], B: [4, 4], C: [5, 5] }, [1, 2]) // lone C is 2 down
+    const offer = deriveRound(round, log.events).derivations.get('game-1')!.availableActions!()
+    expect(offer).toHaveLength(1)
+    expect(offer[0]!.detail).toBe('C 2 down · 7 to play')
+    expect(offer[0]!.effect).toBe('New $10 bet · holes 3–9')
+
+    // and that is exactly what it settles: C pays $10 per bet, each of the
+    // pair collects $5 — the quote and the money agree
+    log.append({
+      type: 'game/event',
+      gameId: 'game-1',
+      kind: 'nassau/press',
+      data: { hole: 3, segment: 'overall' },
+    })
+    log.scoreByHole(
+      round,
+      { A: [4, 4, 4, 4, 4, 4, 4], B: [4, 4, 4, 4, 4, 4, 4], C: [5, 5, 5, 5, 5, 5, 5] },
+      [3, 4, 5, 6, 7, 8, 9],
+    )
+    const done = deriveRound(round, log.events).derivations.get('game-1')!
+    expect(done.settlement.perPlayerCents).toEqual({ 'p-a': 1000, 'p-b': 1000, 'p-c': -2000 })
+  })
+
   it('N8b: lone player beats the pair → collects the stake from each', () => {
     const players = makePlayers([{ name: 'A' }, { name: 'B' }, { name: 'C' }])
     const round = makeRound({ players, holes: 'front9', games: [twoVsOne({})] })

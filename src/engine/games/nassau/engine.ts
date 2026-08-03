@@ -352,13 +352,23 @@ function derive(
       const last = spans[seg][spans[seg].length - 1]!
       const span = frontier === last ? `hole ${last}` : `holes ${frontier}–${last}`
       const why = down ? `${sideShort(down.trailing)} ${down.by} down · ${toPlay} to play` : `${toPlay} to play`
+      // Quote the stake to the side being INVITED to press — the one that's
+      // down. In a 2-v-1 the lone player books this bet against each opponent,
+      // so a "$5" press costs them $10; telling them $5 in the one line meant
+      // to say what they're signing up for would be the wrong number.
+      const stake = down
+        ? sideStake(
+            down.trailing === 'a' ? sideA : sideB,
+            down.trailing === 'a' ? sideB : sideA,
+          )
+        : stakeCents
       actions.push({
         id: `nassau-press-${seg}-${frontier}`,
         gameId: game.gameId,
         hole: frontier,
         label: `Press ${segLabel(seg)}`,
         detail: why,
-        effect: `${taken ? 'Running' : 'New'} ${formatCents(stakeCents)} bet · ${span}`,
+        effect: `${taken ? 'Running' : 'New'} ${formatCents(stake)} bet · ${span}`,
         // nothing to recommend once it's running
         recommended: !taken && (down?.by ?? 0) >= 2,
         eventKind: 'nassau/press',
