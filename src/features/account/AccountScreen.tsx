@@ -111,12 +111,13 @@ export function AccountScreen() {
           in stay on this device.
         </p>
         {/* Apple 5.1.1(v) allows deletion that takes time, but requires telling
-            the user how long. It doubles as the honest description of the grace
-            period: reinstatement is possible by hand until the purge runs. */}
+            the user how long. The "finished rounds" wording is load-bearing, not
+            hedging: only completed rounds are ever pushed to the server, so a
+            round still in progress has no backup and cannot be reinstated. */}
         <p className="mt-2 text-lg text-stone-400">
           You can sign up again with the same email straight away. Deletion completes within 30
-          days — if it was a mistake, contact support before then and we may be able to bring your
-          rounds back.
+          days — if it was a mistake, contact support before then and your finished rounds may be
+          recoverable. A round still in progress can’t be.
         </p>
         {error && <p className="mt-3 text-lg text-flag-500">{error}</p>}
         <div className="mt-5 flex flex-col gap-2">

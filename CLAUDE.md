@@ -83,6 +83,19 @@ Full plan/architecture history: see `docs/` and the games catalog in `docs/games
 - **RLS is `auth.uid() = user_id`** on `round_archives` + `players`; `courses` SELECT is
   granted to `anon, authenticated` so signed-in users keep library access. Deleting a whole
   round/player is outside the append-only event invariant (#2 governs edits *within* a round).
+- **Account deletion is a hard delete with a 30-day data archive** (`/account` →
+  `delete-account` Edge Function). Required by App Store guideline 5.1.1(v). Full design +
+  admin reinstatement runbook: `docs/account-deletion.md`. Two invariants that are easy to
+  break by accident:
+  - **`deleted_account_archives` is service-role only** — RLS on, *no* policies, privileges
+    revoked from `anon`/`authenticated`. It holds the data of people who asked to be
+    forgotten. Never add a policy to make it client-readable.
+  - **The purge is compliance, not housekeeping.** `pg_cron` plus a GitHub Actions fallback
+    both call `purge_deleted_account_archives()`. If neither runs, retention becomes
+    indefinite — which is the "deactivate instead of delete" pattern the guideline names as
+    insufficient. Disabling them breaks compliance, not tidiness.
+  - Only **completed** rounds ever reach the server, so only those can be reinstated; a live
+    round is destroyed with the local wipe. Don't let UI copy promise more.
 
 ## UI conventions
 

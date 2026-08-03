@@ -86,10 +86,7 @@ export function HomeScreen() {
             </button>
           ) : (
             <span className="text-stone-500">
-              Signed in as <span className="text-felt-300">{displayName}</span> ·{' '}
-              <Link to="/account" className="text-felt-400">
-                Account
-              </Link>
+              Signed in as <span className="text-felt-300">{displayName}</span>
             </span>
           )}
         </div>
@@ -99,6 +96,12 @@ export function HomeScreen() {
           </Link>
           <Link to="/courses" className={NAV_CHIP}>
             Courses
+          </Link>
+          {/* Always shown, signed in or not. Account deletion has to be easy to
+              find (App Store 5.1.1(v)), and hiding the route behind the
+              signed-in state also left its guest view unreachable. */}
+          <Link to="/account" className={NAV_CHIP}>
+            Account
           </Link>
           <Link to="/diagnostics" aria-label="Diagnostics" className={NAV_CHIP}>
             ⚙

@@ -58,9 +58,15 @@ function decodeJwtPayload(token: string): Record<string, unknown> | null {
  * Copy the user's rows into `deleted_account_archives` so an admin can reinstate
  * an accidental deletion inside the retention window.
  *
- * Swallows its own failures: the caller asked to be deleted, and a snapshot we
- * keep for OUR convenience must never be the reason that doesn't happen. A
- * failed archive costs the undo, not the deletion.
+ * Never throws: the caller asked to be deleted, and a snapshot we keep for OUR
+ * convenience must not be the reason that doesn't happen. A failed archive costs
+ * the undo, not the deletion.
+ *
+ * But it must never fail QUIETLY. If the migration hasn't been applied, this is
+ * the only thing standing between "we can restore your rounds" (what the app
+ * tells the user) and a table that doesn't exist. Every failure path logs at
+ * error level so it shows up in the function logs instead of being inferred
+ * later from an empty table.
  */
 async function archive(
   url: string,
@@ -73,21 +79,38 @@ async function archive(
     apikey: serviceKey,
     'Content-Type': 'application/json',
   }
+
+  const read = async (path: string): Promise<unknown[]> => {
+    try {
+      const res = await fetch(`${url}/rest/v1/${path}`, { headers })
+      if (!res.ok) {
+        console.error(`[delete-account] archive read failed (${res.status}): ${path}`)
+        return []
+      }
+      return await res.json()
+    } catch (e) {
+      console.error(`[delete-account] archive read threw: ${path}`, e)
+      return []
+    }
+  }
+
   try {
     const [rounds, players] = await Promise.all([
-      fetch(`${url}/rest/v1/round_archives?user_id=eq.${uid}&select=round_id,data`, { headers })
-        .then((r) => (r.ok ? r.json() : []))
-        .catch(() => []),
-      fetch(`${url}/rest/v1/players?user_id=eq.${uid}&select=*`, { headers })
-        .then((r) => (r.ok ? r.json() : []))
-        .catch(() => []),
+      // `deleted_at=is.null` — tombstoned rounds are ones the user deliberately
+      // deleted before closing the account. Archiving them would resurrect them
+      // on reinstatement.
+      read(`round_archives?user_id=eq.${uid}&deleted_at=is.null&select=round_id,data`),
+      read(`players?user_id=eq.${uid}&deleted_at=is.null&select=*`),
     ])
 
     // Nothing worth keeping — skip the row rather than bank an empty archive
     // that still holds the email for 30 days.
-    if (!rounds?.length && !players?.length) return
+    if (!rounds.length && !players.length) {
+      console.info(`[delete-account] nothing to archive for ${uid}`)
+      return
+    }
 
-    await fetch(`${url}/rest/v1/deleted_account_archives`, {
+    const res = await fetch(`${url}/rest/v1/deleted_account_archives`, {
       method: 'POST',
       // The same person deleting twice (a retry, or delete → re-signup →
       // delete) must not 409 on the uid primary key.
@@ -98,8 +121,18 @@ async function archive(
         payload: { rounds, players },
       }),
     })
-  } catch {
-    // Deliberately silent — see the note above.
+
+    if (!res.ok) {
+      // Most likely cause: migration 20260803000001 not applied. Deletion still
+      // proceeds — but the grace period the UI promises does not exist.
+      console.error(
+        `[delete-account] ARCHIVE WRITE FAILED (${res.status}) for ${uid} — ` +
+          `deletion proceeds with NO recovery snapshot. Check the migration is applied. ` +
+          (await res.text().catch(() => '')),
+      )
+    }
+  } catch (e) {
+    console.error(`[delete-account] archive threw for ${uid} — no recovery snapshot`, e)
   }
 }
 
