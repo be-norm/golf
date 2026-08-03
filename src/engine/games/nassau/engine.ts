@@ -79,11 +79,17 @@ function derive(
     else holeResult.set(hole, a < b ? 1 : b < a ? -1 : 0)
   }
 
-  const manualPresses = new Map<string, { hole: number; segment: Segment }>()
+  // Every press event for a slot is kept, not just the last: undoing a press
+  // means retracting ALL of them, or a stray duplicate would leave the bet
+  // standing after the player toggled it off.
+  const manualPresses = new Map<string, { hole: number; segment: Segment; eventIds: Uuid[] }>()
   for (const e of events) {
     if (e.kind !== 'nassau/press') continue
     const data = e.data as { hole: number; segment: Segment }
-    manualPresses.set(`${data.segment}-${data.hole}`, data)
+    const key = `${data.segment}-${data.hole}`
+    const seen = manualPresses.get(key)
+    if (seen) seen.eventIds.push(e.id)
+    else manualPresses.set(key, { ...data, eventIds: [e.id] })
   }
 
   // PRESS IDENTITY — there is exactly ONE press bet per (segment, startHole),
@@ -97,6 +103,11 @@ function derive(
   // Manual presses are registered first, so a hand-tapped press wins the slot.
   const pressStarts = new Set<string>()
   const pressKey = (segment: Segment, hole: number) => `${segment}-${hole}`
+  // Slots the RULES would open on their own, whether or not a hand-tapped press
+  // got there first. A press in one of these is not the player's to take back:
+  // retracting their event would just let auto-press re-create the same bet, so
+  // offering an undo there would be a button that visibly does nothing.
+  const autoWanted = new Set<string>()
 
   const bets: Bet[] = (['front', 'back', 'overall'] as const)
     .filter((seg) => spans[seg].length > 0)
@@ -145,6 +156,9 @@ function derive(
         spans[bet.segment].some((h) => h > hole)
       ) {
         const nextHole = spans[bet.segment].find((h) => h > hole)!
+        // recorded even when the slot is already taken — the point is that the
+        // rules WANT a press here, which is what makes it non-undoable
+        autoWanted.add(pressKey(bet.segment, nextHole))
         // one bet per (segment, startHole) — a parent and one of its own
         // presses can both cross ±2 on this same hole, and both want to open
         // the same press
@@ -327,25 +341,48 @@ function derive(
     const actions: GameAction[] = []
     for (const seg of ['front', 'back', 'overall'] as const) {
       if (!spans[seg].includes(frontier)) continue
-      if (pressStarts.has(pressKey(seg, frontier))) continue
+      const taken = pressStarts.has(pressKey(seg, frontier))
       const down = pressDeficit(seg, frontier)
-      // all square: nothing to catch up on, and no side owns the decision
-      if (!down) continue
+      // all square and unpressed: nothing to catch up on, and no side owns
+      // the decision. A press already running still shows, so it can be undone.
+      if (!taken && !down) continue
       const toPlay = spans[seg].filter(
         (h) => h >= frontier && (holeResult.get(h) ?? null) === null,
       ).length
       const last = spans[seg][spans[seg].length - 1]!
       const span = frontier === last ? `hole ${last}` : `holes ${frontier}–${last}`
+      const why = down ? `${sideShort(down.trailing)} ${down.by} down · ${toPlay} to play` : `${toPlay} to play`
+      // Quote the stake to the side being INVITED to press — the one that's
+      // down. In a 2-v-1 the lone player books this bet against each opponent,
+      // so a "$5" press costs them $10; telling them $5 in the one line meant
+      // to say what they're signing up for would be the wrong number.
+      const stake = down
+        ? sideStake(
+            down.trailing === 'a' ? sideA : sideB,
+            down.trailing === 'a' ? sideB : sideA,
+          )
+        : stakeCents
       actions.push({
         id: `nassau-press-${seg}-${frontier}`,
         gameId: game.gameId,
         hole: frontier,
         label: `Press ${segLabel(seg)}`,
-        detail: `${sideShort(down.trailing)} ${down.by} down · ${toPlay} to play`,
-        effect: `New ${formatCents(stakeCents)} bet · ${span}`,
-        recommended: down.by >= 2,
+        detail: why,
+        effect: `${taken ? 'Running' : 'New'} ${formatCents(stake)} bet · ${span}`,
+        // nothing to recommend once it's running
+        recommended: !taken && (down?.by ?? 0) >= 2,
         eventKind: 'nassau/press',
         data: { hole: frontier, segment: seg },
+        ...(taken && {
+          taken: true,
+          // Undoable only when the player's tap is the ONLY reason this bet
+          // exists. An auto-press has no event behind it; and a hand-tapped
+          // press sitting in a slot the rules also want would simply be
+          // re-created the instant it was retracted.
+          undoEventIds: autoWanted.has(pressKey(seg, frontier))
+            ? []
+            : (manualPresses.get(pressKey(seg, frontier))?.eventIds ?? []),
+        }),
       })
     }
     return actions
@@ -362,16 +399,25 @@ function derive(
     for (const b of bets) {
       if (b.depth > 0 && b.startHole === h) {
         // explain WHY the press exists, in the terms the group argued it in:
-        // who was down and by how much — read from the same rule that offered
-        // it, so the ledger and the offer never tell different stories
+        // who was down and by how much — read from the same rules that drive
+        // the offer, so the ledger and the sheet never tell different stories.
+        // Authorship is OWNERSHIP, not who tapped first: a hand-tapped press in
+        // a slot auto-press also wanted is an auto-press, because it would be
+        // there either way. Reading `b.id` instead would badge that bet "auto"
+        // in the sheet while calling it "pressed" here.
         const down = pressDeficit(b.segment, h)
-        const auto = b.id.startsWith('auto-')
+        const auto = autoWanted.has(pressKey(b.segment, h))
         const why = down
           ? `${sideShort(down.trailing)} ${down.by} down${auto ? ' → auto-press' : ' → pressed'}`
           : auto
             ? 'auto-press'
             : 'pressed'
-        note(h, `${betLabel(b)} starts (${why})`)
+        // NAME THE SEGMENT here, unlike `betLabel`. Several segments can open a
+        // press on the same hole (the front nine and the overall move in
+        // lockstep, so they hit 2 down together), and these notes are a flat
+        // list — two bare "Press @3 starts…" lines with different reasons is
+        // unreadable. detailLines can stay terse because it nests under its bet.
+        note(h, `${segLabel(b.segment)} press @${b.startHole} starts (${why})`)
       }
     }
     const r = holeResult.get(h)

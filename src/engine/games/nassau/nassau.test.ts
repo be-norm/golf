@@ -227,6 +227,39 @@ describe('nassau — golden fixtures (hand-verified)', () => {
     expect(Object.values(d.settlement.perPlayerCents).reduce((a, b) => a + b, 0)).toBe(0)
   })
 
+  /**
+   * N8c: the press offer quotes the stake to the side being invited to press.
+   * A lone player books the bet against EACH opponent, so a $5 press costs them
+   * $10 — and 2v1 is the default the moment a third player joins. Saying "$5"
+   * in the line meant to state what you're signing up for is the wrong number.
+   */
+  it('N8c: a lone player is quoted their own exposure, not the pair’s', () => {
+    const players = makePlayers([{ name: 'A' }, { name: 'B' }, { name: 'C' }])
+    const round = makeRound({ players, holes: 'front9', games: [twoVsOne({})] })
+    const log = new EventLog()
+    log.scoreByHole(round, { A: [4, 4], B: [4, 4], C: [5, 5] }, [1, 2]) // lone C is 2 down
+    const offer = deriveRound(round, log.events).derivations.get('game-1')!.availableActions!()
+    expect(offer).toHaveLength(1)
+    expect(offer[0]!.detail).toBe('C 2 down · 7 to play')
+    expect(offer[0]!.effect).toBe('New $10 bet · holes 3–9')
+
+    // and that is exactly what it settles: C pays $10 per bet, each of the
+    // pair collects $5 — the quote and the money agree
+    log.append({
+      type: 'game/event',
+      gameId: 'game-1',
+      kind: 'nassau/press',
+      data: { hole: 3, segment: 'overall' },
+    })
+    log.scoreByHole(
+      round,
+      { A: [4, 4, 4, 4, 4, 4, 4], B: [4, 4, 4, 4, 4, 4, 4], C: [5, 5, 5, 5, 5, 5, 5] },
+      [3, 4, 5, 6, 7, 8, 9],
+    )
+    const done = deriveRound(round, log.events).derivations.get('game-1')!
+    expect(done.settlement.perPlayerCents).toEqual({ 'p-a': 1000, 'p-b': 1000, 'p-c': -2000 })
+  })
+
   it('N8b: lone player beats the pair → collects the stake from each', () => {
     const players = makePlayers([{ name: 'A' }, { name: 'B' }, { name: 'C' }])
     const round = makeRound({ players, holes: 'front9', games: [twoVsOne({})] })
@@ -279,10 +312,12 @@ describe('nassau — golden fixtures (hand-verified)', () => {
   })
 
   /**
-   * N10: taking the offer removes it for THAT hole only — a press is
-   * (segment, hole), so the same segment is offered again from the next tee.
+   * N10: a taken press stays on the list as an ENGAGED row carrying the events
+   * that undo it — a mistap on a money bet must be reversible in place. It is
+   * still one bet per (segment, hole), so the segment is offered fresh again
+   * from the next tee.
    */
-  it('N10: a taken press stops being offered at that hole, returns at the next', () => {
+  it('N10: a taken press stays listed, engaged and undoable, then re-offers next hole', () => {
     const players = makePlayers([{ name: 'Ann' }, { name: 'Bob' }])
     const round = makeRound({ players, games: [game({})] })
     const log = new EventLog()
@@ -293,18 +328,109 @@ describe('nassau — golden fixtures (hand-verified)', () => {
       kind: 'nassau/press',
       data: { hole: 3, segment: 'front' },
     })
-    // F9 pressed at h3 → only the Overall remains on offer at h3
-    expect(at3().map((a) => a.label)).toEqual(['Press 18'])
+    const pressEventId = log.events[log.events.length - 1]!.id
 
-    // play h3; still 2 down on F9 from the h4 tee → F9 offered again
+    const [f9, overall] = at3()
+    expect(f9!.label).toBe('Press F9')
+    expect(f9!.taken).toBe(true)
+    expect(f9!.recommended).toBe(false) // nothing left to nudge
+    expect(f9!.undoEventIds).toEqual([pressEventId])
+    expect(f9!.effect).toBe('Running $5 bet · holes 3–9')
+    // the Overall is untouched and still a plain offer
+    expect(overall!.label).toBe('Press 18')
+    expect(overall!.taken).toBeUndefined()
+
+    // play h3; still 2 down on F9 from the h4 tee → F9 offered fresh again
     log.scoreByHole(round, { Ann: [4], Bob: [4] }, [3])
     const h4 = deriveRound(round, log.events).derivations.get('game-1')!.availableActions!()
     expect(h4.map((a) => a.label)).toEqual(['Press F9', 'Press 18'])
+    expect(h4.every((a) => !a.taken)).toBe(true)
     expect(h4[0]!.hole).toBe(4)
 
     function at3() {
       return deriveRound(round, log.events).derivations.get('game-1')!.availableActions!()
     }
+  })
+
+  /**
+   * N10c: undoing a press. Retracting the press event un-does the bet entirely
+   * — the ledger loses the row and the offer comes back on the table. This is
+   * the compensation path of invariant #2, not a delete.
+   */
+  it('N10c: retracting the press event takes the bet back and re-opens the offer', () => {
+    const players = makePlayers([{ name: 'Ann' }, { name: 'Bob' }])
+    const round = makeRound({ players, games: [game({})] })
+    const log = new EventLog()
+    log.scoreByHole(round, { Ann: [4, 4], Bob: [5, 5] }, [1, 2])
+    log.append({
+      type: 'game/event',
+      gameId: 'game-1',
+      kind: 'nassau/press',
+      data: { hole: 3, segment: 'front' },
+    })
+    const pressed = deriveRound(round, log.events).derivations.get('game-1')!
+    expect(pressed.detailLines!.map((l) => l.label)).toEqual(['F9', 'Press @3', 'B9', '18'])
+
+    // toggle it back off, exactly as the sheet does
+    const target = pressed.availableActions!()[0]!.undoEventIds![0]!
+    log.append({ type: 'meta/retract', targetEventId: target })
+
+    const d = deriveRound(round, log.events).derivations.get('game-1')!
+    expect(d.detailLines!.map((l) => l.label)).toEqual(['F9', 'B9', '18'])
+    const back = d.availableActions!()
+    expect(back.map((a) => a.label)).toEqual(['Press F9', 'Press 18'])
+    expect(back.every((a) => !a.taken)).toBe(true)
+    expect(back[0]!.recommended).toBe(true) // 2 down again, and pressable again
+  })
+
+  /**
+   * N10d: a press the RULES own is not the player's to take back. An auto-press
+   * shows as running with no undo — and so does a hand-tapped press sitting in
+   * a slot auto-press also wants, because retracting that event would only let
+   * auto re-create the identical bet. Offering an undo there would be a control
+   * that visibly does nothing.
+   */
+  it('N10d: presses auto-press owns are shown running but not undoable', () => {
+    const players = makePlayers([{ name: 'Ann' }, { name: 'Bob' }])
+
+    // (a) plain auto-press: 2 down at h2 → press @3, no event behind it
+    const auto = makeRound({ players, games: [game({ autoPress: true })] })
+    const autoLog = new EventLog()
+    autoLog.scoreByHole(auto, { Ann: [4, 4], Bob: [5, 5] }, [1, 2])
+    const rows = deriveRound(auto, autoLog.events).derivations.get('game-1')!.availableActions!()
+    expect(rows.map((a) => [a.label, a.taken ?? false, a.undoEventIds ?? null])).toEqual([
+      ['Press F9', true, []],
+      ['Press 18', true, []],
+    ])
+    expect(rows.every((a) => !a.recommended)).toBe(true) // nothing left to nudge
+    expect(rows[0]!.effect).toBe('Running $5 bet · holes 3–9')
+
+    // (b) hand-tapped at 1 down, then a score correction makes it 2 down, so
+    // auto now wants the same slot. The tap is no longer what holds the bet up.
+    const fixed = makeRound({ players, games: [game({ autoPress: true })] })
+    const log = new EventLog()
+    log.scoreByHole(fixed, { Ann: [4, 4], Bob: [5, 4] }, [1, 2]) // only 1 down
+    log.append({
+      type: 'game/event',
+      gameId: 'game-1',
+      kind: 'nassau/press',
+      data: { hole: 3, segment: 'front' },
+    })
+    const beforeFix = deriveRound(fixed, log.events).derivations.get('game-1')!.availableActions!()
+    expect(beforeFix[0]!.undoEventIds).toHaveLength(1) // theirs alone — undoable
+
+    log.append({ type: 'score/set', playerId: 'p-bob', hole: 2, gross: 5 }) // now 2 down
+    const afterFix = deriveRound(fixed, log.events).derivations.get('game-1')!.availableActions!()
+    expect(afterFix[0]!.label).toBe('Press F9')
+    expect(afterFix[0]!.taken).toBe(true)
+    expect(afterFix[0]!.undoEventIds).toEqual([]) // auto owns it now — no false promise
+
+    // and once hole 3 is played, the LEDGER must agree with the sheet about who
+    // owns that bet. Authorship is ownership, not who tapped first — reading the
+    // bet id would say "pressed" here while the sheet badges the same bet "auto".
+    log.scoreByHole(fixed, { Ann: [4], Bob: [4] }, [3])
+    const d = deriveRound(fixed, log.events).derivations.get('game-1')!
+    expect(d.holeSummary(3)).toContain('F9 press @3 starts (Bob 2 down → auto-press)')
   })
 
   /**
@@ -341,8 +467,13 @@ describe('nassau — golden fixtures (hand-verified)', () => {
       data: { hole: 12, segment: 'back' },
     })
     const d = deriveRound(round, log.events).derivations.get('game-1')!
-    expect(d.availableActions!().map((a) => a.label)).toEqual(['Press 18'])
-    // exactly one new bet, under the back nine — the overall is untouched
+    const after = d.availableActions!()
+    // B9 stays listed as engaged; the overall is still a plain, untaken offer
+    expect(after.map((a) => [a.label, a.taken ?? false])).toEqual([
+      ['Press B9', true],
+      ['Press 18', false],
+    ])
+    // exactly one new bet, under the back nine — the overall gained nothing
     expect(d.detailLines!.map((l) => l.label)).toEqual(['F9', 'B9', 'Press @12', '18'])
   })
 
@@ -442,9 +573,9 @@ describe('nassau — golden fixtures (hand-verified)', () => {
     expect(d.requiredInputs()).toEqual([])
 
     // h3: the PARENTS were 2 down (Ann up 2) → Bob is the trailing side
-    expect(d.holeSummary(3)).toContain('Press @3 starts (Bob 2 down → auto-press)')
+    expect(d.holeSummary(3)).toContain('F9 press @3 starts (Bob 2 down → auto-press)')
     // h5: F9 itself is back to all square — the press @3 is what hit 2 down.
     // Reading the parent alone would have printed "AS" as the reason.
-    expect(d.holeSummary(5)).toContain('Press @5 starts (Ann 2 down → auto-press)')
+    expect(d.holeSummary(5)).toContain('F9 press @5 starts (Ann 2 down → auto-press)')
   })
 })

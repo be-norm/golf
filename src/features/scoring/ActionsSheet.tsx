@@ -9,6 +9,7 @@ interface ActionsSheetProps {
   /** every game with a ledger, so the sheet can show what the action acts ON */
   games: { gameId: string; name: string; derivation: GameDerivation }[]
   onTake: (action: GameAction) => void
+  onUndo: (action: GameAction) => void
 }
 
 /**
@@ -17,11 +18,14 @@ interface ActionsSheetProps {
  *
  * This is where "why is it suggesting this?" gets answered — the bar and the
  * button can only ever carry a nudge, so the sheet has to carry the argument.
+ *
+ * Rows TOGGLE. A press you have taken stays in the list, engaged, and tapping
+ * it again takes it back — a mistap on a money bet should not be final, and
+ * hunting for the global undo is not an answer.
  */
-export function ActionsSheet({ open, onClose, actions, games, onTake }: ActionsSheetProps) {
-  // Actions start from the frontier hole, which is NOT necessarily the hole on
-  // screen — the scorekeeper may have paged back to fix an earlier score. Say
-  // the hole out loud so a press never starts somewhere the reader didn't expect.
+export function ActionsSheet({ open, onClose, actions, games, onTake, onUndo }: ActionsSheetProps) {
+  // Every action starts from the hole being played, which is what the screen is
+  // showing — say it anyway, so a press never starts somewhere unexpected.
   const startHole = actions[0]?.hole
 
   return (
@@ -43,35 +47,53 @@ export function ActionsSheet({ open, onClose, actions, games, onTake }: ActionsS
           </p>
         ) : (
           <ul className="space-y-2.5">
-            {actions.map((a) => (
-              <li key={a.id}>
-                <button
-                  onClick={() => onTake(a)}
-                  className={`pixel-press flex w-full items-center justify-between gap-3 px-4 py-3 text-left ${
-                    a.recommended
-                      ? 'border-coin-500 bg-coin-500/10'
-                      : 'border-stone-600 bg-stone-800'
-                  }`}
-                >
-                  <span>
-                    <span
-                      className={`font-display block text-xs uppercase ${
-                        a.recommended ? 'text-coin-400' : 'text-stone-200'
-                      }`}
-                    >
-                      {a.label}
+            {actions.map((a) => {
+              // engaged and the player's to take back; an auto-press is engaged
+              // but inert — the rules started it, so it isn't theirs to undo
+              const undoable = a.taken && (a.undoEventIds?.length ?? 0) > 0
+              return (
+                <li key={a.id}>
+                  <button
+                    onClick={() => (a.taken ? onUndo(a) : onTake(a))}
+                    disabled={a.taken && !undoable}
+                    aria-pressed={a.taken ?? false}
+                    className={`pixel-press flex w-full items-center justify-between gap-3 px-4 py-3 text-left disabled:opacity-60 ${
+                      a.taken
+                        ? 'border-felt-500 bg-felt-900/60'
+                        : a.recommended
+                          ? 'border-coin-500 bg-coin-500/10'
+                          : 'border-stone-600 bg-stone-800'
+                    }`}
+                  >
+                    <span>
+                      <span
+                        className={`font-display block text-xs uppercase ${
+                          a.taken
+                            ? 'text-felt-300'
+                            : a.recommended
+                              ? 'text-coin-400'
+                              : 'text-stone-200'
+                        }`}
+                      >
+                        {a.taken && '✓ '}
+                        {a.label}
+                      </span>
+                      <span className="mt-1 block text-stone-400">{a.detail}</span>
+                      <span className="mt-0.5 block text-stone-500">{a.effect}</span>
                     </span>
-                    <span className="mt-1 block text-stone-400">{a.detail}</span>
-                    <span className="mt-0.5 block text-stone-500">{a.effect}</span>
-                  </span>
-                  {a.recommended && (
-                    <span className="font-display shrink-0 text-[9px] uppercase text-coin-400">
-                      2 down
+                    <span className="font-display shrink-0 text-[9px] uppercase">
+                      {undoable ? (
+                        <span className="text-felt-300">Tap to undo</span>
+                      ) : a.taken ? (
+                        <span className="text-stone-500">auto</span>
+                      ) : (
+                        a.recommended && <span className="text-coin-400">2 down</span>
+                      )}
                     </span>
-                  )}
-                </button>
-              </li>
-            ))}
+                  </button>
+                </li>
+              )
+            })}
           </ul>
         )}
 

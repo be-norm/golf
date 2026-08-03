@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router'
 import { motion, AnimatePresence } from 'motion/react'
 import { eventStore } from '../../db/eventStore'
@@ -27,6 +27,8 @@ export function ScoringScreen() {
   const [standingsOpen, setStandingsOpen] = useState(false)
   const [rulesFor, setRulesFor] = useState<string>()
   const [actionsOpen, setActionsOpen] = useState(false)
+  // event ids already sent for retraction — see `undoAction`
+  const undoneRef = useRef<Set<string>>(new Set())
 
   // Initial hole, captured ONCE when the view first loads: ?hole= deep link
   // (scorecard tap), else first not-fully-scored hole, else the last hole.
@@ -53,9 +55,8 @@ export function ScoringScreen() {
     return inputs
   }, [view])
 
-  // Optional actions (Nassau presses). Deliberately NOT filtered to the hole on
-  // screen: pressing is a decision made on a tee, and must not depend on which
-  // hole the scorekeeper happens to be looking at. The sheet names the hole.
+  // Optional actions (Nassau presses). Surfaced only while the scorekeeper is
+  // ON the hole the action starts from — see `onFrontier` below.
   const actions = useMemo(() => {
     if (!view) return []
     const out: GameAction[] = []
@@ -67,6 +68,9 @@ export function ScoringScreen() {
     [view],
   )
   const recommendsAction = actions.some((a) => a.recommended)
+  // the badge counts what's still on OFFER — a press already running is in the
+  // list so it can be undone, but it isn't something left to take
+  const openActions = actions.filter((a) => !a.taken).length
 
   if (view === undefined) return null
   if (view === null) {
@@ -87,6 +91,13 @@ export function ScoringScreen() {
   // stroke dots show the first NET game's allocation (games[0] was arbitrary)
   const primaryGame = round.games.find((g) => g.handicap.mode === 'net') ?? round.games[0]
   const holeInputs = pendingInputs.filter((i) => i.hole === currentHole)
+
+  // A press starts from the first unfinished hole — the tee the group is
+  // standing on. Only offer it while that hole is the one on screen: entering
+  // hole 1's scores must not light up an offer for hole 2 while hole 1 is still
+  // showing. The group hasn't walked anywhere yet, and the score can still be
+  // corrected; advancing to the next hole is what puts them on that tee.
+  const onFrontier = currentHole === ctx.holesPlayed.find((h) => !ctx.finalized(h))
 
   const allScored = round.players.every((p) =>
     ctx.holesPlayed.every((h) => ctx.gross.get(p.playerId)?.get(h) !== undefined),
@@ -116,6 +127,25 @@ export function ScoringScreen() {
     void eventStore.append(round.id, [
       { type: 'game/event', gameId: action.gameId, kind: action.eventKind, data: action.data },
     ])
+  }
+
+  // Undo is a compensation event, never a delete (invariant #2). The sheet
+  // stays open: toggling a bet off then on again shouldn't cost two taps to
+  // re-open the same list.
+  //
+  // Which means, unlike `takeAction`, this button survives its own tap — so two
+  // quick taps would both fire before the re-derive, appending the same retract
+  // twice. Replay tolerates that (targets collect into a Set), but the log is
+  // append-only and syncs: the duplicate would outlive the round in every
+  // export and archive. Guard on what's already been sent, not on render state.
+  const undoAction = (action: GameAction) => {
+    const targets = (action.undoEventIds ?? []).filter((id) => !undoneRef.current.has(id))
+    if (targets.length === 0) return
+    targets.forEach((id) => undoneRef.current.add(id))
+    void eventStore.append(
+      round.id,
+      targets.map((targetEventId) => ({ type: 'meta/retract' as const, targetEventId })),
+    )
   }
 
   const finish = async () => {
@@ -220,15 +250,15 @@ export function ScoringScreen() {
           treatment is the only push, and only when convention says act (2 down).
           Always tappable, including with nothing on offer — "why can't I press?"
           deserves the sheet's answer, not a dead control. */}
-      {offersActions && !allScored && (
+      {offersActions && onFrontier && !allScored && (
         <section className="mb-2 flex justify-end">
           <button
             onClick={() => setActionsOpen(true)}
-            aria-label={`press options — ${actions.length} available`}
+            aria-label={`press options — ${openActions} available`}
             className={`pixel-press font-display px-4 py-2 text-[10px] uppercase ${
               recommendsAction
                 ? 'border-coin-500 bg-coin-500/15 text-coin-400'
-                : actions.length === 0
+                : openActions === 0
                   ? 'border-stone-700 bg-stone-900 text-stone-500'
                   : 'border-stone-600 bg-stone-800 text-stone-300'
             }`}
@@ -237,7 +267,7 @@ export function ScoringScreen() {
                 A primary control that strobes for ten holes is worse than the
                 interrupting card this replaced. */}
             {recommendsAction && <span className="animate-blink mr-1">▶</span>}⚡ Press
-            {actions.length > 0 && <span className="ml-1.5">· {actions.length}</span>}
+            {openActions > 0 && <span className="ml-1.5">· {openActions}</span>}
           </button>
         </section>
       )}
@@ -368,6 +398,7 @@ export function ScoringScreen() {
           return d ? [{ gameId: g.gameId, name: gameName(g.type), derivation: d }] : []
         })}
         onTake={takeAction}
+        onUndo={undoAction}
       />
 
       <RulesSheet type={rulesFor} onClose={() => setRulesFor(undefined)} />

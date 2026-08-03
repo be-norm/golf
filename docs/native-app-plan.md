@@ -106,7 +106,7 @@ guideline 4.2. Each of these is a small, contained change:
 | `@capacitor/haptics` | `Stepper.tsx`, `ScoreRow.tsx` | Tick on each stroke; heavier thump when a hole decides (skin won, press triggered) |
 | `@capacitor/keep-awake` | `ScoringScreen.tsx` | **Screen stays on during a live round.** The single most useful one on-course — currently the phone sleeps between holes |
 | `@capacitor/camera` | `ScanButton.tsx` | Native multi-shot picker for scorecard scan, replacing the `<input type=file>` workaround documented at `ScanButton.tsx:47` |
-| `@capacitor/share` | `SettleScreen.tsx` | Native share sheet for the settlement summary → iMessage to the group |
+| `@capacitor/share` | `settle/shareImage.ts` | Native share sheet for the round summary PNG → iMessage to the group. **Already built web-first** (MAI-35): `shareImage.ts` is the only file touching `navigator.share`, so this is a one-file swap. The image itself is canvas-painted, not a DOM capture, so nothing about it depends on the web runtime |
 | `@capacitor/app` | `AppLayout` | Android hardware back → router back; `appStateChange` resume → `syncNow` (more reliable than `visibilitychange`) |
 
 `@capacitor/assets` generates every icon and splash size from one 1024×1024 source — you'll

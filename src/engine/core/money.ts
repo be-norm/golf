@@ -47,6 +47,26 @@ export function assertZeroSum(settlement: Settlement): void {
   }
 }
 
+/**
+ * Sum every game's settlement into one per-player balance for the round.
+ * Takes settlements rather than derivations so this stays free of a catalog
+ * import — money.ts is the bottom of the engine, not a consumer of it.
+ * Players with no money movement stay in the map at 0, so the round's full
+ * roster survives into standings.
+ */
+export function combineSettlements(
+  playerIds: readonly Uuid[],
+  settlements: Iterable<Settlement>,
+): Record<Uuid, number> {
+  const combined: Record<Uuid, number> = Object.fromEntries(playerIds.map((id) => [id, 0]))
+  for (const s of settlements) {
+    for (const [id, cents] of Object.entries(s.perPlayerCents)) {
+      combined[id] = (combined[id] ?? 0) + cents
+    }
+  }
+  return combined
+}
+
 export interface Transfer {
   fromPlayerId: Uuid
   toPlayerId: Uuid
@@ -80,4 +100,26 @@ export function minimalTransfers(perPlayerCents: Record<Uuid, number>): Transfer
     if (creditor.remaining === 0) c++
   }
   return transfers
+}
+
+export interface Collector {
+  toPlayerId: Uuid
+  totalCents: number
+  from: { fromPlayerId: Uuid; cents: number }[]
+}
+
+/**
+ * Regroup transfers by who collects: one entry per creditor with their total,
+ * debtors listed beneath. Reads cleanly when one player collects from several —
+ * "Ben collects $6 ← Rob $4, ← Al $2" rather than two unrelated lines.
+ */
+export function collectorsFrom(transfers: readonly Transfer[]): Collector[] {
+  const byCreditor = new Map<Uuid, Collector>()
+  for (const t of transfers) {
+    const g = byCreditor.get(t.toPlayerId) ?? { toPlayerId: t.toPlayerId, totalCents: 0, from: [] }
+    g.totalCents += t.cents
+    g.from.push({ fromPlayerId: t.fromPlayerId, cents: t.cents })
+    byCreditor.set(t.toPlayerId, g)
+  }
+  return [...byCreditor.values()].sort((a, b) => b.totalCents - a.totalCents)
 }
