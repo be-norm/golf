@@ -139,9 +139,8 @@ no account UI at all, let alone deletion.
 
 **No change needed.** Confirmation is off (`supabase/config.toml`: `enable_confirmations =
 false`), so `signUp` returns a session immediately and sends no email. There's no
-password-reset flow either — `AuthValue` exposes only sign-in, sign-up, Google, and
-sign-out. Nothing generates a link, so nothing breaks natively. Email confirmation is not an
-App Store requirement.
+password-reset flow either — nothing on `AuthValue` sends mail. Nothing generates a link, so
+nothing breaks natively. Email confirmation is not an App Store requirement.
 
 The `needsConfirmation` branch in `AuthProvider.tsx` and the "Check your email" state in
 `AuthSheet.tsx` are dead code today. Harmless, and correct if confirmations are ever enabled.
