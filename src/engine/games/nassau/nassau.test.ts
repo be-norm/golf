@@ -308,6 +308,45 @@ describe('nassau — golden fixtures (hand-verified)', () => {
   })
 
   /**
+   * N10b: every live bet is its own offer — pressing one must never drag the
+   * others in. You are offered the nine you are STANDING ON plus the overall;
+   * the other nine's bet is not live, so it is never in the list (and a
+   * finished F9 can't be pressed from the 12th tee).
+   */
+  it('N10b: each bet presses independently — the nine in play, plus the overall', () => {
+    const players = makePlayers([{ name: 'Ann' }, { name: 'Bob' }])
+    const round = makeRound({ players, games: [game({})] })
+    const log = new EventLog()
+    // halve the front, then Bob loses h10 and h11 → B9 and 18 both 2 down
+    log.scoreByHole(
+      round,
+      {
+        Ann: [4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4],
+        Bob: [4, 4, 4, 4, 4, 4, 4, 4, 4, 5, 5],
+      },
+      [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+    )
+    const back = deriveRound(round, log.events).derivations.get('game-1')!.availableActions!()
+    // the front nine is over — not offered, however far anyone is down
+    expect(back.map((a) => a.label)).toEqual(['Press B9', 'Press 18'])
+    expect(back.map((a) => a.data.segment)).toEqual(['back', 'overall'])
+    expect(back[0]!.effect).toBe('New $5 bet · holes 12–18')
+    expect(back[1]!.effect).toBe('New $5 bet · holes 12–18')
+
+    // take ONLY the B9: the overall stays on offer and gains no bet
+    log.append({
+      type: 'game/event',
+      gameId: 'game-1',
+      kind: 'nassau/press',
+      data: { hole: 12, segment: 'back' },
+    })
+    const d = deriveRound(round, log.events).derivations.get('game-1')!
+    expect(d.availableActions!().map((a) => a.label)).toEqual(['Press 18'])
+    // exactly one new bet, under the back nine — the overall is untouched
+    expect(d.detailLines!.map((l) => l.label)).toEqual(['F9', 'B9', 'Press @12', '18'])
+  })
+
+  /**
    * N11 — regression, MAI-34. A parent bet and one of ITS OWN presses can both
    * cross ±2 on the same hole, and each wants to open a press on the next hole
    * of the same segment. That is ONE bet, not two: same segment, same span,
