@@ -21,11 +21,42 @@ export interface InputRequest {
   gameId: Uuid
   hole: number
   prompt: string
-  /** optional inputs render as chips but never block play (e.g. press offers) */
-  optional?: boolean
   options: { value: string; label: string }[]
   /** the game event kind to append with data { hole, choice } */
   eventKind: string
+}
+
+/**
+ * A player-initiated optional action (Nassau press today; hammer / Banker
+ * wagers are the same shape). PULL, NOT PUSH — the UI parks these behind a
+ * button instead of interrupting scoring, because availability ("this is
+ * legal now") is true on most holes and would nag if it interrupted.
+ *
+ * `recommended` is the separate, occasional claim — "the game's convention
+ * says take this NOW" — and is the only thing the UI badges. Keeping the two
+ * apart is the whole point of this channel: a game that conflates them ends up
+ * interrupting on every hole (see MAI-34).
+ *
+ * Contrast `InputRequest`, which is genuinely blocking: Wolf's hole cannot
+ * compute without its pick, so that one is right to interrupt.
+ */
+export interface GameAction {
+  /** stable id — same action across re-derives keeps the same id */
+  id: string
+  gameId: Uuid
+  /** the hole the action takes effect from (a press starts here) */
+  hole: number
+  /** the button, e.g. "Press F9" */
+  label: string
+  /** WHY it is offered, e.g. "Rob 2 down · 5 to play" */
+  detail: string
+  /** what taking it creates, e.g. "New $5 bet · holes 5–9" */
+  effect: string
+  /** the game's convention says act now — the UI badges these */
+  recommended: boolean
+  eventKind: string
+  /** appended verbatim as the game event's data */
+  data: Record<string, unknown>
 }
 
 export interface GameDerivation {
@@ -57,6 +88,12 @@ export interface GameDerivation {
    */
   holeSummary(hole: number): string[]
   requiredInputs(): InputRequest[]
+  /**
+   * Optional player-initiated actions, surfaced behind a button rather than
+   * interrupting play. Implement it and the scoring screen grows a PRESS-style
+   * affordance for this game; leave it off and nothing changes.
+   */
+  availableActions?(): GameAction[]
   settlement: Settlement
 }
 

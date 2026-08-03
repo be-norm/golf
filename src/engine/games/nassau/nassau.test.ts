@@ -241,4 +241,171 @@ describe('nassau — golden fixtures (hand-verified)', () => {
     expect(d.settlement.perPlayerCents).toEqual({ 'p-a': -500, 'p-b': -500, 'p-c': 1000 })
     expect(Object.values(d.settlement.perPlayerCents).reduce((a, b) => a + b, 0)).toBe(0)
   })
+
+  /**
+   * N9: the press OFFER (availableActions). A press is available whenever a
+   * side is down by any amount — the 2-down convention is a recommendation,
+   * not a gate — so `recommended` is the only thing that turns on at 2.
+   *
+   * A wins h1 (F9 +1, 18 +1), A wins h2 (F9 +2, 18 +2), B wins h3 & h4
+   * (F9 0, 18 0). Offers are read on the frontier hole each time.
+   */
+  it('N9: presses are offered at any deficit, recommended at 2 down', () => {
+    const players = makePlayers([{ name: 'Ann' }, { name: 'Bob' }])
+    const round = makeRound({ players, games: [game({})] })
+    const log = new EventLog()
+
+    // nothing scored: hole 1 is the frontier but no bet has started scoring
+    const at = () => deriveRound(round, log.events).derivations.get('game-1')!.availableActions!()
+    expect(at()).toEqual([])
+
+    log.scoreByHole(round, { Ann: [4], Bob: [5] }, [1])
+    const oneDown = at()
+    expect(oneDown.map((a) => a.label)).toEqual(['Press F9', 'Press 18'])
+    expect(oneDown.every((a) => a.recommended)).toBe(false)
+    expect(oneDown[0]!.hole).toBe(2)
+    expect(oneDown[0]!.detail).toBe('Bob 1 down · 8 to play')
+    expect(oneDown[0]!.effect).toBe('New $5 bet · holes 2–9')
+    expect(oneDown[1]!.effect).toBe('New $5 bet · holes 2–18')
+
+    log.scoreByHole(round, { Ann: [4], Bob: [5] }, [2])
+    const twoDown = at()
+    expect(twoDown.every((a) => a.recommended)).toBe(true)
+    expect(twoDown[0]!.detail).toBe('Bob 2 down · 7 to play')
+
+    // back to all square → nothing to press, on either bet
+    log.scoreByHole(round, { Ann: [5, 5], Bob: [4, 4] }, [3, 4])
+    expect(at()).toEqual([])
+  })
+
+  /**
+   * N10: taking the offer removes it for THAT hole only — a press is
+   * (segment, hole), so the same segment is offered again from the next tee.
+   */
+  it('N10: a taken press stops being offered at that hole, returns at the next', () => {
+    const players = makePlayers([{ name: 'Ann' }, { name: 'Bob' }])
+    const round = makeRound({ players, games: [game({})] })
+    const log = new EventLog()
+    log.scoreByHole(round, { Ann: [4, 4], Bob: [5, 5] }, [1, 2])
+    log.append({
+      type: 'game/event',
+      gameId: 'game-1',
+      kind: 'nassau/press',
+      data: { hole: 3, segment: 'front' },
+    })
+    // F9 pressed at h3 → only the Overall remains on offer at h3
+    expect(at3().map((a) => a.label)).toEqual(['Press 18'])
+
+    // play h3; still 2 down on F9 from the h4 tee → F9 offered again
+    log.scoreByHole(round, { Ann: [4], Bob: [4] }, [3])
+    const h4 = deriveRound(round, log.events).derivations.get('game-1')!.availableActions!()
+    expect(h4.map((a) => a.label)).toEqual(['Press F9', 'Press 18'])
+    expect(h4[0]!.hole).toBe(4)
+
+    function at3() {
+      return deriveRound(round, log.events).derivations.get('game-1')!.availableActions!()
+    }
+  })
+
+  /**
+   * N11 — regression, MAI-34. A parent bet and one of ITS OWN presses can both
+   * cross ±2 on the same hole, and each wants to open a press on the next hole
+   * of the same segment. That is ONE bet, not two: same segment, same span,
+   * same stake, indistinguishable in the ledger.
+   *
+   * $2, auto-press, 1v1. A wins h1,h2 → F9 +2 and 18 +2 → presses @3.
+   * B wins h3,h4 → F9 0 (P@3 −2 → press @5); B wins h5,h6 → F9 −2 (prev −1,
+   * fires) AND P@5 −2 (prev −1, fires), both wanting front @7.
+   * Halved h7–h18.
+   *
+   * Front bets: F9 (−2, B), P@3 (−4, B), P@5 (−2, B), P@7 (0, push) = 4 rows.
+   * Overall runs the same shape: 18 (−2), P@3 (−4), P@5 (−2), P@7 (push).
+   * Money: B wins F9, FP@3, FP@5, 18, OP@3, OP@5 = 6 × $2 = $12 to B.
+   * With the bug there would be a SEVENTH front row and an eighth overall row,
+   * both pushes — harmless to zero-sum, which is why the fuzz never saw it.
+   */
+  it('N11: a parent and its own press crossing 2 down together open ONE press', () => {
+    const players = makePlayers([{ name: 'A' }, { name: 'B' }])
+    const round = makeRound({ players, games: [game({ stakeCents: 200, autoPress: true })] })
+    const log = new EventLog()
+    log.scoreByHole(round, {
+      A: [4, 4, 5, 5, 5, 5, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4],
+      B: [5, 5, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4],
+    })
+    const d = deriveRound(round, log.events).derivations.get('game-1')!
+
+    // exactly one press per (segment, startHole) — no duplicate @7 in either
+    // segment, and presses listed in the order they started
+    expect(d.detailLines!.map((l) => l.label)).toEqual([
+      'F9',
+      'Press @3',
+      'Press @5',
+      'Press @7',
+      'B9',
+      '18',
+      'Press @3',
+      'Press @5',
+      'Press @7',
+    ])
+
+    // magnitude, not just zero-sum: the bug leaves zero-sum intact
+    expect(d.settlement.perPlayerCents).toEqual({ 'p-a': -1200, 'p-b': 1200 })
+    expect(d.settlement.lines).toHaveLength(6)
+  })
+
+  /**
+   * N12: press identity is independent of what created it. A hand-tapped press
+   * and an auto-press landing on the same segment+hole are one bet — the
+   * manual one wins the slot, and the group writes down one press either way.
+   */
+  it('N12: a manual press and an auto-press on the same segment+hole are one bet', () => {
+    const players = makePlayers([{ name: 'A' }, { name: 'B' }])
+    const scores = {
+      A: [4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4],
+      B: [5, 5, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4],
+    }
+    // auto-press alone: A goes 2 up on F9 and 18 at h2 → presses @3
+    const autoOnly = makeRound({ players, games: [game({ autoPress: true })] })
+    const autoLog = new EventLog()
+    autoLog.scoreByHole(autoOnly, scores)
+    const auto = deriveRound(autoOnly, autoLog.events).derivations.get('game-1')!
+
+    // same round, but the group ALSO tapped press on front @3 by hand
+    const both = makeRound({ players, games: [game({ autoPress: true })] })
+    const bothLog = new EventLog()
+    bothLog.scoreByHole(both, scores)
+    bothLog.append({
+      type: 'game/event',
+      gameId: 'game-1',
+      kind: 'nassau/press',
+      data: { hole: 3, segment: 'front' },
+    })
+    const d = deriveRound(both, bothLog.events).derivations.get('game-1')!
+
+    expect(d.detailLines).toEqual(auto.detailLines)
+    expect(d.settlement.perPlayerCents).toEqual(auto.settlement.perPlayerCents)
+  })
+
+  /**
+   * N13: Nassau blocks on nothing, and the ledger explains a press by the
+   * deficit that caused it — including when the cause is another PRESS being
+   * 2 down while the parent sits all square (h5 below: F9 is level, P@3 is −2).
+   */
+  it('N13: no blocking inputs; the ledger names who was down when a press opened', () => {
+    const players = makePlayers([{ name: 'Ann' }, { name: 'Bob' }])
+    const round = makeRound({ players, games: [game({ stakeCents: 200, autoPress: true })] })
+    const log = new EventLog()
+    log.scoreByHole(round, {
+      Ann: [4, 4, 5, 5, 5, 5, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4],
+      Bob: [5, 5, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4],
+    })
+    const d = deriveRound(round, log.events).derivations.get('game-1')!
+    expect(d.requiredInputs()).toEqual([])
+
+    // h3: the PARENTS were 2 down (Ann up 2) → Bob is the trailing side
+    expect(d.holeSummary(3)).toContain('Press @3 starts (Bob 2 down → auto-press)')
+    // h5: F9 itself is back to all square — the press @3 is what hit 2 down.
+    // Reading the parent alone would have printed "AS" as the reason.
+    expect(d.holeSummary(5)).toContain('Press @5 starts (Ann 2 down → auto-press)')
+  })
 })

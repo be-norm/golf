@@ -131,6 +131,15 @@ change, use a 6-digit code (`{{ .Token }}` + `verifyOtp`) rather than a link.
   the outcome, then explains the cause of anything non-obvious on a "↳ "
   continuation line (birdie→flip, carry→multi-skin, 2-down→press, lone/blind→
   Wolf points). A reader should never have to ask why a result happened.
+- **Availability pulls, recommendation pushes — never the same channel.**
+  `requiredInputs`/`InputRequest` is for genuinely BLOCKING inputs (Wolf's pick:
+  the hole can't compute without it) and interrupts. Optional player-initiated
+  actions go through `availableActions`/`GameAction`, park behind a button, and
+  only *badge* when the game's convention says act now (`recommended`). Mixing
+  them is how Nassau ended up nagging "Press?" on every hole while never saying
+  why (MAI-34): a thing that's legal most of the time will interrupt most of the
+  time. A `GameAction` carries its own argument — `detail` (why it's offered)
+  and `effect` (what taking it creates).
 
 ## Testing conventions
 

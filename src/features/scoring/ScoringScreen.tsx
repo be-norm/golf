@@ -5,7 +5,8 @@ import { eventStore } from '../../db/eventStore'
 import { roundRepo } from '../../db/repos'
 import { effectiveEvents } from '../../engine/core/replay'
 import { formatCentsSigned } from '../../engine/core/money'
-import type { InputRequest } from '../../engine/catalog'
+import type { GameAction, InputRequest } from '../../engine/catalog'
+import { ActionsSheet } from './ActionsSheet'
 import { Sheet } from '../../components/Sheet'
 import { GameSummary } from '../../components/GameSummary'
 import { DetailLines } from '../../components/DetailLines'
@@ -25,8 +26,7 @@ export function ScoringScreen() {
   const [hole, setHole] = useState<number>()
   const [standingsOpen, setStandingsOpen] = useState(false)
   const [rulesFor, setRulesFor] = useState<string>()
-  // optional prompts (e.g. press offers) can be waved off without an event
-  const [dismissedInputs, setDismissedInputs] = useState<Set<string>>(new Set())
+  const [actionsOpen, setActionsOpen] = useState(false)
 
   // Initial hole, captured ONCE when the view first loads: ?hole= deep link
   // (scorecard tap), else first not-fully-scored hole, else the last hole.
@@ -53,6 +53,20 @@ export function ScoringScreen() {
     return inputs
   }, [view])
 
+  // Optional actions (Nassau presses). Deliberately NOT filtered to the hole on
+  // screen: pressing is a decision made on a tee, and must not depend on which
+  // hole the scorekeeper happens to be looking at. The sheet names the hole.
+  const actions = useMemo(() => {
+    if (!view) return []
+    const out: GameAction[] = []
+    for (const d of view.derivations.values()) out.push(...(d.availableActions?.() ?? []))
+    return out
+  }, [view])
+  const offersActions = useMemo(
+    () => (view ? [...view.derivations.values()].some((d) => d.availableActions) : false),
+    [view],
+  )
+
   if (view === undefined) return null
   if (view === null) {
     return (
@@ -71,7 +85,7 @@ export function ScoringScreen() {
   const holeIdx = ctx.holesPlayed.indexOf(currentHole)
   // stroke dots show the first NET game's allocation (games[0] was arbitrary)
   const primaryGame = round.games.find((g) => g.handicap.mode === 'net') ?? round.games[0]
-  const holeInputs = pendingInputs.filter((i) => i.hole === currentHole && !dismissedInputs.has(i.id))
+  const holeInputs = pendingInputs.filter((i) => i.hole === currentHole)
 
   const allScored = round.players.every((p) =>
     ctx.holesPlayed.every((h) => ctx.gross.get(p.playerId)?.get(h) !== undefined),
@@ -93,6 +107,13 @@ export function ScoringScreen() {
   const answerInput = (input: InputRequest, choice: string) => {
     void eventStore.append(round.id, [
       { type: 'game/event', gameId: input.gameId, kind: input.eventKind, data: { hole: input.hole, choice } },
+    ])
+  }
+
+  const takeAction = (action: GameAction) => {
+    setActionsOpen(false)
+    void eventStore.append(round.id, [
+      { type: 'game/event', gameId: action.gameId, kind: action.eventKind, data: action.data },
     ])
   }
 
@@ -173,12 +194,9 @@ export function ScoringScreen() {
       {holeInputs.length > 0 && (
         <section className="mb-2 space-y-2.5">
           {holeInputs.map((input) => (
-            <div
-              key={input.id}
-              className={`pixel p-3 ${input.optional ? 'border-stone-600 bg-stone-800/40' : 'border-coin-500 bg-coin-500/10'}`}
-            >
-              <p className={`mb-2 text-lg ${input.optional ? 'text-stone-300' : 'text-coin-400'}`}>
-                {!input.optional && <span className="animate-blink">▶ </span>}
+            <div key={input.id} className="pixel border-coin-500 bg-coin-500/10 p-3">
+              <p className="mb-2 text-lg text-coin-400">
+                <span className="animate-blink">▶ </span>
                 {input.prompt}
               </p>
               <div className="flex flex-wrap gap-2.5">
@@ -191,17 +209,28 @@ export function ScoringScreen() {
                     {o.label}
                   </button>
                 ))}
-                {input.optional && (
-                  <button
-                    onClick={() => setDismissedInputs(new Set([...dismissedInputs, input.id]))}
-                    className="px-3 py-2.5 text-lg text-stone-500"
-                  >
-                    ✕ No thanks
-                  </button>
-                )}
               </div>
             </div>
           ))}
+        </section>
+      )}
+
+      {/* Availability, parked behind a button so it never interrupts; the gold
+          badge is the only push, and only when convention says act (2 down). */}
+      {offersActions && !allScored && (
+        <section className="mb-2 flex justify-end">
+          <button
+            onClick={() => setActionsOpen(true)}
+            disabled={actions.length === 0}
+            className={`pixel-press font-display px-4 py-2 text-[10px] uppercase disabled:opacity-40 ${
+              actions.some((a) => a.recommended)
+                ? 'animate-blink border-coin-500 bg-coin-500/15 text-coin-400'
+                : 'border-stone-600 bg-stone-800 text-stone-300'
+            }`}
+          >
+            ⚡ Press
+            {actions.length > 0 && <span className="ml-1.5">· {actions.length}</span>}
+          </button>
         </section>
       )}
 
@@ -321,6 +350,17 @@ export function ScoringScreen() {
           )}
         </div>
       </Sheet>
+
+      <ActionsSheet
+        open={actionsOpen}
+        onClose={() => setActionsOpen(false)}
+        actions={actions}
+        games={round.games.flatMap((g) => {
+          const d = derivations.get(g.gameId)
+          return d ? [{ gameId: g.gameId, name: gameName(g.type), derivation: d }] : []
+        })}
+        onTake={takeAction}
+      />
 
       <RulesSheet type={rulesFor} onClose={() => setRulesFor(undefined)} />
     </main>
