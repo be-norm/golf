@@ -57,6 +57,17 @@ export interface GameAction {
   eventKind: string
   /** appended verbatim as the game event's data */
   data: Record<string, unknown>
+  /**
+   * Already in effect. The row stays in the list rather than vanishing, so a
+   * mistap is visible and reversible instead of silently final.
+   */
+  taken?: boolean
+  /**
+   * Events to retract to undo it (invariant #2: compensate, never delete).
+   * Empty when the GAME started it rather than the player — an auto-press is
+   * not theirs to undo, so the UI shows it engaged but inert.
+   */
+  undoEventIds?: Uuid[]
 }
 
 export interface GameDerivation {

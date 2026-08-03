@@ -79,11 +79,17 @@ function derive(
     else holeResult.set(hole, a < b ? 1 : b < a ? -1 : 0)
   }
 
-  const manualPresses = new Map<string, { hole: number; segment: Segment }>()
+  // Every press event for a slot is kept, not just the last: undoing a press
+  // means retracting ALL of them, or a stray duplicate would leave the bet
+  // standing after the player toggled it off.
+  const manualPresses = new Map<string, { hole: number; segment: Segment; eventIds: Uuid[] }>()
   for (const e of events) {
     if (e.kind !== 'nassau/press') continue
     const data = e.data as { hole: number; segment: Segment }
-    manualPresses.set(`${data.segment}-${data.hole}`, data)
+    const key = `${data.segment}-${data.hole}`
+    const seen = manualPresses.get(key)
+    if (seen) seen.eventIds.push(e.id)
+    else manualPresses.set(key, { ...data, eventIds: [e.id] })
   }
 
   // PRESS IDENTITY — there is exactly ONE press bet per (segment, startHole),
@@ -327,25 +333,34 @@ function derive(
     const actions: GameAction[] = []
     for (const seg of ['front', 'back', 'overall'] as const) {
       if (!spans[seg].includes(frontier)) continue
-      if (pressStarts.has(pressKey(seg, frontier))) continue
+      const taken = pressStarts.has(pressKey(seg, frontier))
       const down = pressDeficit(seg, frontier)
-      // all square: nothing to catch up on, and no side owns the decision
-      if (!down) continue
+      // all square and unpressed: nothing to catch up on, and no side owns
+      // the decision. A press already running still shows, so it can be undone.
+      if (!taken && !down) continue
       const toPlay = spans[seg].filter(
         (h) => h >= frontier && (holeResult.get(h) ?? null) === null,
       ).length
       const last = spans[seg][spans[seg].length - 1]!
       const span = frontier === last ? `hole ${last}` : `holes ${frontier}–${last}`
+      const why = down ? `${sideShort(down.trailing)} ${down.by} down · ${toPlay} to play` : `${toPlay} to play`
       actions.push({
         id: `nassau-press-${seg}-${frontier}`,
         gameId: game.gameId,
         hole: frontier,
         label: `Press ${segLabel(seg)}`,
-        detail: `${sideShort(down.trailing)} ${down.by} down · ${toPlay} to play`,
-        effect: `New ${formatCents(stakeCents)} bet · ${span}`,
-        recommended: down.by >= 2,
+        detail: why,
+        effect: `${taken ? 'Running' : 'New'} ${formatCents(stakeCents)} bet · ${span}`,
+        // nothing to recommend once it's running
+        recommended: !taken && (down?.by ?? 0) >= 2,
         eventKind: 'nassau/press',
         data: { hole: frontier, segment: seg },
+        ...(taken && {
+          taken: true,
+          // an auto-press has no event behind it — the rules started it, so
+          // it is not the player's to take back
+          undoEventIds: manualPresses.get(pressKey(seg, frontier))?.eventIds ?? [],
+        }),
       })
     }
     return actions

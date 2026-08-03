@@ -179,9 +179,50 @@ describe('ScoringScreen', () => {
       data: { hole: 3, segment: 'front' },
     })
 
-    // that segment stops being offered at this hole — the Overall bet remains
+    // that segment stops being OFFERED — only the Overall is left to take
     await waitFor(async () => {
       expect(await pressButton()).toHaveAccessibleName('press options — 1 available')
+    })
+  })
+
+  it('no press offer while looking at a hole the group has already played', async () => {
+    // holes 1–2 are in, so the group is on the 3rd tee — but the scorekeeper
+    // has paged back to hole 1 to check a score. Nothing to press from here.
+    const round = await nassauRound('round-press-off-frontier', [1, 2])
+    const router = createMemoryRouter(routes, { initialEntries: [`/round/${round.id}?hole=1`] })
+    render(<RouterProvider router={router} />)
+
+    await screen.findByText('Hole')
+    expect(screen.queryByRole('button', { name: /press options/ })).not.toBeInTheDocument()
+  })
+
+  it('a taken press stays on the list and tapping it again takes it back', async () => {
+    const round = await nassauRound('round-press-undo', [1, 2])
+    const router = createMemoryRouter(routes, { initialEntries: [`/round/${round.id}`] })
+    render(<RouterProvider router={router} />)
+
+    await userEvent.click(await pressButton())
+    await userEvent.click(await screen.findByRole('button', { name: /Press F9/ }))
+    await waitFor(async () => {
+      expect(await eventStore.list(round.id)).toHaveLength(5)
+    })
+
+    // reopen: the press is still listed, engaged, and offering its own undo
+    await userEvent.click(await pressButton())
+    const taken = await screen.findByRole('button', { name: /Press F9/ })
+    expect(taken).toHaveAttribute('aria-pressed', 'true')
+    expect(await screen.findByText('Running $5 bet · holes 3–9')).toBeInTheDocument()
+
+    // tap it again → a retract lands, and the row goes back to a plain offer
+    await userEvent.click(taken)
+    await waitFor(async () => {
+      expect(await eventStore.list(round.id)).toHaveLength(6)
+    })
+    const events = await eventStore.list(round.id)
+    expect(events[5]).toMatchObject({ type: 'meta/retract', targetEventId: events[4]!.id })
+
+    await waitFor(async () => {
+      expect(await pressButton()).toHaveAccessibleName('press options — 2 available')
     })
   })
 })

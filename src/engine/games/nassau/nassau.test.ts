@@ -279,10 +279,12 @@ describe('nassau — golden fixtures (hand-verified)', () => {
   })
 
   /**
-   * N10: taking the offer removes it for THAT hole only — a press is
-   * (segment, hole), so the same segment is offered again from the next tee.
+   * N10: a taken press stays on the list as an ENGAGED row carrying the events
+   * that undo it — a mistap on a money bet must be reversible in place. It is
+   * still one bet per (segment, hole), so the segment is offered fresh again
+   * from the next tee.
    */
-  it('N10: a taken press stops being offered at that hole, returns at the next', () => {
+  it('N10: a taken press stays listed, engaged and undoable, then re-offers next hole', () => {
     const players = makePlayers([{ name: 'Ann' }, { name: 'Bob' }])
     const round = makeRound({ players, games: [game({})] })
     const log = new EventLog()
@@ -293,18 +295,59 @@ describe('nassau — golden fixtures (hand-verified)', () => {
       kind: 'nassau/press',
       data: { hole: 3, segment: 'front' },
     })
-    // F9 pressed at h3 → only the Overall remains on offer at h3
-    expect(at3().map((a) => a.label)).toEqual(['Press 18'])
+    const pressEventId = log.events[log.events.length - 1]!.id
 
-    // play h3; still 2 down on F9 from the h4 tee → F9 offered again
+    const [f9, overall] = at3()
+    expect(f9!.label).toBe('Press F9')
+    expect(f9!.taken).toBe(true)
+    expect(f9!.recommended).toBe(false) // nothing left to nudge
+    expect(f9!.undoEventIds).toEqual([pressEventId])
+    expect(f9!.effect).toBe('Running $5 bet · holes 3–9')
+    // the Overall is untouched and still a plain offer
+    expect(overall!.label).toBe('Press 18')
+    expect(overall!.taken).toBeUndefined()
+
+    // play h3; still 2 down on F9 from the h4 tee → F9 offered fresh again
     log.scoreByHole(round, { Ann: [4], Bob: [4] }, [3])
     const h4 = deriveRound(round, log.events).derivations.get('game-1')!.availableActions!()
     expect(h4.map((a) => a.label)).toEqual(['Press F9', 'Press 18'])
+    expect(h4.every((a) => !a.taken)).toBe(true)
     expect(h4[0]!.hole).toBe(4)
 
     function at3() {
       return deriveRound(round, log.events).derivations.get('game-1')!.availableActions!()
     }
+  })
+
+  /**
+   * N10c: undoing a press. Retracting the press event un-does the bet entirely
+   * — the ledger loses the row and the offer comes back on the table. This is
+   * the compensation path of invariant #2, not a delete.
+   */
+  it('N10c: retracting the press event takes the bet back and re-opens the offer', () => {
+    const players = makePlayers([{ name: 'Ann' }, { name: 'Bob' }])
+    const round = makeRound({ players, games: [game({})] })
+    const log = new EventLog()
+    log.scoreByHole(round, { Ann: [4, 4], Bob: [5, 5] }, [1, 2])
+    log.append({
+      type: 'game/event',
+      gameId: 'game-1',
+      kind: 'nassau/press',
+      data: { hole: 3, segment: 'front' },
+    })
+    const pressed = deriveRound(round, log.events).derivations.get('game-1')!
+    expect(pressed.detailLines!.map((l) => l.label)).toEqual(['F9', 'Press @3', 'B9', '18'])
+
+    // toggle it back off, exactly as the sheet does
+    const target = pressed.availableActions!()[0]!.undoEventIds![0]!
+    log.append({ type: 'meta/retract', targetEventId: target })
+
+    const d = deriveRound(round, log.events).derivations.get('game-1')!
+    expect(d.detailLines!.map((l) => l.label)).toEqual(['F9', 'B9', '18'])
+    const back = d.availableActions!()
+    expect(back.map((a) => a.label)).toEqual(['Press F9', 'Press 18'])
+    expect(back.every((a) => !a.taken)).toBe(true)
+    expect(back[0]!.recommended).toBe(true) // 2 down again, and pressable again
   })
 
   /**
@@ -341,8 +384,13 @@ describe('nassau — golden fixtures (hand-verified)', () => {
       data: { hole: 12, segment: 'back' },
     })
     const d = deriveRound(round, log.events).derivations.get('game-1')!
-    expect(d.availableActions!().map((a) => a.label)).toEqual(['Press 18'])
-    // exactly one new bet, under the back nine — the overall is untouched
+    const after = d.availableActions!()
+    // B9 stays listed as engaged; the overall is still a plain, untaken offer
+    expect(after.map((a) => [a.label, a.taken ?? false])).toEqual([
+      ['Press B9', true],
+      ['Press 18', false],
+    ])
+    // exactly one new bet, under the back nine — the overall gained nothing
     expect(d.detailLines!.map((l) => l.label)).toEqual(['F9', 'B9', 'Press @12', '18'])
   })
 
