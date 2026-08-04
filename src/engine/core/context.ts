@@ -36,6 +36,22 @@ export interface RoundContext {
    * claim about golf that never happened.
    */
   anyScored(hole: number): boolean
+  /**
+   * WHERE a hole's outcome becomes visible: the hole at which `hole` first
+   * counts as final, which is the hole a prefix replay first settles it on and
+   * therefore the hole any money riding on it lands on. Undefined if it isn't
+   * final yet.
+   *
+   * Usually `hole` itself — everyone scored it. But a hole that finalized only
+   * because play MOVED ON belongs to the hole play moved on to, and a hole
+   * finalized by `round/completed` belongs to the last hole anybody played.
+   *
+   * This lives here, beside `finalized`, because it is the same rule read
+   * backwards, and a caller that re-derives it from `anyScored` gets a subtly
+   * different answer — money landing on one ledger row while the sentence
+   * explaining it sits on another (MAI-38).
+   */
+  finalizedAt(hole: number): number | undefined
 }
 
 export function holesForRange(range: RoundHoles): number[] {
@@ -129,12 +145,27 @@ export function buildRoundContext(round: Round, effective: readonly RoundEvent[]
   holesPlayed.forEach((h, i) => {
     if (anyScored(h)) lastTouchedIdx = i
   })
+  const allScored = (hole: number): boolean =>
+    round.players.every((p) => gross.get(p.playerId)?.get(hole) !== undefined)
+
   const finalized = (hole: number): boolean => {
     const idx = holesPlayed.indexOf(hole)
     if (idx === -1) return false
-    if (round.players.every((p) => gross.get(p.playerId)?.get(hole) !== undefined)) return true
+    if (allScored(hole)) return true
     if (completed) return true
     return idx < lastTouchedIdx
+  }
+
+  // Mirrors `finalized`'s three clauses, in the same order, so the two can't
+  // drift: scored out → here; play moved on → the hole it moved on to;
+  // completed → the last hole anybody played.
+  const finalizedAt = (hole: number): number | undefined => {
+    const idx = holesPlayed.indexOf(hole)
+    if (idx === -1 || !finalized(hole)) return undefined
+    if (allScored(hole)) return hole
+    const movedOnTo = holesPlayed.find((h, i) => i > idx && anyScored(h))
+    if (movedOnTo !== undefined) return movedOnTo
+    return holesPlayed.filter(anyScored).pop()
   }
 
   return {
@@ -148,5 +179,6 @@ export function buildRoundContext(round: Round, effective: readonly RoundEvent[]
     bestNetAmongPosted,
     finalized,
     anyScored,
+    finalizedAt,
   }
 }

@@ -20,7 +20,7 @@ export function ScorecardScreen() {
   const ledger = useMemo(
     () =>
       view
-        ? buildHoleLedger(view.round, view.events, view.ctx.holesPlayed, view.derivations)
+        ? buildHoleLedger(view.round, view.events, view.ctx, view.derivations)
         : undefined,
     [view],
   )

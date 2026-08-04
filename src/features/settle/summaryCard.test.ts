@@ -113,9 +113,12 @@ describe('buildSummaryCard', () => {
     const nassau = card(round, log).games[0]!
     expect(nassau.kind).toBe('ledger')
     // the margin reaches the shared image intact — and as ONE token, since the
-    // painter word-wraps on spaces and "3 & 2" could break across two lines
+    // painter word-wraps on spaces and "3 & 2" could break across two lines.
+    // Matched as a MARGIN pattern, not a bare ' & ': team sides legitimately
+    // render "Ann & Bob", so a blanket ampersand ban would both prove nothing
+    // here and fail on the first 2v2 fixture anyone adds.
     expect(nassau.lines.find((l) => l.label === 'F9')!.value).toBe('Ben wins 3&2')
-    expect(nassau.lines.every((l) => !l.value.includes(' & '))).toBe(true)
+    expect(nassau.lines.every((l) => !/\d\s+&\s+\d/.test(l.value))).toBe(true)
   })
 
   it('names a dead skins carry, which has no ledger to hide in', () => {

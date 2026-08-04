@@ -294,8 +294,10 @@ describe('nassau — golden fixtures (hand-verified)', () => {
       { label: 'B9', value: 'push', depth: 0 },
       { label: '18', value: `Ann wins ${up(2)}`, depth: 0 },
     ])
-    // no bet may quote a to-play count off holes nobody played
-    expect(d.detailLines!.every((l) => !l.value.includes('&'))).toBe(true)
+    // no bet may quote a to-play count off holes nobody played. Matched as the
+    // MARGIN pattern rather than a bare '&', which a team side ("Ann & Bob")
+    // also contains — that would pass here by luck and break on a 2v2 fixture.
+    expect(d.detailLines!.every((l) => !/\d&\d/.test(l.value))).toBe(true)
     // the money is unaffected — only the sentence describing it
     expect(d.settlement.perPlayerCents).toEqual({ 'p-ann': 1000, 'p-bob': -1000 })
   })
@@ -325,6 +327,56 @@ describe('nassau — golden fixtures (hand-verified)', () => {
     // the settlement names the bet the way the ledger does — a nine-hole
     // round's single bet is the nine that was played, not "Overall"
     expect(d.settlement.lines[0]!.label).toBe('F9 — Ann & Bob win 5&4')
+    // ...and so does the per-player status line, which had kept its own copy
+    // of the segment label and called this bet "18"
+    expect(d.standings[0]!.detail).toBe('F9 ✓5&4')
+  })
+
+  /**
+   * N19: a pushed bet reports on the last hole of ITS OWN stretch. The front
+   * nine finishes level on 9, not on 18 — piling every pushed front-nine bet
+   * and press onto the final row of the round is the ledger telling the group
+   * their front nine was decided on the 18th green.
+   */
+  it('N19: a push closes on the last hole of its own nine', () => {
+    const players = makePlayers([{ name: 'Ann' }, { name: 'Bob' }])
+    const round = makeRound({ players, games: [game({})] })
+    const log = new EventLog()
+    const flat = Array(18).fill(4)
+    log.scoreByHole(round, { Ann: flat, Bob: flat }) // every hole halved
+    const d = deriveRound(round, log.events).derivations.get('game-1')!
+
+    expect(d.holeSummary(9)).toContain('F9 closes — push')
+    expect(d.holeSummary(18)).toContain('B9 closes — push')
+    expect(d.holeSummary(18)).toContain('18 closes — push')
+    // the front's push does NOT also land on 18
+    expect(d.holeSummary(18)).not.toContain('F9 closes — push')
+  })
+
+  /**
+   * N20: the front nine and the overall both open a press on the same hole, so
+   * a bare "Press @3 closes" cannot say which bet just paid. These notes are a
+   * flat per-hole list — the same reason the press-START note names its
+   * segment.
+   */
+  it('N20: a closing press names its segment, like the note that opened it', () => {
+    const players = makePlayers([{ name: 'Ann' }, { name: 'Bob' }])
+    const round = makeRound({ players, games: [game({ autoPress: true })] })
+    const log = new EventLog()
+    // Bob wins the whole front: F9 and 18 each auto-press at h3, and the F9
+    // press is itself over by h6 (4 up, 3 to play)
+    log.scoreByHole(
+      round,
+      { Ann: [5, 5, 5, 5, 5, 5, 5, 5, 5], Bob: [4, 4, 4, 4, 4, 4, 4, 4, 4] },
+      [1, 2, 3, 4, 5, 6, 7, 8, 9],
+    )
+    const d = deriveRound(round, log.events).derivations.get('game-1')!
+
+    // both presses announce themselves by segment on the hole they start
+    expect(d.holeSummary(3)).toContain('F9 press @3 starts (Ann 2 down → auto-press)')
+    expect(d.holeSummary(3)).toContain('18 press @3 starts (Ann 2 down → auto-press)')
+    // and the one that closes says which one it was
+    expect(d.holeSummary(6)).toContain('F9 press @3 closes — Bob wins 4&3')
   })
 
   /**

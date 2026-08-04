@@ -25,7 +25,6 @@ interface Bet {
   segment: Segment
   /** first hole this bet scores (press start) */
   startHole: number
-  label: string
   /** press depth: 0 = original bet */
   depth: number
   /** running diff from side A's perspective, over scored holes */
@@ -58,8 +57,6 @@ interface Bet {
 function closeMargin(up: number, toPlay: number): string {
   return toPlay > 0 ? `${up}&${toPlay}` : `${up}\u00A0up`
 }
-
-const SEGMENT_LABEL: Record<Segment, string> = { front: 'Front', back: 'Back', overall: 'Overall' }
 
 function computeSpans(holesPlayed: readonly number[]): Record<Segment, number[]> {
   // 9-hole rounds collapse to a single 'overall' bet
@@ -139,7 +136,6 @@ function derive(
       id: seg,
       segment: seg,
       startHole: spans[seg][0]!,
-      label: SEGMENT_LABEL[seg],
       depth: 0,
       diff: 0,
       history: new Map(),
@@ -153,7 +149,6 @@ function derive(
       id: `press-${press.segment}-${press.hole}`,
       segment: press.segment,
       startHole: press.hole,
-      label: `Press ${SEGMENT_LABEL[press.segment]} @${press.hole}`,
       depth: 1,
       diff: 0,
       history: new Map(),
@@ -180,8 +175,11 @@ function derive(
     const span = spans[segment]
     span.forEach((hole, i) => toPlayAfterBySegment[segment].set(hole, span.length - 1 - i))
   }
+  // The fallback must fail towards NOT closing. A miss returning 0 would read
+  // as "no holes left", which any non-zero lead beats — silently settling a bet
+  // that is still live. The span's own length can never be exceeded by a lead.
   const toPlayAfter = (segment: Segment, hole: number) =>
-    toPlayAfterBySegment[segment].get(hole) ?? 0
+    toPlayAfterBySegment[segment].get(hole) ?? spans[segment].length
 
   // Single accumulation walk. Auto-presses spawn when a bet's diff transitions
   // into exactly ±2 (from a smaller gap), starting the NEXT hole of the same
@@ -236,7 +234,6 @@ function derive(
           id: `auto-${bet.id}-@${nextHole}`,
           segment: bet.segment,
           startHole: nextHole,
-          label: `Press ${SEGMENT_LABEL[bet.segment]} @${nextHole}`,
           depth: bet.depth + 1,
           diff: 0,
           history: new Map(),
@@ -339,7 +336,10 @@ function derive(
       .filter((b) => b.depth === 0)
       .map((b) => {
         const d = side === 'a' ? b.diff : -b.diff
-        const seg = b.segment === 'overall' ? '18' : b.segment === 'front' ? 'F9' : 'B9'
+        // segLabel, not a local copy of it — a nine-hole round's single bet is
+        // the nine that was played, and this line sits beside the bar and the
+        // ledger that already call it that
+        const seg = segLabel(b.segment)
         // A decided bet takes ✓/✗ rather than an arrow: "↓2 up" reads as a
         // contradiction, and the margin token itself says the match is over.
         if (b.closedAt !== undefined) {
@@ -559,26 +559,24 @@ function derive(
   }
   // Narrate a close on the hole the MONEY lands on, which is not always the
   // hole the bet was decided on. The ledger derives each hole's delta from a
-  // prefix replay, and a hole nobody scored only becomes final once play moves
-  // PAST it (core/context.ts `finalized`) — so a bet decided on a skipped hole
-  // first shows its money on the next hole ANYONE played. Attribute the note
-  // there or the ledger drops the row (no score, no delta) and the money turns
-  // up later with nothing explaining it.
+  // prefix replay, so a close only surfaces once its deciding hole counts as
+  // final — which can be a later hole entirely. Put the note anywhere else and
+  // the two come apart: the money appears on a row with nothing explaining it,
+  // and the sentence sits on a row the ledger may drop for having neither a
+  // score nor a delta.
   //
-  // Searched over the whole round, NOT the bet's own segment: a front-nine bet
-  // can be decided on a skipped 6th and have holes 7–9 skipped too, with play
-  // resuming on the 10th. That is the hole the money appears on, even though it
-  // belongs to a different bet.
-  const playedHoles = ctx.holesPlayed.filter((h) => ctx.anyScored(h))
+  // `ctx.finalizedAt` IS that hole, by the same rule the money uses. Deriving
+  // it here instead — from "the next hole anybody played", say — gets a subtly
+  // different answer whenever the deciding hole was only partly scored.
+  //
+  // A pushed bet has no closedAt: it is decided when its own holes run out, so
+  // it reports on the last hole of ITS stretch, not the round's.
   for (const b of ordered) {
     if (!isClosed(b)) continue
-    // No played hole at or after the close — a bet finished off by
-    // `round/completed` over holes nobody reached — falls back to the last hole
-    // actually played, which is where completion's money lands.
-    const closeAt =
-      (b.closedAt !== undefined ? playedHoles.find((h) => h >= b.closedAt!) : undefined) ??
-      playedHoles[playedHoles.length - 1]
-    if (closeAt !== undefined) note(closeAt, `${betLabel(b)} closes — ${betValue(b)}`)
+    const span = spans[b.segment].filter((x) => x >= b.startHole)
+    const decidedOn = b.closedAt ?? span[span.length - 1]
+    const closeAt = decidedOn === undefined ? undefined : ctx.finalizedAt(decidedOn)
+    if (closeAt !== undefined) note(closeAt, `${betFullLabel(b)} closes — ${betValue(b)}`)
   }
 
   const holeSummary = (hole: number): string[] => {
