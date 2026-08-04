@@ -120,7 +120,7 @@ describe('code-review regressions', () => {
     // treat every hole as finalized because of it
     const completedRound = { ...round, status: 'completed' as const }
     const { ctx, derivations } = deriveRound(completedRound, log.events)
-    const rows = buildHoleLedger(completedRound, log.events, ctx.holesPlayed, derivations).get(
+    const rows = buildHoleLedger(completedRound, log.events, ctx, derivations).get(
       'game-1',
     )!
     // money locks once (at the last played hole), not on hole 1's prefix

@@ -49,10 +49,26 @@ describe('skins — golden fixtures (hand-verified)', () => {
       'won',
       'tied',
     ])
-    expect(skins.carrying).toBe(1) // hole 9 tie dies carried
     expect(skins.standings[0]).toMatchObject({ label: 'A', amountCents: 800, detail: '4 skins' })
+
+    // Hole 9 ties with a skin on the pile and there is no hole left to win it.
+    // Saying "1 carried" would promise it rolls somewhere; it doesn't — it
+    // dies, and every money surface has to say so (MAI-38).
+    expect(skins.carrying).toBe(1)
+    expect(skins.carryDied).toBe(1)
     // bar recaps the latest decided hole, not the aggregate
-    expect(skins.summaryParts).toEqual([{ label: 'H9', value: 'tied · 1 carried' }])
+    expect(skins.summaryParts).toEqual([{ label: 'H9', value: 'tied · 1 skin died unwon' }])
+    expect(skins.holeSummary(9)).toEqual([
+      'Tied — no outright winner',
+      '↳ 1 skin died unwon — no hole left to win them',
+    ])
+    // and it reaches the settle screen / share card, which are built from
+    // settlement.lines for games without a detail ledger — at zero cents, so
+    // the settlement stays zero-sum
+    expect(skins.settlement.lines.at(-1)).toEqual({
+      label: '1 skin died unwon — no outright winner left',
+      perPlayerCents: { 'p-a': 0, 'p-b': 0, 'p-c': 0, 'p-d': 0 },
+    })
   })
 
   /**
@@ -207,6 +223,61 @@ describe('skins — golden fixtures (hand-verified)', () => {
 
     const skins = skinsOf(round, log)
     expect(skins.holeResults[0]).toMatchObject({ kind: 'won', winnerId: 'p-a', skins: 1 })
+  })
+
+  /**
+   * A pile is only dead when no hole is left to win it. Mid-round it is very
+   * much alive and must keep reading as carried — the point of the carry is
+   * that the next hole is worth more.
+   */
+  it('a live carry mid-round is carried, not dead', () => {
+    const players = makePlayers([{ name: 'A' }, { name: 'B' }])
+    const round = makeRound({
+      players,
+      holes: 'front9',
+      games: [{ type: 'skins', config: { stakeCents: 100, carryover: true } }],
+    })
+    const log = new EventLog()
+    log.scoreByHole(round, { A: [4, 4], B: [4, 4] }, [1, 2]) // both tied, 7 holes left
+    const skins = skinsOf(round, log)
+    expect(skins.carrying).toBe(2)
+    expect(skins.carryDied).toBe(0)
+    expect(skins.summaryParts).toEqual([{ label: 'H2', value: 'tied · 2 carried' }])
+    expect(skins.holeSummary(2)).toEqual(['Tied — 2 carried'])
+    expect(skins.settlement.lines).toEqual([])
+  })
+
+  /**
+   * Finishing early kills a live pile just as surely as tying the last hole —
+   * completion finalizes the holes nobody reached, so there is no hole left to
+   * win it on. The settle screen is the only place the group will look.
+   */
+  it('a carry outstanding when the round is finished early dies too', () => {
+    const players = makePlayers([{ name: 'A' }, { name: 'B' }])
+    const round = makeRound({
+      players,
+      holes: 'front9',
+      games: [{ type: 'skins', config: { stakeCents: 100, carryover: true } }],
+    })
+    const log = new EventLog()
+    log.scoreByHole(round, { A: [4, 4, 4], B: [4, 4, 4] }, [1, 2, 3]) // 3 tied holes
+    log.append({ type: 'round/completed' })
+    const skins = skinsOf(round, log)
+
+    expect(skins.carryDied).toBe(3)
+    // narrated on the last hole anyone PLAYED, not on hole 9 which nobody saw
+    expect(skins.holeSummary(3)).toEqual([
+      'Tied — no outright winner',
+      '↳ 3 skins died unwon — no hole left to win them',
+    ])
+    expect(skins.holeSummary(9)).toEqual(['No scores — hole void'])
+    expect(skins.settlement.lines).toEqual([
+      {
+        label: '3 skins died unwon — no outright winner left',
+        perPlayerCents: { 'p-a': 0, 'p-b': 0 },
+      },
+    ])
+    expect(skins.settlement.perPlayerCents).toEqual({ 'p-a': 0, 'p-b': 0 })
   })
 
   it('carryover off: ties are simply dead', () => {

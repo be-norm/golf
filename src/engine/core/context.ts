@@ -28,6 +28,30 @@ export interface RoundContext {
    * hole being actively entered stays unfinalized — no premature payouts.
    */
   finalized(hole: number): boolean
+  /**
+   * Did ANYBODY post a score on this hole — i.e. was it actually played?
+   * Distinct from `finalized`, which is true for a hole nobody reached once
+   * the round completes. Engines need the difference whenever they narrate or
+   * attribute something to a hole: a claim about a hole no one played is a
+   * claim about golf that never happened.
+   */
+  anyScored(hole: number): boolean
+  /**
+   * WHERE a hole's outcome becomes visible: the hole at which `hole` first
+   * counts as final, which is the hole a prefix replay first settles it on and
+   * therefore the hole any money riding on it lands on. Undefined if it isn't
+   * final yet.
+   *
+   * Usually `hole` itself — everyone scored it. But a hole that finalized only
+   * because play MOVED ON belongs to the hole play moved on to, and a hole
+   * finalized by `round/completed` belongs to the last hole anybody played.
+   *
+   * This lives here, beside `finalized`, because it is the same rule read
+   * backwards, and a caller that re-derives it from `anyScored` gets a subtly
+   * different answer — money landing on one ledger row while the sentence
+   * explaining it sits on another (MAI-38).
+   */
+  finalizedAt(hole: number): number | undefined
 }
 
 export function holesForRange(range: RoundHoles): number[] {
@@ -114,16 +138,34 @@ export function buildRoundContext(round: Round, effective: readonly RoundEvent[]
     else if (e.type === 'round/reopened') completed = false
   }
 
+  const anyScored = (hole: number): boolean =>
+    round.players.some((p) => gross.get(p.playerId)?.get(hole) !== undefined)
+
   let lastTouchedIdx = -1
   holesPlayed.forEach((h, i) => {
-    if (round.players.some((p) => gross.get(p.playerId)?.get(h) !== undefined)) lastTouchedIdx = i
+    if (anyScored(h)) lastTouchedIdx = i
   })
+  const allScored = (hole: number): boolean =>
+    round.players.every((p) => gross.get(p.playerId)?.get(hole) !== undefined)
+
   const finalized = (hole: number): boolean => {
     const idx = holesPlayed.indexOf(hole)
     if (idx === -1) return false
-    if (round.players.every((p) => gross.get(p.playerId)?.get(hole) !== undefined)) return true
+    if (allScored(hole)) return true
     if (completed) return true
     return idx < lastTouchedIdx
+  }
+
+  // Mirrors `finalized`'s three clauses, in the same order, so the two can't
+  // drift: scored out → here; play moved on → the hole it moved on to;
+  // completed → the last hole anybody played.
+  const finalizedAt = (hole: number): number | undefined => {
+    const idx = holesPlayed.indexOf(hole)
+    if (idx === -1 || !finalized(hole)) return undefined
+    if (allScored(hole)) return hole
+    const movedOnTo = holesPlayed.find((h, i) => i > idx && anyScored(h))
+    if (movedOnTo !== undefined) return movedOnTo
+    return holesPlayed.filter(anyScored).pop()
   }
 
   return {
@@ -136,5 +178,7 @@ export function buildRoundContext(round: Round, effective: readonly RoundEvent[]
     netFor,
     bestNetAmongPosted,
     finalized,
+    anyScored,
+    finalizedAt,
   }
 }

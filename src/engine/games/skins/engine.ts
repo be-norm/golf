@@ -25,6 +25,13 @@ export interface SkinsDerivation extends GameDerivation {
   holeResults: SkinsHoleResult[]
   /** live carried skins waiting to be won */
   carrying: number
+  /**
+   * Carried skins that can never be won now — every hole is decided and the
+   * pile is still sitting there (the final hole tied, or the round finished
+   * early). It is the one open bet Skins has, and money the group thinks is
+   * still live until somebody says otherwise (MAI-38).
+   */
+  carryDied: number
 }
 
 function derive(
@@ -79,6 +86,29 @@ function derive(
     }
   }
 
+  // The pot is dead once no hole is left to win it — every hole decided, with
+  // skins still on the pile. Covers both a tied final hole and a round finished
+  // early (completion finalizes the holes nobody reached).
+  const carryDied = carry > 0 && ctx.holesPlayed.every((h) => ctx.finalized(h)) ? carry : 0
+  const deadSkins = carryDied > 0 ? `${carryDied} skin${carryDied === 1 ? '' : 's'}` : ''
+  // Where the death gets narrated: the last hole anybody actually played, since
+  // that is the hole the group is looking at when it happens. Undefined unless
+  // something actually died — this scans every player's scores, and `derive`
+  // runs once per hole in the ledger's prefix replay.
+  const diedAt =
+    carryDied > 0 ? [...ctx.holesPlayed].reverse().find((h) => ctx.anyScored(h)) : undefined
+
+  if (carryDied > 0) {
+    // Skins ships no detailLines, so its settle-screen and share-card panel is
+    // built from settlement.lines (features/settle/summaryCard.ts). A pile that
+    // died has to appear there or the money pages simply never mention it —
+    // zero-money, so zero-sum is untouched.
+    addLine(settlement, {
+      label: `${deadSkins} died unwon — no outright winner left`,
+      perPlayerCents: Object.fromEntries(playerIds.map((id) => [id, 0])),
+    })
+  }
+
   const standings: StandingLine[] = players
     .map((p) => ({
       id: p.playerId,
@@ -95,8 +125,11 @@ function derive(
       const r = holeResults.find((h) => h.hole === hole)
       if (r?.kind === 'won')
         return `${nameOf.get(r.winnerId)} wins ${r.skins} skin${r.skins > 1 ? 's' : ''}`
-      if (r?.kind === 'tied')
+      if (r?.kind === 'tied') {
+        // "carried" promises the pile rolls onto a hole that no longer exists
+        if (hole === diedAt) return `tied · ${deadSkins} died unwon`
         return r.carryAfter > 0 ? `tied · ${r.carryAfter} carried` : 'tied — no skin'
+      }
       return null
     },
     'no skins yet',
@@ -114,7 +147,12 @@ function derive(
         const carried = r.skins - 1
         lines.push(`↳ this hole + ${carried} carried in from ties`)
       }
+      // never a dead pot here: winning a hole banks the pile, so `diedAt` can
+      // only ever be a TIED hole
       return lines
+    }
+    if (hole === diedAt) {
+      return ['Tied — no outright winner', `↳ ${deadSkins} died unwon — no hole left to win them`]
     }
     return [r.carryAfter > 0 ? `Tied — ${r.carryAfter} carried` : 'Tied — no skin']
   }
@@ -128,6 +166,7 @@ function derive(
     settlement,
     holeResults,
     carrying: carry,
+    carryDied,
   }
 }
 

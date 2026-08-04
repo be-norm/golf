@@ -1,6 +1,6 @@
 import { deriveRound, type GameDerivation } from './catalog'
+import type { RoundContext } from './core/context'
 import type { RoundEvent } from './core/events'
-import { deriveGross, effectiveEvents } from './core/replay'
 import type { Round, Uuid } from './core/types'
 
 export interface HoleImpact {
@@ -32,18 +32,22 @@ function eventHole(e: RoundEvent): number | null {
 export function buildHoleLedger(
   round: Round,
   events: readonly RoundEvent[],
-  holesPlayed: readonly number[],
+  ctx: RoundContext,
   full: ReadonlyMap<Uuid, GameDerivation>,
 ): Map<Uuid, HoleImpact[]> {
+  const holesPlayed = ctx.holesPlayed
   const ledger = new Map<Uuid, HoleImpact[]>(round.games.map((g) => [g.gameId, []]))
   let prev = new Map<Uuid, Record<Uuid, number>>(round.games.map((g) => [g.gameId, {}]))
 
   // A hole earns a ledger row only once it exists in play: money moved, or the
   // game has something to say about a hole somebody actually scored. Keeps
   // chatty engines (wolf announces its wolf pre-round) out of the ledger.
-  const gross = deriveGross(effectiveEvents(events))
-  const hasScore = (hole: number) =>
-    round.players.some((p) => gross.get(p.playerId)?.get(hole) !== undefined)
+  //
+  // Takes the round context rather than re-deriving gross, so this predicate is
+  // the SAME one the engines narrate by (`ctx.anyScored`). It gates whether a
+  // row exists at all, so a private copy here means one rule deciding where a
+  // close is explained and another deciding whether that row survives.
+  const hasScore = (hole: number) => ctx.anyScored(hole)
 
   // Round completion finalizes everything at once — attribute the money it
   // locks to the last hole anyone actually played (an early-finished round

@@ -32,6 +32,66 @@ function ctxFor(
   return { strokesTotal, strokesOn }
 }
 
+/**
+ * `finalizedAt` answers WHERE a hole's outcome shows up — the hole a prefix
+ * replay first settles it on, and so the hole any money riding on it lands on.
+ * It mirrors `finalized`'s three clauses, and games narrate by it so a payout
+ * and the sentence explaining it can never end up on different ledger rows.
+ */
+describe('finalizedAt — where a hole’s result lands', () => {
+  const twoPlayers = () => makePlayers([{ name: 'Ann' }, { name: 'Bob' }])
+  const build = (events: Parameters<typeof buildRoundContext>[1]) =>
+    buildRoundContext(makeRound({ players: twoPlayers(), holes: 'front9', games: [] }), events)
+  const score = (hole: number, playerId: string, gross: number, seq: number) =>
+    ({
+      type: 'score/set' as const,
+      playerId,
+      hole,
+      gross,
+      id: `e${seq}`,
+      roundId: 'r',
+      seq,
+      at: '2026-08-04T00:00:00.000Z',
+      deviceId: 'd',
+    })
+
+  it('is the hole itself once everyone has scored it', () => {
+    const ctx = build([score(1, 'p-ann', 4, 1), score(1, 'p-bob', 4, 2)])
+    expect(ctx.finalizedAt(1)).toBe(1)
+  })
+
+  it('is the hole play MOVED ON TO when the first one was left part-scored', () => {
+    // Only Ann posts hole 1; it becomes final only because hole 2 got played,
+    // so that is the prefix — and the ledger row — its result appears on.
+    const ctx = build([score(1, 'p-ann', 4, 1), score(2, 'p-ann', 4, 2), score(2, 'p-bob', 4, 3)])
+    expect(ctx.finalizedAt(1)).toBe(2)
+    expect(ctx.finalizedAt(2)).toBe(2)
+  })
+
+  it('is the next PLAYED hole, skipping holes nobody touched', () => {
+    const ctx = build([score(1, 'p-ann', 4, 1), score(4, 'p-ann', 4, 2), score(4, 'p-bob', 4, 3)])
+    expect(ctx.finalizedAt(1)).toBe(4)
+    // hole 2 was never played and is final only by having been passed
+    expect(ctx.finalizedAt(2)).toBe(4)
+  })
+
+  it('is the last hole anybody played when completion finalized the rest', () => {
+    const ctx = build([
+      score(1, 'p-ann', 4, 1),
+      score(1, 'p-bob', 4, 2),
+      { type: 'round/completed', id: 'e3', roundId: 'r', seq: 3, at: '2026-08-04T00:00:00.000Z', deviceId: 'd' },
+    ])
+    // holes 2–9 were finalized by the completion event, not by golf
+    expect(ctx.finalizedAt(9)).toBe(1)
+  })
+
+  it('is undefined while the hole is still open', () => {
+    const ctx = build([score(1, 'p-ann', 4, 1)])
+    expect(ctx.finalized(1)).toBe(false)
+    expect(ctx.finalizedAt(1)).toBeUndefined()
+  })
+})
+
 describe('allowance % → stroke allocation', () => {
   it('100% off-low gives the full stroke spread', () => {
     // scratch vs 18: low = 0, so 18 plays off 18 → one stroke on every hole.

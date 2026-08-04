@@ -15,7 +15,7 @@ describe('buildHoleLedger', () => {
     // h1 tie (carry 1), h2 tie (carry 2), h3 A wins 3 skins
     log.scoreByHole(round, { A: [4, 4, 3], B: [4, 4, 4] }, [1, 2, 3])
     const { ctx, derivations } = deriveRound(round, log.events)
-    const ledger = buildHoleLedger(round, log.events, ctx.holesPlayed, derivations)
+    const ledger = buildHoleLedger(round, log.events, ctx, derivations)
     const skins = ledger.get('game-1')!
 
     expect(skins[0]).toMatchObject({ hole: 1, deltas: [] })
@@ -40,7 +40,7 @@ describe('buildHoleLedger', () => {
     // h1: A wins · h2: halved · h3: A wins — nothing locks mid-round
     log.scoreByHole(round, { A: [4, 4, 4], B: [5, 4, 5] }, [1, 2, 3])
     const mid = deriveRound(round, log.events)
-    const midLedger = buildHoleLedger(round, log.events, mid.ctx.holesPlayed, mid.derivations)
+    const midLedger = buildHoleLedger(round, log.events, mid.ctx, mid.derivations)
     const midRows = midLedger.get('game-1')!
     expect(midRows[0]!.summary[0]).toBe('A wins the hole')
     expect(midRows[0]!.summary[1]).toContain('F9 A ↑1')
@@ -50,7 +50,7 @@ describe('buildHoleLedger', () => {
     // hole's row (never on an unplayed hole finalized by completion)
     log.append({ type: 'round/completed' })
     const done = deriveRound(round, log.events)
-    const ledger = buildHoleLedger(round, log.events, done.ctx.holesPlayed, done.derivations)
+    const ledger = buildHoleLedger(round, log.events, done.ctx, done.derivations)
     const rows = ledger.get('game-1')!
     const closing = rows[rows.length - 1]!
     expect(closing.hole).toBe(3)
@@ -59,6 +59,113 @@ describe('buildHoleLedger', () => {
       { playerId: 'p-a', cents: 500 },
       { playerId: 'p-b', cents: -500 },
     ])
+  })
+
+  it('nassau: a bet decided early pays on its closing hole, with the reason', () => {
+    const round = makeRound({
+      players: makePlayers([{ name: 'Ann' }, { name: 'Bob' }]),
+      games: [{ type: 'nassau', config: { stakeCents: 500, teams: null, autoPress: false } }],
+    })
+    const log = new EventLog()
+    // Ann wins h1–h3, h4–h7 halved → 3 up with 2 of the front left = 3&2 on h7
+    log.scoreByHole(
+      round,
+      { Ann: [4, 4, 4, 4, 4, 4, 4], Bob: [5, 5, 5, 4, 4, 4, 4] },
+      [1, 2, 3, 4, 5, 6, 7],
+    )
+    const { ctx, derivations } = deriveRound(round, log.events)
+    const rows = buildHoleLedger(round, log.events, ctx, derivations).get('game-1')!
+
+    // nothing moves while the front can still be caught
+    expect(rows.filter((r) => r.hole < 7).every((r) => r.deltas.length === 0)).toBe(true)
+    const closing = rows.find((r) => r.hole === 7)!
+    expect(closing.deltas).toEqual([
+      { playerId: 'p-ann', cents: 500 },
+      { playerId: 'p-bob', cents: -500 },
+    ])
+    // the money and the sentence explaining it share a row
+    expect(closing.summary).toContain('F9 closes — Ann wins 3&2')
+  })
+
+  it('nassau: a bet decided on a skipped hole narrates where the money lands', () => {
+    const round = makeRound({
+      players: makePlayers([{ name: 'Ann' }, { name: 'Bob' }]),
+      holes: 'front9',
+      games: [{ type: 'nassau', config: { stakeCents: 500, teams: null, autoPress: false } }],
+    })
+    const log = new EventLog()
+    // Ann wins h1–h4 (+4), h5 halved. NOBODY plays h6 — but h6 still shrinks
+    // the bet, and 4 up with h7–h9 left ends it 4&3 on a hole with no scores.
+    log.scoreByHole(round, { Ann: [4, 4, 4, 4, 4], Bob: [5, 5, 5, 5, 4] }, [1, 2, 3, 4, 5])
+    log.scoreByHole(round, { Ann: [4, 4], Bob: [4, 4] }, [7, 8])
+    const { ctx, derivations } = deriveRound(round, log.events)
+    const rows = buildHoleLedger(round, log.events, ctx, derivations).get('game-1')!
+
+    // A scoreless hole is only final once play moves past it, so the money
+    // surfaces on h7 — the first hole actually played after the close. The
+    // note has to follow it there: h6 has neither a score nor a delta, so its
+    // row does not exist to carry the explanation.
+    const closing = rows.find((r) => r.deltas.length > 0)!
+    expect(closing.hole).toBe(7)
+    expect(closing.deltas).toEqual([
+      { playerId: 'p-ann', cents: 500 },
+      { playerId: 'p-bob', cents: -500 },
+    ])
+    // "4&3" would claim a real hole clinched it with three left to play, and
+    // h6 was never played — so the margin degrades to the plainly true "4 up"
+    expect(closing.summary).toContain(`F9 closes — Ann wins 4\u00A0up`)
+    expect(rows.some((r) => r.hole === 6)).toBe(false)
+  })
+
+  it('nassau: a close follows the money past the end of its own segment', () => {
+    const round = makeRound({
+      players: makePlayers([{ name: 'Ann' }, { name: 'Bob' }]),
+      games: [{ type: 'nassau', config: { stakeCents: 500, teams: null, autoPress: false } }],
+    })
+    const log = new EventLog()
+    // Ann wins h1–h4, h5 halved — then the group skips the rest of the front
+    // entirely and tees off on 10. The FRONT bet dies on h6 (4 up, 3 left), but
+    // no front hole is ever played again, so the hunt for the row carrying the
+    // money has to leave the segment.
+    log.scoreByHole(round, { Ann: [4, 4, 4, 4, 4], Bob: [5, 5, 5, 5, 4] }, [1, 2, 3, 4, 5])
+    log.scoreByHole(round, { Ann: [4], Bob: [4] }, [10])
+    const { ctx, derivations } = deriveRound(round, log.events)
+    const rows = buildHoleLedger(round, log.events, ctx, derivations).get('game-1')!
+
+    const closing = rows.find((r) => r.deltas.length > 0)!
+    expect(closing.hole).toBe(10)
+    expect(closing.summary).toContain(`F9 closes — Ann wins 4\u00A0up`)
+    // and nothing is stranded on hole 5, which carries no money
+    expect(rows.find((r) => r.hole === 5)!.summary.every((s) => !s.includes('closes'))).toBe(true)
+  })
+
+  it('nassau: a close decided on a part-scored hole follows the money forward', () => {
+    const round = makeRound({
+      players: makePlayers([{ name: 'Ann' }, { name: 'Bob' }]),
+      games: [{ type: 'nassau', config: { stakeCents: 500, teams: null, autoPress: false } }],
+    })
+    const log = new EventLog()
+    log.scoreByHole(
+      round,
+      { Ann: [4, 4, 4, 4, 4, 4], Bob: [5, 5, 5, 4, 4, 4] },
+      [1, 2, 3, 4, 5, 6],
+    )
+    // Only Ann posts hole 7 — enough to decide the front (4 up, 2 to play) but
+    // NOT enough to finalize the hole, which needs play to move on. So the
+    // money waits for hole 8, and the sentence has to wait with it: "anyone
+    // scored it" would have stranded the note back on 7.
+    log.append({ type: 'score/set', playerId: 'p-ann', hole: 7, gross: 4 })
+    log.scoreByHole(round, { Ann: [4], Bob: [4] }, [8])
+    const { ctx, derivations } = deriveRound(round, log.events)
+    const rows = buildHoleLedger(round, log.events, ctx, derivations).get('game-1')!
+
+    expect(rows.find((r) => r.hole === 7)!.deltas).toEqual([])
+    const closing = rows.find((r) => r.hole === 8)!
+    expect(closing.deltas).toEqual([
+      { playerId: 'p-ann', cents: 500 },
+      { playerId: 'p-bob', cents: -500 },
+    ])
+    expect(closing.summary).toContain('F9 closes — Ann wins 4&2')
   })
 
   it('wolf: silent before any scores, attributes point-money on decided holes', () => {
@@ -71,7 +178,7 @@ describe('buildHoleLedger', () => {
     })
     const emptyLog = new EventLog()
     const { ctx: emptyCtx, derivations: emptyDerivations } = deriveRound(round, emptyLog.events)
-    const emptyLedger = buildHoleLedger(round, emptyLog.events, emptyCtx.holesPlayed, emptyDerivations)
+    const emptyLedger = buildHoleLedger(round, emptyLog.events, emptyCtx, emptyDerivations)
     // wolf announces "Wolf: A" for every pending hole — none of that belongs here
     expect(emptyLedger.get('game-1')).toEqual([])
 
@@ -79,7 +186,7 @@ describe('buildHoleLedger', () => {
     log.append({ type: 'game/event', gameId: 'game-1', kind: 'wolf/pick', data: { hole: 1, choice: 'p-b' } })
     log.scoreByHole(round, { A: [4], B: [5], C: [5], D: [5] }, [1])
     const { ctx, derivations } = deriveRound(round, log.events)
-    const ledger = buildHoleLedger(round, log.events, ctx.holesPlayed, derivations)
+    const ledger = buildHoleLedger(round, log.events, ctx, derivations)
     const wolf = ledger.get('game-1')!
     expect(wolf).toHaveLength(1)
     expect(wolf[0]!.hole).toBe(1)
@@ -112,7 +219,7 @@ describe('buildHoleLedger', () => {
     // h1: 45 v 45 push · h2: 44 v 45 → team A +1 pt
     log.scoreByHole(round, { A: [4, 4], B: [5, 4], C: [4, 4], D: [5, 5] }, [1, 2])
     const { ctx, derivations } = deriveRound(round, log.events)
-    const vegas = buildHoleLedger(round, log.events, ctx.holesPlayed, derivations).get('game-1')!
+    const vegas = buildHoleLedger(round, log.events, ctx, derivations).get('game-1')!
     expect(vegas).toHaveLength(2)
     expect(vegas[0]!.summary[0]).toContain('push')
     expect(vegas[0]!.deltas).toEqual([])
@@ -135,7 +242,7 @@ describe('buildHoleLedger', () => {
     const bad = log.append({ type: 'score/set', playerId: 'p-a', hole: 1, gross: 5 })
     log.append({ type: 'meta/retract', targetEventId: bad.id })
     const { ctx, derivations } = deriveRound(round, log.events)
-    const ledger = buildHoleLedger(round, log.events, ctx.holesPlayed, derivations)
+    const ledger = buildHoleLedger(round, log.events, ctx, derivations)
     expect(ledger.get('game-1')![0]!.deltas).toEqual([
       { playerId: 'p-a', cents: 100 },
       { playerId: 'p-b', cents: -100 },

@@ -25,6 +25,11 @@ Legend:
 Each hole worth one skin; outright lowest (gross or net) wins it, any tie = no skin.
 - **Carryover (default on):** tied hole's value rolls to the next hole, across the turn.
   Final-hole tie: pot dies (current impl) — alternates: split, playoff.
+- **A dead pot is declared dead.** Once every hole is decided with skins still on the pile —
+  the last hole tied, or the round finished early — the app says "N skins died unwon" instead
+  of "N carried", which would promise a roll onto a hole that no longer exists. Skins ships no
+  detail ledger, so this also rides a zero-money settlement line to reach the settle screen and
+  the share card (MAI-38).
 - **Validation variant (not yet impl):** skin banked only if winner ties-or-beats field on next hole.
 - **Money:** winner collects stake × (n−1) per skin.
 - Config: stakeCents, carryover, handicap mode (gross / net full / net off-low).
@@ -45,6 +50,18 @@ Three equal match-play bets: Front 9, Back 9, Overall 18. Hole won by lower net 
   and its own presses can cross 2-down on the same hole and all point at the same new bet; so
   can a hand-tapped press. Collapsing them is load-bearing: duplicates settle twice while
   staying zero-sum, so the property fuzz cannot see the error (MAI-34).
+- **Close-out — a bet is won when it is DECIDED, not when its holes run out.** Up more holes
+  than the bet has left and it is over: reported in golf's notation (3&2 = three up with two
+  to play; `2 up` when it went the distance), **frozen** at that margin so the dead holes
+  cannot drift it, and **settled on that hole** — the standings, the pinned bar, the hole
+  ledger, the settle screen and the share card all show the money there. A decided segment is
+  no longer pressable, and a bet that closes 2&1 opens no auto-press over its last hole (both
+  rules fire on the same hole; the close wins — you cannot press a match that is over). Live
+  presses under a closed parent keep that segment pressable: you press the bet you're down on.
+  A bet level at the end never closes — it pushes. And the `N&M` form is only ever quoted when a
+  hole somebody actually played clinched it: a bet that runs out of room on an unplayed hole
+  (finishing early finalizes the whole card at once) reports the plain `N up` instead, rather
+  than describing holes that were never contested (MAI-38).
 - **Undo follows ownership, not authorship.** A hand-tapped press can be toggled back off
   (`meta/retract` over its event). A press auto-press would open anyway cannot — retracting the
   event would only let the rules re-create the identical bet, so the UI shows it running and
