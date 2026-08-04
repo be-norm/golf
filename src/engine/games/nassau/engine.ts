@@ -33,6 +33,27 @@ interface Bet {
   /** diff after each decided hole, recorded during the single accumulation walk */
   history: Map<number, number>
   holesRemaining: number
+  /**
+   * The hole this bet became mathematically decided on — up more holes than
+   * its stretch has left. Undefined means still live, OR level at the end
+   * (a push, which never "closes" because nobody won it). So
+   * `closedAt !== undefined` is exactly "this bet pays".
+   */
+  closedAt?: number
+  /** holes that still remained in the stretch at `closedAt` — the "2" in 3&2 */
+  closeToPlay?: number
+}
+
+/**
+ * A finished match in golf's own notation: 3&2 is three up with two to play,
+ * 2 up is a match that went the distance. One formatter, because the pinned
+ * bar, the ledger, the standings detail and the settlement labels must all
+ * name the same margin the same way.
+ */
+function closeMargin(up: number, toPlay: number): string {
+  // NO SPACES around the ampersand: the share card's painter word-wraps on
+  // spaces (paintSummaryCard.ts), and "3 & 2" would break across two lines.
+  return toPlay > 0 ? `${up}&${toPlay}` : `${up} up`
 }
 
 const SEGMENT_LABEL: Record<Segment, string> = { front: 'Front', back: 'Back', overall: 'Overall' }
@@ -137,20 +158,45 @@ function derive(
     })
   }
 
+  /**
+   * How many of a segment's holes come after this one — STRUCTURAL, not "how
+   * many are still undecided". The two agree mid-round, but `round/completed`
+   * finalizes every hole at once (core/context.ts), so an undecided count
+   * would report every finished bet as won "3&0". A match won 3&2 was three up
+   * with two holes left in it, whether or not those holes were played out.
+   */
+  const toPlayAfter = (segment: Segment, hole: number) =>
+    spans[segment].filter((h) => h > hole).length
+
   // Single accumulation walk. Auto-presses spawn when a bet's diff transitions
   // into exactly ±2 (from a smaller gap), starting the NEXT hole of the same
   // segment (never past the segment's end). Presses spawned this hole don't
   // score it — the `active` snapshot is taken before spawning.
+  //
+  // A bet stops scoring the moment it is decided: a match that is over is over,
+  // and the dead holes must not drift the margin the group wrote down (3&2 has
+  // to stay 3&2 even if the loser wins the last two).
   for (const hole of ctx.holesPlayed) {
     const result = holeResult.get(hole)
     if (result === null || result === undefined) continue
-    const active = bets.filter((b) => spans[b.segment].includes(hole) && hole >= b.startHole)
+    const active = bets.filter(
+      (b) => b.closedAt === undefined && spans[b.segment].includes(hole) && hole >= b.startHole,
+    )
     for (const bet of active) {
       const prev = bet.diff
       bet.diff += result
       bet.history.set(hole, bet.diff)
+      const left = toPlayAfter(bet.segment, hole)
+      if (Math.abs(bet.diff) > left) {
+        bet.closedAt = hole
+        bet.closeToPlay = left
+      }
       if (
         autoPress &&
+        // a bet that just closed is not live, and you cannot press a match
+        // that is over — this is the one case where both fire on the same
+        // hole (2 down with exactly 1 to play is 2&1, not a press)
+        bet.closedAt === undefined &&
         Math.abs(bet.diff) === 2 &&
         Math.abs(prev) < 2 &&
         spans[bet.segment].some((h) => h > hole)
@@ -184,10 +230,20 @@ function derive(
     ).length
   }
 
-  // Money is LOCKED-ONLY: a bet pays when its holes run out (holesRemaining 0
-  // — round completion finalizes empty holes, so finishing closes everything).
-  // Mid-round a flipped lead moves no money, matching how golfers think.
-  const isClosed = (b: Bet) => b.holesRemaining === 0
+  // Money is LOCKED-ONLY, and a bet is locked the moment it is DECIDED — up
+  // more holes than its stretch has left. That is when golfers shake hands and
+  // settle, so it is when the dollars move (MAI-38).
+  //
+  // The old rule waited for the holes to physically run out, which is the same
+  // instant for a bet that goes the distance and hours late for one that closes
+  // 3&2. What has NOT changed is the thing that rule was protecting: a merely
+  // leading bet still moves no money, because it can still flip. A decided one
+  // cannot — that is precisely what makes settling here safe.
+  //
+  // A bet level at the end never sets closedAt: it pushes, and pays nothing
+  // either way. `holesRemaining === 0` is kept in the predicate so that case
+  // reads as closed rather than perpetually live.
+  const isClosed = (b: Bet) => b.closedAt !== undefined || b.holesRemaining === 0
   // A full side collectively wagers ONE stake (the 1v1/2v2 convention: a $5 bet
   // swings $5 per player). An outnumbered lone player instead plays that stake
   // against EACH opponent, so their swing scales with the other side's size —
@@ -203,7 +259,7 @@ function derive(
     const winEach = sideStake(winners, losers)
     const loseEach = sideStake(losers, winners)
     addLine(settlement, {
-      label: `${bet.label} — ${winners.map((id) => nameOf.get(id)).join(' & ')} ${winners.length > 1 ? 'win' : 'wins'} ↑${Math.abs(bet.diff)}`,
+      label: `${bet.label} — ${winners.map((id) => nameOf.get(id)).join(' & ')} ${winners.length > 1 ? 'win' : 'wins'} ${closeMargin(Math.abs(bet.diff), bet.closeToPlay ?? 0)}`,
       perPlayerCents: Object.fromEntries([
         ...winners.map((id) => [id, winEach] as const),
         ...losers.map((id) => [id, -loseEach] as const),
@@ -217,6 +273,11 @@ function derive(
       .map((b) => {
         const d = side === 'a' ? b.diff : -b.diff
         const seg = b.segment === 'overall' ? '18' : b.segment === 'front' ? 'F9' : 'B9'
+        // A decided bet takes ✓/✗ rather than an arrow: "↓2 up" reads as a
+        // contradiction, and the margin token itself says the match is over.
+        if (b.closedAt !== undefined) {
+          return `${seg} ${d > 0 ? '✓' : '✗'}${closeMargin(Math.abs(d), b.closeToPlay ?? 0)}`
+        }
         return `${seg} ${d > 0 ? `↑${d}` : d < 0 ? `↓${-d}` : 'AS'}`
       })
       .join(' · ')
@@ -249,8 +310,12 @@ function derive(
   const betValue = (b: Bet): string => {
     const n = Math.abs(b.diff)
     const leader = b.diff === 0 ? null : sideShort(b.diff > 0 ? 'a' : 'b')
-    if (b.holesRemaining === 0) return leader ? `${leader} wins ↑${n}` : 'push'
-    if (leader && n > b.holesRemaining) return `${leader} ↑${n} · closed out`
+    // Decided is checked FIRST — a bet closed 3&2 still has two holes on the
+    // card, and reading holesRemaining before closedAt would call it live.
+    if (b.closedAt !== undefined && leader) {
+      return `${leader} wins ${closeMargin(n, b.closeToPlay ?? 0)}`
+    }
+    if (b.holesRemaining === 0) return 'push'
     if (leader && n === b.holesRemaining) return `${leader} ↑${n} · dormie`
     const status = leader ? `${leader} ↑${n}` : 'AS'
     return `${status} · ${b.holesRemaining} to play`
@@ -265,6 +330,11 @@ function derive(
    * parent bet sits all square, so reading the parent alone would report "AS"
    * as the reason a press exists. And two copies of the press rule drifting
    * apart is exactly what MAI-34 was — one helper, two call sites.
+   *
+   * "Live" is evaluated AS OF the hole asked about, not as of now. Both callers
+   * need that and for opposite reasons: the offer must ignore a bet that closed
+   * two holes ago, while the ledger's historical explanation must still see a
+   * bet that was live back then and has closed since.
    */
   const pressDeficit = (
     segment: Segment,
@@ -276,6 +346,7 @@ function derive(
     let worst = 0
     for (const b of bets) {
       if (b.segment !== segment || b.startHole >= asOf) continue
+      if (b.closedAt !== undefined && b.closedAt < asOf) continue
       const d = b.history.get(at)
       if (d !== undefined && Math.abs(d) > Math.abs(worst)) worst = d
     }
@@ -304,11 +375,18 @@ function derive(
   const compactValue = (b: Bet): string => {
     const n = Math.abs(b.diff)
     const leader = b.diff === 0 ? null : sideShort(b.diff > 0 ? 'a' : 'b')
-    if (b.holesRemaining === 0) return leader ? `${leader} wins ↑${n}` : 'push'
+    // The bar is the ONE place a close has to survive being made compact —
+    // dropping it here is what let a decided bet read as a running lead.
+    if (b.closedAt !== undefined && leader) {
+      return `${leader} wins ${closeMargin(n, b.closeToPlay ?? 0)}`
+    }
+    if (b.holesRemaining === 0) return 'push'
     return leader ? `${leader} ↑${n}` : 'AS'
   }
   const parents = ordered.filter((b) => b.depth === 0)
-  const livePresses = ordered.filter((b) => b.depth > 0 && b.holesRemaining > 0).length
+  // a press that closed early is settled, not live — the chip counts bets
+  // still capable of moving money
+  const livePresses = ordered.filter((b) => b.depth > 0 && !isClosed(b)).length
   const summaryParts =
     parents.length === 1
       ? parents.map((b) => ({ label: betLabel(b), value: betValue(b) }))
@@ -433,12 +511,24 @@ function derive(
   for (const b of ordered) {
     if (!isClosed(b)) continue
     const span = spans[b.segment].filter((x) => x >= b.startHole)
-    // a bet closed by round completion closes on its last PLAYED hole —
-    // never narrate (or attribute money) on a hole nobody played
     const played = span.filter((h) =>
       playerIds.some((id) => ctx.gross.get(id)?.get(h) !== undefined),
     )
-    const closeAt = played[played.length - 1] ?? span[span.length - 1]
+    // Narrate on the hole the MONEY lands on, which is not always the hole the
+    // bet was decided on. The ledger derives each hole's delta from a prefix
+    // replay, and a hole nobody scored only becomes final once play moves PAST
+    // it (core/context.ts `finalized`) — so a bet decided on a skipped hole
+    // first shows its money on the next played one. Attribute the note there or
+    // the ledger drops the row (no score, no delta) and the money appears on a
+    // later row with nothing explaining it.
+    //
+    // With no played hole at or after the close — a bet finished off by
+    // `round/completed` over holes nobody reached — fall back to the last hole
+    // actually played, which is where completion's money lands.
+    const closeAt =
+      (b.closedAt !== undefined ? played.find((h) => h >= b.closedAt!) : undefined) ??
+      played[played.length - 1] ??
+      span[span.length - 1]
     if (closeAt !== undefined) note(closeAt, `${betLabel(b)} closes — ${betValue(b)}`)
   }
 
@@ -485,7 +575,8 @@ export const nassauEngine: GameEngine<NassauConfig> = {
         'A 9-hole round collapses to a single overall bet.',
       ],
       scoring: [
-        'When a bet runs out of holes, whoever is up wins its stake; a tied bet pushes.',
+        'A bet is won the moment a side is up more holes than the bet has left — 3 up with 2 to play is won 3&2, the margin stops moving there, and the money settles on that hole.',
+        'Otherwise the bet runs to the end of its stretch: whoever is up wins its stake, and a tied bet pushes.',
         'Every player pays or collects the stake — a $5 bet swings $5 per player, in singles or 2v2.',
         'In a 2-v-1, the solo player plays each opponent for the stake: a $5 bet swings $10 for them, $5 for each of the pair.',
         'A hole where only one side posts a score goes to that side; no scores at all halves it.',
@@ -501,6 +592,10 @@ export const nassauEngine: GameEngine<NassauConfig> = {
         { term: 'Push', def: 'A bet that ends tied — no money moves.' },
         { term: 'Best ball', def: 'In 2v2, each team counts only its lower score on a hole.' },
         { term: 'Dormie', def: 'Up exactly as many holes as remain — can no longer lose the bet.' },
+        {
+          term: 'Closed out (3&2)',
+          def: 'Up more holes than remain, so the bet is over early — 3&2 is three up with two to play. It pays there, and its remaining holes no longer count for it (though they still count for every other live bet).',
+        },
       ],
     },
   },

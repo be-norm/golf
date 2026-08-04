@@ -127,6 +127,16 @@ change, use a 6-digit code (`{{ .Token }}` + `verifyOtp`) rather than a link.
   aggregate (that's the standings sheet). New games follow this by default.
   Match-play games (Nassau) are the documented exception: their bar shows live
   bet status because the stakes are the running match, not a single hole.
+- **A decided bet is a won bet, everywhere at once.** A Nassau bet is settled
+  the moment a side is up more holes than the bet has left — not when its holes
+  run out. It then reports in golf's notation (`Ann wins 3&2`, or `2 up` for one
+  that went the distance), its margin FREEZES there, it stops being pressable,
+  and the money moves on that hole. All of it comes from one formatter
+  (`closeMargin`) so the bar, the ledger, the standings detail, the settle
+  screen and the share card cannot disagree. The margin token carries no spaces
+  because the share card's painter word-wraps on them. Skins' equivalent is the
+  carry that can no longer be won: it is declared dead rather than left reading
+  as "carried" onto a hole that doesn't exist (MAI-38).
 - **The ledger explains WHY, not just what.** Each engine's `holeSummary` states
   the outcome, then explains the cause of anything non-obvious on a "↳ "
   continuation line (birdie→flip, carry→multi-skin, 2-down→press, lone/blind→

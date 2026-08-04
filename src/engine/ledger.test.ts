@@ -61,6 +61,60 @@ describe('buildHoleLedger', () => {
     ])
   })
 
+  it('nassau: a bet decided early pays on its closing hole, with the reason', () => {
+    const round = makeRound({
+      players: makePlayers([{ name: 'Ann' }, { name: 'Bob' }]),
+      games: [{ type: 'nassau', config: { stakeCents: 500, teams: null, autoPress: false } }],
+    })
+    const log = new EventLog()
+    // Ann wins h1–h3, h4–h7 halved → 3 up with 2 of the front left = 3&2 on h7
+    log.scoreByHole(
+      round,
+      { Ann: [4, 4, 4, 4, 4, 4, 4], Bob: [5, 5, 5, 4, 4, 4, 4] },
+      [1, 2, 3, 4, 5, 6, 7],
+    )
+    const { ctx, derivations } = deriveRound(round, log.events)
+    const rows = buildHoleLedger(round, log.events, ctx.holesPlayed, derivations).get('game-1')!
+
+    // nothing moves while the front can still be caught
+    expect(rows.filter((r) => r.hole < 7).every((r) => r.deltas.length === 0)).toBe(true)
+    const closing = rows.find((r) => r.hole === 7)!
+    expect(closing.deltas).toEqual([
+      { playerId: 'p-ann', cents: 500 },
+      { playerId: 'p-bob', cents: -500 },
+    ])
+    // the money and the sentence explaining it share a row
+    expect(closing.summary).toContain('F9 closes — Ann wins 3&2')
+  })
+
+  it('nassau: a bet decided on a skipped hole narrates where the money lands', () => {
+    const round = makeRound({
+      players: makePlayers([{ name: 'Ann' }, { name: 'Bob' }]),
+      holes: 'front9',
+      games: [{ type: 'nassau', config: { stakeCents: 500, teams: null, autoPress: false } }],
+    })
+    const log = new EventLog()
+    // Ann wins h1–h4 (+4), h5 halved. NOBODY plays h6 — but h6 still shrinks
+    // the bet, and 4 up with h7–h9 left ends it 4&3 on a hole with no scores.
+    log.scoreByHole(round, { Ann: [4, 4, 4, 4, 4], Bob: [5, 5, 5, 5, 4] }, [1, 2, 3, 4, 5])
+    log.scoreByHole(round, { Ann: [4, 4], Bob: [4, 4] }, [7, 8])
+    const { ctx, derivations } = deriveRound(round, log.events)
+    const rows = buildHoleLedger(round, log.events, ctx.holesPlayed, derivations).get('game-1')!
+
+    // A scoreless hole is only final once play moves past it, so the money
+    // surfaces on h7 — the first hole actually played after the close. The
+    // note has to follow it there: h6 has neither a score nor a delta, so its
+    // row does not exist to carry the explanation.
+    const closing = rows.find((r) => r.deltas.length > 0)!
+    expect(closing.hole).toBe(7)
+    expect(closing.deltas).toEqual([
+      { playerId: 'p-ann', cents: 500 },
+      { playerId: 'p-bob', cents: -500 },
+    ])
+    expect(closing.summary).toContain('F9 closes — Ann wins 4&3')
+    expect(rows.some((r) => r.hole === 6)).toBe(false)
+  })
+
   it('wolf: silent before any scores, attributes point-money on decided holes', () => {
     const round = makeRound({
       players: makePlayers([{ name: 'A' }, { name: 'B' }, { name: 'C' }, { name: 'D' }]),

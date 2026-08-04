@@ -11,9 +11,11 @@ const game = (config: object) => ({
 describe('nassau — golden fixtures (hand-verified)', () => {
   /**
    * N1: 1v1 gross, $5, no presses, full 18.
-   * Front: A wins h1,h4,h6, B wins h3 → +2 → A wins $5.
-   * Back: B wins h10,h12, A wins h13 → −1 → B wins $5.
-   * Overall: +1 → A wins $5. Net: A +$5, B −$5.
+   * Front: A wins h1,h4,h6, B wins h3 → +2. A is 2 up standing on 9 with only
+   *   h9 left, so the front is CLOSED OUT 2&1 on h8 — B cannot catch up.
+   * Back: B wins h10,h12, A wins h13 → −1, decided only when the holes run
+   *   out → B wins 1 up.
+   * Overall: +1 over 18 → A wins 1 up. Net: A +$5, B −$5.
    */
   it('N1: three bets, no presses', () => {
     const players = makePlayers([{ name: 'A' }, { name: 'B' }])
@@ -26,8 +28,10 @@ describe('nassau — golden fixtures (hand-verified)', () => {
     const d = deriveRound(round, log.events).derivations.get('game-1')!
     expect(d.settlement.perPlayerCents).toEqual({ 'p-a': 500, 'p-b': -500 })
     expect(d.settlement.lines).toHaveLength(3)
-    // mini-bar shows match status per bet, not dollars
-    expect(d.summary).toBe('F9: A wins ↑2 · B9: B wins ↑1 · 18: A wins ↑1')
+    // mini-bar shows match status per bet, not dollars — and names a close in
+    // golf's own notation: 2&1 for the front, "1 up" for bets that went the
+    // distance
+    expect(d.summary).toBe('F9: A wins 2&1 · B9: B wins 1 up · 18: A wins 1 up')
   })
 
   /**
@@ -59,6 +63,10 @@ describe('nassau — golden fixtures (hand-verified)', () => {
    * reaches −2 at h11 → re-press @12. Ties h12–18.
    * Final: F +2 (A $2) · FP@3 push · Back −2 (B $2) · BP@12 push ·
    * O push · OP@3 −2 (B $2) · OPP@12 push. Net: A −$2, B +$2, 4 presses.
+   *
+   * Each 2-up bet closes on the second-to-last hole of its stretch — 2&1 —
+   * rather than waiting for the last hole it can no longer lose: F9 on h8,
+   * B9 and OP@3 on h17. Same winners, same $2, named the way it was won.
    */
   it('N3: auto-presses spawn at 2 down, presses press', () => {
     const players = makePlayers([{ name: 'A' }, { name: 'B' }])
@@ -75,10 +83,10 @@ describe('nassau — golden fixtures (hand-verified)', () => {
     // bet ledger: 3 parents + 4 presses, presses indented under their nine
     expect(d.detailLines).toHaveLength(7)
     expect(d.detailLines!.filter((l) => l.depth === 1)).toHaveLength(4)
-    expect(d.detailLines![0]).toEqual({ label: 'F9', value: 'A wins ↑2', depth: 0 })
+    expect(d.detailLines![0]).toEqual({ label: 'F9', value: 'A wins 2&1', depth: 0 })
     expect(d.detailLines![1]).toEqual({ label: 'Press @3', value: 'push', depth: 1 })
     // bar stays compact: parents only (no live presses at final)
-    expect(d.summary).toBe('F9: A wins ↑2 · B9: B wins ↑2 · 18: push')
+    expect(d.summary).toBe('F9: A wins 2&1 · B9: B wins 2&1 · 18: push')
   })
 
   /**
@@ -103,30 +111,158 @@ describe('nassau — golden fixtures (hand-verified)', () => {
   })
 
   /**
-   * N6: golfer vocabulary — dormie when up exactly the holes remaining,
-   * closed out when up more than remain.
+   * N6: golfer vocabulary — dormie when up exactly the holes remaining, and
+   * WON when up more than remain. The close is the whole point (MAI-38): it
+   * names the margin, freezes it, and settles the money on the spot.
+   *
+   * A wins 5 straight on a front-9 round (one Overall bet over h1–h9):
+   * after h5 A is 5 up with 4 to play → 5 > 4, so the match is over, 5&4.
+   * The group keeps playing (h6, h7 are scored) but this bet is settled.
    */
-  it('N6: dormie and closed-out states', () => {
+  it('N6: a decided bet is won, frozen and paid on the closing hole', () => {
     const players = makePlayers([{ name: 'A' }, { name: 'B' }])
     const round = makeRound({ players, holes: 'front9', games: [game({})] })
     const log = new EventLog()
-    // A wins 7 straight: after h7, up 7 with 2 to play → closed out
     log.scoreByHole(round, {
       A: [3, 3, 3, 3, 3, 3, 3],
       B: [4, 4, 4, 4, 4, 4, 4],
     })
     let d = deriveRound(round, log.events).derivations.get('game-1')!
-    expect(d.detailLines![0]!.value).toBe('A ↑7 · closed out')
+    expect(d.detailLines![0]!.value).toBe('A wins 5&4')
+    // the money moves NOW, with h8 and h9 still unplayed — the old rule waited
+    // for the holes to run out and reported $0 for a match already over
+    expect(d.settlement.perPlayerCents).toEqual({ 'p-a': 500, 'p-b': -500 })
+    expect(d.holeSummary(5)).toContain('F9 closes — A wins 5&4')
+    // and the bar says it too, not just the ledger
+    expect(d.summary).toBe('F9: A wins 5&4')
 
-    // fresh round: A up 2 after 7 → dormie (2 up, 2 to play)
+    // FROZEN: B takes the two dead holes. A won 5&4 and still wins 5&4 — the
+    // margin is what it was when the match ended, not a running total.
+    log.scoreByHole(round, { A: [5, 5], B: [3, 3] }, [8, 9])
+    d = deriveRound(round, log.events).derivations.get('game-1')!
+    expect(d.detailLines![0]!.value).toBe('A wins 5&4')
+    expect(d.settlement.perPlayerCents).toEqual({ 'p-a': 500, 'p-b': -500 })
+
+    // fresh round: A up 2 after 7 → dormie (2 up, 2 to play) — still live,
+    // because 2 is not MORE than 2. B can still halve it.
     const round2 = makeRound({ players, holes: 'front9', games: [game({})] })
     const log2 = new EventLog()
     log2.scoreByHole(round2, {
       A: [3, 3, 4, 4, 4, 4, 4],
       B: [4, 4, 4, 4, 4, 4, 4],
     })
-    d = deriveRound(round2, log2.events).derivations.get('game-1')!
-    expect(d.detailLines![0]!.value).toBe('A ↑2 · dormie')
+    const dormie = deriveRound(round2, log2.events).derivations.get('game-1')!
+    expect(dormie.detailLines![0]!.value).toBe('A ↑2 · dormie')
+    expect(dormie.settlement.perPlayerCents).toEqual({ 'p-a': 0, 'p-b': 0 })
+  })
+
+  /**
+   * N14: one bet closing does not close the others. The front nine is won 3&2
+   * on h7 and pays there, while the back nine and the overall are still live
+   * and still say so — the round's dollars are non-zero at the 8th tee.
+   *
+   * A wins h1,h2,h3 → F9 +3, 18 +3. h4–h7 halved. After h7 the front has 2
+   * holes left and A is 3 up → over. The overall has 11 left → nowhere near.
+   */
+  it('N14: a closed bet pays mid-round while the other bets keep running', () => {
+    const players = makePlayers([{ name: 'Ann' }, { name: 'Bob' }])
+    const round = makeRound({ players, games: [game({})] })
+    const log = new EventLog()
+    log.scoreByHole(
+      round,
+      { Ann: [4, 4, 4, 4, 4, 4, 4], Bob: [5, 5, 5, 4, 4, 4, 4] },
+      [1, 2, 3, 4, 5, 6, 7],
+    )
+    const d = deriveRound(round, log.events).derivations.get('game-1')!
+
+    expect(d.detailLines).toEqual([
+      { label: 'F9', value: 'Ann wins 3&2', depth: 0 },
+      { label: 'B9', value: 'AS · 9 to play', depth: 0 },
+      { label: '18', value: 'Ann ↑3 · 11 to play', depth: 0 },
+    ])
+    expect(d.summary).toBe('F9: Ann wins 3&2 · B9: AS · 18: Ann ↑3')
+    // one bet's stake, mid-round, with 11 holes still to play
+    expect(d.settlement.perPlayerCents).toEqual({ 'p-ann': 500, 'p-bob': -500 })
+    expect(d.settlement.lines).toHaveLength(1)
+    expect(d.holeSummary(7)).toContain('F9 closes — Ann wins 3&2')
+    // the per-player status line marks the settled bet without an arrow —
+    // "↓3 up" would read as a contradiction
+    expect(d.standings.find((s) => s.id === 'p-ann')!.detail).toBe('F9 ✓3&2 · B9 AS · 18 ↑3')
+    expect(d.standings.find((s) => s.id === 'p-bob')!.detail).toBe('F9 ✗3&2 · B9 AS · 18 ↓3')
+  })
+
+  /**
+   * N15: a segment whose bets are all decided is no longer pressable — there
+   * is nothing left to press. But a LIVE press under a closed parent keeps the
+   * segment alive, and pressing it is legal: you press the bet you're down on.
+   *
+   * Both halves share one scoreline — Ann wins h1–h5, so the front (5 up, 4 to
+   * play) is over 5&4 on h5.
+   */
+  it('N15: a decided segment stops offering presses; a live press under it does not', () => {
+    const players = makePlayers([{ name: 'Ann' }, { name: 'Bob' }])
+    const scores = { Ann: [4, 4, 4, 4, 4], Bob: [5, 5, 5, 5, 5] }
+    const holes = [1, 2, 3, 4, 5]
+
+    // (a) nothing but the parent bets: the front is dead, the overall is not
+    const dead = makeRound({ players, games: [game({})] })
+    const deadLog = new EventLog()
+    deadLog.scoreByHole(dead, scores, holes)
+    const deadActions = deriveRound(dead, deadLog.events)
+      .derivations.get('game-1')!
+      .availableActions!()
+    expect(deadActions.map((a) => a.label)).toEqual(['Press 18'])
+
+    // (b) same scores, but Bob had pressed the front from h5 — that press is
+    // live and 1 down, so the front is on the table again
+    const alive = makeRound({ players, games: [game({})] })
+    const aliveLog = new EventLog()
+    aliveLog.scoreByHole(alive, scores, holes)
+    aliveLog.append({
+      type: 'game/event',
+      gameId: 'game-1',
+      kind: 'nassau/press',
+      data: { hole: 5, segment: 'front' },
+    })
+    const d = deriveRound(alive, aliveLog.events).derivations.get('game-1')!
+    const live = d.availableActions!()
+    expect(live.map((a) => a.label)).toEqual(['Press F9', 'Press 18'])
+    // and the reason quoted is the LIVE press's deficit, not the dead parent's
+    expect(live[0]!.detail).toBe('Bob 1 down · 4 to play')
+    expect(d.detailLines).toEqual([
+      { label: 'F9', value: 'Ann wins 5&4', depth: 0 },
+      { label: 'Press @5', value: 'Ann ↑1 · 4 to play', depth: 1 },
+      { label: 'B9', value: 'AS · 9 to play', depth: 0 },
+      { label: '18', value: 'Ann ↑5 · 13 to play', depth: 0 },
+    ])
+  })
+
+  /**
+   * N16: 2 down with 1 to play is a CLOSE, not a press. Both rules fire on the
+   * same hole — the bet hits ±2 (auto-press's trigger) and simultaneously runs
+   * out of room (2 > 1) — and the close wins: you cannot press a match that is
+   * over. Without the guard the group would be booked into a phantom bet over
+   * a hole that no longer decides anything.
+   *
+   * Front-9 round (one Overall bet, h1–h9), auto-press ON. Ann wins h1, h2–h7
+   * halved, Ann wins h8 → 2 up with only h9 left.
+   */
+  it('N16: a bet closing 2&1 opens no auto-press on its last hole', () => {
+    const players = makePlayers([{ name: 'Ann' }, { name: 'Bob' }])
+    const round = makeRound({ players, holes: 'front9', games: [game({ autoPress: true })] })
+    const log = new EventLog()
+    log.scoreByHole(
+      round,
+      { Ann: [4, 4, 4, 4, 4, 4, 4, 4], Bob: [5, 4, 4, 4, 4, 4, 4, 5] },
+      [1, 2, 3, 4, 5, 6, 7, 8],
+    )
+    const d = deriveRound(round, log.events).derivations.get('game-1')!
+
+    // exactly one bet — no "Press @9" spawned off a match that just ended
+    expect(d.detailLines).toEqual([{ label: 'F9', value: 'Ann wins 2&1', depth: 0 }])
+    expect(d.settlement.perPlayerCents).toEqual({ 'p-ann': 500, 'p-bob': -500 })
+    // and standing on the 9th tee there is nothing to press by hand either
+    expect(d.availableActions!()).toEqual([])
   })
 
   /**

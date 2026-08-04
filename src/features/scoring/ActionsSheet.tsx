@@ -42,8 +42,12 @@ export function ActionsSheet({ open, onClose, actions, games, onTake, onUndo }: 
         </div>
 
         {actions.length === 0 ? (
+          // States the RULE, not one of its causes. "Every bet is level" was
+          // true until bets could close: a decided bet isn't level, it's over,
+          // and this sheet exists to answer "why can't I press?" honestly.
+          // Which bet is which is right below, in the per-bet ledger.
           <p className="pixel border-stone-700 bg-stone-800/50 p-4 text-lg text-stone-400">
-            Nothing to press — every bet is level.
+            Nothing to press — a press needs a live bet you're down on.
           </p>
         ) : (
           <ul className="space-y-2.5">

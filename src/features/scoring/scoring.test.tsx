@@ -134,7 +134,9 @@ describe('ScoringScreen', () => {
     expect(button).toBeEnabled()
 
     await userEvent.click(button)
-    expect(await screen.findByText(/every bet is level/)).toBeInTheDocument()
+    // states the rule rather than one of its causes — a bet can also be
+    // unpressable because it has already been won
+    expect(await screen.findByText(/needs a live bet you're down on/)).toBeInTheDocument()
   })
 
   it('offers a press at 1 down, quietly — no gold, no blink', async () => {
@@ -183,6 +185,43 @@ describe('ScoringScreen', () => {
     await waitFor(async () => {
       expect(await pressButton()).toHaveAccessibleName('press options — 1 available')
     })
+  })
+
+  /**
+   * MAI-38, end to end on the screen the scorekeeper is actually holding: a bet
+   * the group has already won reads as won on the pinned bar, its money is in
+   * the standings while eleven holes are still to play, and it drops out of the
+   * press offer. The bar is the surface that used to hide this entirely —
+   * it showed a decided bet as a running lead.
+   */
+  it('a decided bet reads as won on the bar, pays, and stops being pressable', async () => {
+    const round = await nassauRound('round-press-closed', [1, 2, 3])
+    // halve h4–h7 → Ann is 3 up with only h8 and h9 left on the front: 3&2
+    for (const hole of [4, 5, 6, 7]) {
+      await eventStore.append(round.id, [
+        { type: 'score/set', playerId: 'p-ann', hole, gross: 4 },
+        { type: 'score/set', playerId: 'p-bob', hole, gross: 4 },
+      ])
+    }
+    const router = createMemoryRouter(routes, { initialEntries: [`/round/${round.id}`] })
+    render(<RouterProvider router={router} />)
+
+    // the bar: front won outright, the overall still a running lead
+    const bar = await screen.findByText('Ann wins 3&2')
+    expect(bar).toBeInTheDocument()
+    expect(screen.getByText('Ann ↑3')).toBeInTheDocument()
+
+    // the money is real and visible mid-round, not deferred to the 9th green
+    await userEvent.click(bar)
+    expect(await screen.findByText('+$5')).toBeInTheDocument()
+    expect(screen.getByText('-$5')).toBeInTheDocument()
+    expect(screen.getByText('F9 ✓3&2 · B9 AS · 18 ↑3')).toBeInTheDocument()
+    await userEvent.keyboard('{Escape}')
+
+    // and a won bet is not a pressable one — only the overall is left
+    await userEvent.click(await pressButton())
+    expect(await screen.findByRole('button', { name: /Press 18/ })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Press F9/ })).not.toBeInTheDocument()
   })
 
   it('no press offer while looking at a hole the group has already played', async () => {

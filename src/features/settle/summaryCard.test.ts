@@ -101,6 +101,43 @@ describe('buildSummaryCard', () => {
     expect(c.strokeNote).toBe('underline = handicap stroke (Nassau)')
   })
 
+  it('carries a Nassau close through to the settle screen and the share card', () => {
+    const round = makeRound({
+      players: makePlayers([{ name: 'Ben' }, { name: 'Al' }]),
+      games: [{ type: 'nassau', config: { stakeCents: 500, teams: null, autoPress: false } }],
+    })
+    const log = new EventLog(round.id)
+    // Ben wins h1–h3, h4–h7 halved → the front is over 3&2 on hole 7
+    log.scoreByHole(round, { Ben: [4, 4, 4, 4, 4, 4, 4], Al: [5, 5, 5, 4, 4, 4, 4] }, [1, 2, 3, 4, 5, 6, 7])
+
+    const nassau = card(round, log).games[0]!
+    expect(nassau.kind).toBe('ledger')
+    // the margin reaches the shared image intact — and as ONE token, since the
+    // painter word-wraps on spaces and "3 & 2" could break across two lines
+    expect(nassau.lines.find((l) => l.label === 'F9')!.value).toBe('Ben wins 3&2')
+    expect(nassau.lines.every((l) => !l.value.includes(' & '))).toBe(true)
+  })
+
+  it('names a dead skins carry, which has no ledger to hide in', () => {
+    const round = makeRound({
+      players: makePlayers([{ name: 'Ben' }, { name: 'Al' }]),
+      holes: 'front9',
+      games: [{ type: 'skins', config: { stakeCents: 100, carryover: true } }],
+    })
+    const log = new EventLog(round.id)
+    log.scoreByHole(round, { Ben: [4, 4], Al: [4, 4] }, [1, 2]) // both tied
+    log.append({ type: 'round/completed' })
+
+    const skins = card(round, log).games[0]!
+    // no detailLines, so the settle panel is built from settlement lines —
+    // without the dead-pot line this panel would read "No money moved." and
+    // never account for the two skins the group put up
+    expect(skins.kind).toBe('lines')
+    expect(skins.lines.map((l) => l.value)).toEqual([
+      '2 skins died unwon — no outright winner left',
+    ])
+  })
+
   it('falls back to settlement lines for games without a ledger', () => {
     const round = makeRound({
       players: makePlayers([{ name: 'Ben' }, { name: 'Al' }]),
