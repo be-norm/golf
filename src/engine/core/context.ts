@@ -28,6 +28,14 @@ export interface RoundContext {
    * hole being actively entered stays unfinalized — no premature payouts.
    */
   finalized(hole: number): boolean
+  /**
+   * Did ANYBODY post a score on this hole — i.e. was it actually played?
+   * Distinct from `finalized`, which is true for a hole nobody reached once
+   * the round completes. Engines need the difference whenever they narrate or
+   * attribute something to a hole: a claim about a hole no one played is a
+   * claim about golf that never happened.
+   */
+  anyScored(hole: number): boolean
 }
 
 export function holesForRange(range: RoundHoles): number[] {
@@ -114,9 +122,12 @@ export function buildRoundContext(round: Round, effective: readonly RoundEvent[]
     else if (e.type === 'round/reopened') completed = false
   }
 
+  const anyScored = (hole: number): boolean =>
+    round.players.some((p) => gross.get(p.playerId)?.get(hole) !== undefined)
+
   let lastTouchedIdx = -1
   holesPlayed.forEach((h, i) => {
-    if (round.players.some((p) => gross.get(p.playerId)?.get(h) !== undefined)) lastTouchedIdx = i
+    if (anyScored(h)) lastTouchedIdx = i
   })
   const finalized = (hole: number): boolean => {
     const idx = holesPlayed.indexOf(hole)
@@ -136,5 +147,6 @@ export function buildRoundContext(round: Round, effective: readonly RoundEvent[]
     netFor,
     bestNetAmongPosted,
     finalized,
+    anyScored,
   }
 }

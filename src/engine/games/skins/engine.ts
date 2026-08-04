@@ -90,12 +90,13 @@ function derive(
   // skins still on the pile. Covers both a tied final hole and a round finished
   // early (completion finalizes the holes nobody reached).
   const carryDied = carry > 0 && ctx.holesPlayed.every((h) => ctx.finalized(h)) ? carry : 0
-  const deadSkins = `${carryDied} skin${carryDied === 1 ? '' : 's'}`
-  // The last hole anybody actually played — where the death gets narrated,
-  // since that is the hole the group is looking at when it happens.
-  const lastScored = [...ctx.holesPlayed]
-    .reverse()
-    .find((h) => players.some((p) => ctx.gross.get(p.playerId)?.get(h) !== undefined))
+  const deadSkins = carryDied > 0 ? `${carryDied} skin${carryDied === 1 ? '' : 's'}` : ''
+  // Where the death gets narrated: the last hole anybody actually played, since
+  // that is the hole the group is looking at when it happens. Undefined unless
+  // something actually died — this scans every player's scores, and `derive`
+  // runs once per hole in the ledger's prefix replay.
+  const diedAt =
+    carryDied > 0 ? [...ctx.holesPlayed].reverse().find((h) => ctx.anyScored(h)) : undefined
 
   if (carryDied > 0) {
     // Skins ships no detailLines, so its settle-screen and share-card panel is
@@ -126,7 +127,7 @@ function derive(
         return `${nameOf.get(r.winnerId)} wins ${r.skins} skin${r.skins > 1 ? 's' : ''}`
       if (r?.kind === 'tied') {
         // "carried" promises the pile rolls onto a hole that no longer exists
-        if (carryDied > 0 && hole === lastScored) return `tied · ${deadSkins} died unwon`
+        if (hole === diedAt) return `tied · ${deadSkins} died unwon`
         return r.carryAfter > 0 ? `tied · ${r.carryAfter} carried` : 'tied — no skin'
       }
       return null
@@ -138,12 +139,6 @@ function derive(
     const r = holeResults.find((h) => h.hole === hole)
     if (!r || r.kind === 'pending') return []
     if (r.kind === 'void') return ['No scores — hole void']
-    // A won hole banks the whole pile, so a carry still standing at the end
-    // means the last hole played was tied — this lands there.
-    const died =
-      carryDied > 0 && hole === lastScored
-        ? [`↳ ${deadSkins} died unwon — no hole left to win them`]
-        : []
     if (r.kind === 'won') {
       const scoreTag = game.handicap.mode === 'net' ? `net ${r.effective}` : `${r.effective}`
       const lines = [`${nameOf.get(r.winnerId)} wins ${r.skins} skin${r.skins > 1 ? 's' : ''} (${scoreTag})`]
@@ -152,15 +147,14 @@ function derive(
         const carried = r.skins - 1
         lines.push(`↳ this hole + ${carried} carried in from ties`)
       }
-      return [...lines, ...died]
+      // never a dead pot here: winning a hole banks the pile, so `diedAt` can
+      // only ever be a TIED hole
+      return lines
     }
-    const tied =
-      died.length > 0
-        ? 'Tied — no outright winner'
-        : r.carryAfter > 0
-          ? `Tied — ${r.carryAfter} carried`
-          : 'Tied — no skin'
-    return [tied, ...died]
+    if (hole === diedAt) {
+      return ['Tied — no outright winner', `↳ ${deadSkins} died unwon — no hole left to win them`]
+    }
+    return [r.carryAfter > 0 ? `Tied — ${r.carryAfter} carried` : 'Tied — no skin']
   }
 
   return {

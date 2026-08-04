@@ -49,11 +49,14 @@ interface Bet {
  * 2 up is a match that went the distance. One formatter, because the pinned
  * bar, the ledger, the standings detail and the settlement labels must all
  * name the same margin the same way.
+ *
+ * The margin is ONE UNBREAKABLE TOKEN. The share card is painted by hand and
+ * word-wraps on spaces (paintSummaryCard.ts), so a plain "3 & 2" splits across
+ * two lines, and so does "1 up" — leaving a card that reads "Ann wins 1" with
+ * the "up" stranded below. Hence the bare ampersand and the non-breaking space.
  */
 function closeMargin(up: number, toPlay: number): string {
-  // NO SPACES around the ampersand: the share card's painter word-wraps on
-  // spaces (paintSummaryCard.ts), and "3 & 2" would break across two lines.
-  return toPlay > 0 ? `${up}&${toPlay}` : `${up} up`
+  return toPlay > 0 ? `${up}&${toPlay}` : `${up}\u00A0up`
 }
 
 const SEGMENT_LABEL: Record<Segment, string> = { front: 'Front', back: 'Back', overall: 'Overall' }
@@ -164,9 +167,21 @@ function derive(
    * finalizes every hole at once (core/context.ts), so an undecided count
    * would report every finished bet as won "3&0". A match won 3&2 was three up
    * with two holes left in it, whether or not those holes were played out.
+   *
+   * Precomputed: it is read once per (bet × decided hole) inside the walk, and
+   * `derive` itself runs once per hole in the ledger's prefix replay.
    */
+  const toPlayAfterBySegment: Record<Segment, Map<number, number>> = {
+    front: new Map(),
+    back: new Map(),
+    overall: new Map(),
+  }
+  for (const segment of ['front', 'back', 'overall'] as const) {
+    const span = spans[segment]
+    span.forEach((hole, i) => toPlayAfterBySegment[segment].set(hole, span.length - 1 - i))
+  }
   const toPlayAfter = (segment: Segment, hole: number) =>
-    spans[segment].filter((h) => h > hole).length
+    toPlayAfterBySegment[segment].get(hole) ?? 0
 
   // Single accumulation walk. Auto-presses spawn when a bet's diff transitions
   // into exactly ±2 (from a smaller gap), starting the NEXT hole of the same
@@ -189,7 +204,14 @@ function derive(
       const left = toPlayAfter(bet.segment, hole)
       if (Math.abs(bet.diff) > left) {
         bet.closedAt = hole
-        bet.closeToPlay = left
+        // "3&2" is a claim that a REAL hole clinched it with two left to play.
+        // A bet can also run out of room on a hole nobody played — most often
+        // when the group finishes early and `round/completed` finalizes the
+        // rest of the card at once. Quoting a to-play count there invents golf:
+        // an 18 abandoned after 5 holes would announce "won 2&1" about a match
+        // whose last 13 holes never happened. Fall back to the plain "2 up",
+        // which is the honest statement — that is where the bet ended.
+        bet.closeToPlay = ctx.anyScored(hole) ? left : 0
       }
       if (
         autoPress &&
@@ -251,15 +273,60 @@ function derive(
   // ≤4 players the only uneven split is a lone side, so it stays integer.
   const sideStake = (self: readonly Uuid[], other: readonly Uuid[]) =>
     self.length === 1 ? stakeCents * other.length : stakeCents
+
+  // Every bet — parents and presses — reported the way a golfer tracks it:
+  // who's up, by how much, holes left; dormie/closed-out/final when apt.
+  const sideShort = (side: 'a' | 'b') =>
+    (side === 'a' ? sideA : sideB).map((id) => firstName(nameOf.get(id))).join(' & ')
+  const segLabel = (seg: Segment): string =>
+    // a collapsed 9-hole nassau's single bet is the nine that was played
+    seg === 'overall'
+      ? ctx.holesPlayed.length <= 9
+        ? ctx.round.holes === 'back9'
+          ? 'B9'
+          : 'F9'
+        : '18'
+      : seg === 'front'
+        ? 'F9'
+        : 'B9'
+  const betLabel = (b: Bet): string => (b.depth === 0 ? segLabel(b.segment) : `Press @${b.startHole}`)
+  // Names the bet in full, for contexts that are a flat list rather than rows
+  // nested under their segment: settlement lines and the per-hole notes. Goes
+  // through segLabel like everything else, so a nine-hole round's single bet
+  // isn't called "Overall" in the money while the ledger calls it "B9".
+  const betFullLabel = (b: Bet): string =>
+    b.depth === 0 ? segLabel(b.segment) : `${segLabel(b.segment)} press @${b.startHole}`
+
+  /**
+   * "Ann wins 3&2" for a decided bet; null while it is still live, and null for
+   * a push (nobody won it). THE definition of a won bet, shared by the pinned
+   * bar, the bet ledger, the settlement label and the hole notes — the same
+   * one-helper-many-callers rule the press logic learned in MAI-34.
+   *
+   * The verb agrees with the side: a pair WIN, a lone player WINS. Reading it
+   * off the winning side rather than hardcoding "wins" is the difference
+   * between "Ann & Bob win 3&2" and the bar announcing "Ann & Bob wins 3&2"
+   * on every 2v2 close.
+   */
+  const closedLabel = (b: Bet): string | null => {
+    if (b.closedAt === undefined || b.diff === 0) return null
+    const side = b.diff > 0 ? 'a' : 'b'
+    const plural = (side === 'a' ? sideA : sideB).length > 1
+    return `${sideShort(side)} ${plural ? 'win' : 'wins'} ${closeMargin(Math.abs(b.diff), b.closeToPlay ?? 0)}`
+  }
+
   const settlement: Settlement = emptySettlement(playerIds)
   for (const bet of bets) {
-    if (!isClosed(bet) || bet.diff === 0) continue
+    // A bet pays exactly when it is won — still live, or level at the end
+    // (a push), and nothing moves either way.
+    const won = closedLabel(bet)
+    if (won === null) continue
     const winners = bet.diff > 0 ? sideA : sideB
     const losers = bet.diff > 0 ? sideB : sideA
     const winEach = sideStake(winners, losers)
     const loseEach = sideStake(losers, winners)
     addLine(settlement, {
-      label: `${bet.label} — ${winners.map((id) => nameOf.get(id)).join(' & ')} ${winners.length > 1 ? 'win' : 'wins'} ${closeMargin(Math.abs(bet.diff), bet.closeToPlay ?? 0)}`,
+      label: `${betFullLabel(bet)} — ${won}`,
       perPlayerCents: Object.fromEntries([
         ...winners.map((id) => [id, winEach] as const),
         ...losers.map((id) => [id, -loseEach] as const),
@@ -291,31 +358,14 @@ function derive(
     }))
     .sort((a, b) => b.amountCents - a.amountCents)
 
-  // Every bet — parents and presses — reported the way a golfer tracks it:
-  // who's up, by how much, holes left; dormie/closed-out/final when apt.
-  const sideShort = (side: 'a' | 'b') =>
-    (side === 'a' ? sideA : sideB).map((id) => firstName(nameOf.get(id))).join(' & ')
-  const segLabel = (seg: Segment): string =>
-    // a collapsed 9-hole nassau's single bet is the nine that was played
-    seg === 'overall'
-      ? ctx.holesPlayed.length <= 9
-        ? ctx.round.holes === 'back9'
-          ? 'B9'
-          : 'F9'
-        : '18'
-      : seg === 'front'
-        ? 'F9'
-        : 'B9'
-  const betLabel = (b: Bet): string => (b.depth === 0 ? segLabel(b.segment) : `Press @${b.startHole}`)
   const betValue = (b: Bet): string => {
-    const n = Math.abs(b.diff)
-    const leader = b.diff === 0 ? null : sideShort(b.diff > 0 ? 'a' : 'b')
     // Decided is checked FIRST — a bet closed 3&2 still has two holes on the
     // card, and reading holesRemaining before closedAt would call it live.
-    if (b.closedAt !== undefined && leader) {
-      return `${leader} wins ${closeMargin(n, b.closeToPlay ?? 0)}`
-    }
+    const won = closedLabel(b)
+    if (won) return won
     if (b.holesRemaining === 0) return 'push'
+    const n = Math.abs(b.diff)
+    const leader = b.diff === 0 ? null : sideShort(b.diff > 0 ? 'a' : 'b')
     if (leader && n === b.holesRemaining) return `${leader} ↑${n} · dormie`
     const status = leader ? `${leader} ↑${n}` : 'AS'
     return `${status} · ${b.holesRemaining} to play`
@@ -373,14 +423,13 @@ function derive(
   // live-press count chip. The full ledger (to play / dormie / presses) is
   // one tap away in the sheet — glanceability beats completeness here.
   const compactValue = (b: Bet): string => {
-    const n = Math.abs(b.diff)
-    const leader = b.diff === 0 ? null : sideShort(b.diff > 0 ? 'a' : 'b')
     // The bar is the ONE place a close has to survive being made compact —
     // dropping it here is what let a decided bet read as a running lead.
-    if (b.closedAt !== undefined && leader) {
-      return `${leader} wins ${closeMargin(n, b.closeToPlay ?? 0)}`
-    }
+    const won = closedLabel(b)
+    if (won) return won
     if (b.holesRemaining === 0) return 'push'
+    const n = Math.abs(b.diff)
+    const leader = b.diff === 0 ? null : sideShort(b.diff > 0 ? 'a' : 'b')
     return leader ? `${leader} ↑${n}` : 'AS'
   }
   const parents = ordered.filter((b) => b.depth === 0)
@@ -495,7 +544,7 @@ function derive(
         // lockstep, so they hit 2 down together), and these notes are a flat
         // list — two bare "Press @3 starts…" lines with different reasons is
         // unreadable. detailLines can stay terse because it nests under its bet.
-        note(h, `${segLabel(b.segment)} press @${b.startHole} starts (${why})`)
+        note(h, `${betFullLabel(b)} starts (${why})`)
       }
     }
     const r = holeResult.get(h)
@@ -508,27 +557,27 @@ function derive(
       })
     if (states.length > 0) note(h, states.join(' · '))
   }
+  // Narrate a close on the hole the MONEY lands on, which is not always the
+  // hole the bet was decided on. The ledger derives each hole's delta from a
+  // prefix replay, and a hole nobody scored only becomes final once play moves
+  // PAST it (core/context.ts `finalized`) — so a bet decided on a skipped hole
+  // first shows its money on the next hole ANYONE played. Attribute the note
+  // there or the ledger drops the row (no score, no delta) and the money turns
+  // up later with nothing explaining it.
+  //
+  // Searched over the whole round, NOT the bet's own segment: a front-nine bet
+  // can be decided on a skipped 6th and have holes 7–9 skipped too, with play
+  // resuming on the 10th. That is the hole the money appears on, even though it
+  // belongs to a different bet.
+  const playedHoles = ctx.holesPlayed.filter((h) => ctx.anyScored(h))
   for (const b of ordered) {
     if (!isClosed(b)) continue
-    const span = spans[b.segment].filter((x) => x >= b.startHole)
-    const played = span.filter((h) =>
-      playerIds.some((id) => ctx.gross.get(id)?.get(h) !== undefined),
-    )
-    // Narrate on the hole the MONEY lands on, which is not always the hole the
-    // bet was decided on. The ledger derives each hole's delta from a prefix
-    // replay, and a hole nobody scored only becomes final once play moves PAST
-    // it (core/context.ts `finalized`) — so a bet decided on a skipped hole
-    // first shows its money on the next played one. Attribute the note there or
-    // the ledger drops the row (no score, no delta) and the money appears on a
-    // later row with nothing explaining it.
-    //
-    // With no played hole at or after the close — a bet finished off by
-    // `round/completed` over holes nobody reached — fall back to the last hole
+    // No played hole at or after the close — a bet finished off by
+    // `round/completed` over holes nobody reached — falls back to the last hole
     // actually played, which is where completion's money lands.
     const closeAt =
-      (b.closedAt !== undefined ? played.find((h) => h >= b.closedAt!) : undefined) ??
-      played[played.length - 1] ??
-      span[span.length - 1]
+      (b.closedAt !== undefined ? playedHoles.find((h) => h >= b.closedAt!) : undefined) ??
+      playedHoles[playedHoles.length - 1]
     if (closeAt !== undefined) note(closeAt, `${betLabel(b)} closes — ${betValue(b)}`)
   }
 
@@ -537,8 +586,7 @@ function derive(
     if (r === null || r === undefined) return []
     const notes = holeNotes.get(hole) ?? []
     // an unplayed hole finalized by round completion carries only its notes
-    const played = playerIds.some((id) => ctx.gross.get(id)?.get(hole) !== undefined)
-    if (!played) return notes
+    if (!ctx.anyScored(hole)) return notes
     const side = r === 1 ? sideA : r === -1 ? sideB : null
     const winnerLine = side
       ? `${side.map((id) => nameOf.get(id)).join(' & ')} ${side.length > 1 ? 'win' : 'wins'} the hole`

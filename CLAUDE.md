@@ -133,10 +133,15 @@ change, use a 6-digit code (`{{ .Token }}` + `verifyOtp`) rather than a link.
   that went the distance), its margin FREEZES there, it stops being pressable,
   and the money moves on that hole. All of it comes from one formatter
   (`closeMargin`) so the bar, the ledger, the standings detail, the settle
-  screen and the share card cannot disagree. The margin token carries no spaces
-  because the share card's painter word-wraps on them. Skins' equivalent is the
-  carry that can no longer be won: it is declared dead rather than left reading
-  as "carried" onto a hole that doesn't exist (MAI-38).
+  screen and the share card cannot disagree. The margin is ONE UNBREAKABLE
+  TOKEN — bare `3&2`, and a non-breaking space in `2 up` — because the share
+  card's painter word-wraps on spaces and would strand the "up" on its own
+  line. **Never quote a to-play count off a hole nobody played:** a bet can run
+  out of room on an unplayed hole (finishing early finalizes the rest of the
+  card at once), and "won 2&1" about a match whose last thirteen holes never
+  happened is a fabrication — it degrades to the plainly true `2 up`. Skins'
+  equivalent is the carry that can no longer be won: it is declared dead rather
+  than left reading as "carried" onto a hole that doesn't exist (MAI-38).
 - **The ledger explains WHY, not just what.** Each engine's `holeSummary` states
   the outcome, then explains the cause of anything non-obvious on a "↳ "
   continuation line (birdie→flip, carry→multi-skin, 2-down→press, lone/blind→

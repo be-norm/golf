@@ -111,8 +111,32 @@ describe('buildHoleLedger', () => {
       { playerId: 'p-ann', cents: 500 },
       { playerId: 'p-bob', cents: -500 },
     ])
-    expect(closing.summary).toContain('F9 closes — Ann wins 4&3')
+    // "4&3" would claim a real hole clinched it with three left to play, and
+    // h6 was never played — so the margin degrades to the plainly true "4 up"
+    expect(closing.summary).toContain(`F9 closes — Ann wins 4\u00A0up`)
     expect(rows.some((r) => r.hole === 6)).toBe(false)
+  })
+
+  it('nassau: a close follows the money past the end of its own segment', () => {
+    const round = makeRound({
+      players: makePlayers([{ name: 'Ann' }, { name: 'Bob' }]),
+      games: [{ type: 'nassau', config: { stakeCents: 500, teams: null, autoPress: false } }],
+    })
+    const log = new EventLog()
+    // Ann wins h1–h4, h5 halved — then the group skips the rest of the front
+    // entirely and tees off on 10. The FRONT bet dies on h6 (4 up, 3 left), but
+    // no front hole is ever played again, so the hunt for the row carrying the
+    // money has to leave the segment.
+    log.scoreByHole(round, { Ann: [4, 4, 4, 4, 4], Bob: [5, 5, 5, 5, 4] }, [1, 2, 3, 4, 5])
+    log.scoreByHole(round, { Ann: [4], Bob: [4] }, [10])
+    const { ctx, derivations } = deriveRound(round, log.events)
+    const rows = buildHoleLedger(round, log.events, ctx.holesPlayed, derivations).get('game-1')!
+
+    const closing = rows.find((r) => r.deltas.length > 0)!
+    expect(closing.hole).toBe(10)
+    expect(closing.summary).toContain(`F9 closes — Ann wins 4\u00A0up`)
+    // and nothing is stranded on hole 5, which carries no money
+    expect(rows.find((r) => r.hole === 5)!.summary.every((s) => !s.includes('closes'))).toBe(true)
   })
 
   it('wolf: silent before any scores, attributes point-money on decided holes', () => {

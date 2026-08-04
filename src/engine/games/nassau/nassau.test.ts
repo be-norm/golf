@@ -8,6 +8,14 @@ const game = (config: object) => ({
   config: { stakeCents: 500, teams: null, autoPress: false, ...config },
 })
 
+/**
+ * A match that went the distance, e.g. "2 up". The space is NON-BREAKING so
+ * the share card's painter cannot strand the "up" on its own line — spelled
+ * as an escape in these expectations because the character is invisible in
+ * source, and a golden test you cannot read is worse than no golden test.
+ */
+const up = (n: number) => `${n}\u00A0up`
+
 describe('nassau — golden fixtures (hand-verified)', () => {
   /**
    * N1: 1v1 gross, $5, no presses, full 18.
@@ -31,7 +39,7 @@ describe('nassau — golden fixtures (hand-verified)', () => {
     // mini-bar shows match status per bet, not dollars — and names a close in
     // golf's own notation: 2&1 for the front, "1 up" for bets that went the
     // distance
-    expect(d.summary).toBe('F9: A wins 2&1 · B9: B wins 1 up · 18: A wins 1 up')
+    expect(d.summary).toBe(`F9: A wins 2&1 · B9: B wins ${up(1)} · 18: A wins ${up(1)}`)
   })
 
   /**
@@ -263,6 +271,60 @@ describe('nassau — golden fixtures (hand-verified)', () => {
     expect(d.settlement.perPlayerCents).toEqual({ 'p-ann': 500, 'p-bob': -500 })
     // and standing on the 9th tee there is nothing to press by hand either
     expect(d.availableActions!()).toEqual([])
+  })
+
+  /**
+   * N17: finishing early must not invent a margin. "2&1" is a claim that a real
+   * hole clinched the match with one left to play. Abandon an 18 after five
+   * holes and `round/completed` finalizes the other thirteen at once — every
+   * bet runs out of room on a hole nobody stood on. The honest report is where
+   * the bet actually ended: 2 up.
+   */
+  it('N17: a round finished early reports where it ended, not a fictional margin', () => {
+    const players = makePlayers([{ name: 'Ann' }, { name: 'Bob' }])
+    const round = makeRound({ players, games: [game({})] })
+    const log = new EventLog()
+    // Ann wins h1 and h2, h3–h5 halved, then the group packs it in
+    log.scoreByHole(round, { Ann: [4, 4, 4, 4, 4], Bob: [5, 5, 4, 4, 4] }, [1, 2, 3, 4, 5])
+    log.append({ type: 'round/completed' })
+    const d = deriveRound(round, log.events).derivations.get('game-1')!
+
+    expect(d.detailLines).toEqual([
+      { label: 'F9', value: `Ann wins ${up(2)}`, depth: 0 },
+      { label: 'B9', value: 'push', depth: 0 },
+      { label: '18', value: `Ann wins ${up(2)}`, depth: 0 },
+    ])
+    // no bet may quote a to-play count off holes nobody played
+    expect(d.detailLines!.every((l) => !l.value.includes('&'))).toBe(true)
+    // the money is unaffected — only the sentence describing it
+    expect(d.settlement.perPlayerCents).toEqual({ 'p-ann': 1000, 'p-bob': -1000 })
+  })
+
+  /**
+   * N18: a side of two WIN, one player WINS. The bar, the ledger and the
+   * settlement label all render one sentence from one helper, so the verb (and
+   * the bet's name) cannot disagree between them.
+   */
+  it('N18: a 2v2 close agrees with itself across the bar, ledger and money', () => {
+    const players = makePlayers([{ name: 'Ann' }, { name: 'Bob' }, { name: 'Cy' }, { name: 'Dee' }])
+    const round = makeRound({
+      players,
+      holes: 'front9',
+      games: [game({ teams: { a: ['p-ann', 'p-bob'], b: ['p-cy', 'p-dee'] } })],
+    })
+    const log = new EventLog()
+    log.scoreByHole(
+      round,
+      { Ann: [4, 4, 4, 4, 4], Bob: [4, 4, 4, 4, 4], Cy: [5, 5, 5, 5, 5], Dee: [5, 5, 5, 5, 5] },
+      [1, 2, 3, 4, 5],
+    )
+    const d = deriveRound(round, log.events).derivations.get('game-1')!
+
+    expect(d.detailLines![0]!.value).toBe('Ann & Bob win 5&4')
+    expect(d.summary).toBe('F9: Ann & Bob win 5&4')
+    // the settlement names the bet the way the ledger does — a nine-hole
+    // round's single bet is the nine that was played, not "Overall"
+    expect(d.settlement.lines[0]!.label).toBe('F9 — Ann & Bob win 5&4')
   })
 
   /**

@@ -58,7 +58,10 @@ Three equal match-play bets: Front 9, Back 9, Overall 18. Hole won by lower net 
   no longer pressable, and a bet that closes 2&1 opens no auto-press over its last hole (both
   rules fire on the same hole; the close wins — you cannot press a match that is over). Live
   presses under a closed parent keep that segment pressable: you press the bet you're down on.
-  A bet level at the end never closes — it pushes (MAI-38).
+  A bet level at the end never closes — it pushes. And the `N&M` form is only ever quoted when a
+  hole somebody actually played clinched it: a bet that runs out of room on an unplayed hole
+  (finishing early finalizes the whole card at once) reports the plain `N up` instead, rather
+  than describing holes that were never contested (MAI-38).
 - **Undo follows ownership, not authorship.** A hand-tapped press can be toggled back off
   (`meta/retract` over its event). A press auto-press would open anyway cannot — retracting the
   event would only let the rules re-create the identical bet, so the UI shows it running and
