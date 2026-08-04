@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { Round } from '../../engine/core/types'
 import { Sheet } from '../../components/Sheet'
 import { BigButton } from '../../components/BigButton'
@@ -40,25 +40,41 @@ export function ShareSheet({
 
 function SharePreview({ round, card }: { round: Round; card: SummaryCard }) {
   const [state, setState] = useState<State>({ status: 'painting' })
+  const urlRef = useRef<string>(undefined)
 
   useEffect(() => {
     let cancelled = false
-    let objectUrl: string | undefined
     void paintSummaryCard(card)
       .then((blob) => {
         if (cancelled) return
         const file = new File([blob], `${roundFileBase(round)}.png`, { type: 'image/png' })
-        objectUrl = URL.createObjectURL(file)
-        setState({ status: 'ready', file, url: objectUrl })
+        const url = URL.createObjectURL(file)
+        const previous = urlRef.current
+        urlRef.current = url
+        setState({ status: 'ready', file, url })
+        // Release the old preview only once its replacement exists. Revoking in
+        // this effect's cleanup instead would kill the URL that `state` still
+        // points at — a repaint (a background sync touching the round while the
+        // sheet is open) would leave the <img> aimed at a revoked blob until
+        // the new paint landed.
+        if (previous) URL.revokeObjectURL(previous)
       })
       .catch(() => {
         if (!cancelled) setState({ status: 'error' })
       })
     return () => {
       cancelled = true
-      if (objectUrl) URL.revokeObjectURL(objectUrl)
     }
   }, [card, round])
+
+  // The surviving preview outlives the effect that made it, so it's released on
+  // unmount rather than on every dependency change.
+  useEffect(
+    () => () => {
+      if (urlRef.current) URL.revokeObjectURL(urlRef.current)
+    },
+    [],
+  )
 
   const share = async (file: File) => {
     // a failed share still owes the user their image

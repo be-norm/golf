@@ -22,6 +22,10 @@ export function DiagnosticsScreen() {
   // file is the only way to move a round that's still in progress.
   const rounds = useLiveQuery(() => roundRepo.listRecent(activeUserId, 20), [activeUserId])
   const [exportId, setExportId] = useState<string>()
+  // Resolve the selection once, falling back to the newest round: `rounds` is
+  // scoped by user and refetches live, so a held id can name a round that has
+  // since been deleted or signed away — which left the button armed but inert.
+  const selected = rounds?.find((r) => r.id === exportId) ?? rounds?.[0]
 
   useEffect(() => {
     void navigator.storage?.estimate?.().then((e) => {
@@ -54,14 +58,14 @@ export function DiagnosticsScreen() {
 
       <section className="pixel border-stone-700 bg-stone-900/70 p-4">
         <h2 className="font-display mb-2 text-[10px] uppercase text-stone-400">Data</h2>
-        {rounds && rounds.length > 0 && (
+        {selected && (
           <div className="mb-4">
             <select
               className="pixel mb-2 w-full border-stone-700 bg-stone-800 px-3 py-3 text-lg text-stone-100"
-              value={exportId ?? rounds[0]!.id}
+              value={selected.id}
               onChange={(e) => setExportId(e.target.value)}
             >
-              {rounds.map((r) => (
+              {rounds!.map((r) => (
                 <option key={r.id} value={r.id}>
                   {r.courseSnapshot.name} — {new Date(r.startedAt).toLocaleDateString()}
                 </option>
@@ -70,10 +74,7 @@ export function DiagnosticsScreen() {
             <BigButton
               variant="outline"
               className="w-full"
-              onClick={() => {
-                const round = rounds.find((r) => r.id === (exportId ?? rounds[0]!.id))
-                if (round) void buildExport(round).then(downloadExport)
-              }}
+              onClick={() => void buildExport(selected).then(downloadExport)}
             >
               Export round to file
             </BigButton>

@@ -114,21 +114,49 @@ function ellipsize(g: Ctx, s: string, max: number, o: TextOpts): string {
   return `${cut}…`
 }
 
-function wrap(g: Ctx, s: string, max: number, o: TextOpts): string[] {
-  const words = s.split(' ')
+/**
+ * Greedy word wrap that also breaks a token with no break opportunity — a
+ * hyphen-free course name, say, or a long single-word player name inside a
+ * Nassau line. Without the inner chop, a word wider than the column is
+ * accepted whole and simply runs off the panel edge.
+ *
+ * Pure and measure-injected so the one loop in this file with a termination
+ * condition can be tested without a canvas. See paintSummaryCard.test.ts.
+ */
+export function wrapText(
+  measure: (s: string) => number,
+  s: string,
+  max: number,
+): string[] {
   const lines: string[] = []
   let line = ''
-  for (const word of words) {
+  for (const word of s.split(' ')) {
     const next = line ? `${line} ${word}` : word
-    if (width(g, next, o) > max && line) {
-      lines.push(line)
-      line = word
-    } else {
+    if (measure(next) <= max) {
       line = next
+      continue
     }
+    if (line) lines.push(line)
+    // No break opportunity left: chop the token itself. `cut` is floored at 1 —
+    // on a one-character remainder `rest.length - 1` is 0, which would emit an
+    // empty line and leave `rest` untouched, i.e. spin forever. The floor is
+    // what makes `rest` strictly shrink, so this terminates even when `max` is
+    // narrower than a single glyph.
+    let rest = word
+    while (measure(rest) > max) {
+      let cut = Math.max(1, rest.length - 1)
+      while (cut > 1 && measure(rest.slice(0, cut)) > max) cut--
+      lines.push(rest.slice(0, cut))
+      rest = rest.slice(cut)
+    }
+    line = rest
   }
   if (line) lines.push(line)
   return lines
+}
+
+function wrap(g: Ctx, s: string, max: number, o: TextOpts): string[] {
+  return wrapText((t) => width(g, t, o), s, max)
 }
 
 // ── sections ────────────────────────────────────────────────────────────────

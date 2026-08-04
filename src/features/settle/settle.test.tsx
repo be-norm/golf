@@ -65,13 +65,17 @@ describe('sharing the summary image', () => {
     shareMocks.share.mockClear().mockResolvedValue('shared')
   })
 
+  // a counter, not Math.random — the harness is deterministic by design
+  // ("no clocks, no randomness", engine/test/harness.ts)
+  let seq = 0
+
   async function openShareSheet() {
     const round = makeRound({
       players: makePlayers([{ name: 'Ben' }, { name: 'Alice' }]),
       holes: 'front9',
       games: [{ type: 'skins', config: { stakeCents: 100, carryover: true } }],
     })
-    round.id = `round-share-${Math.random().toString(36).slice(2)}`
+    round.id = `round-share-${++seq}`
     round.status = 'completed'
     const log = new EventLog(round.id)
     log.scoreByHole(round, { Ben: [3, 4], Alice: [4, 4] }, [1, 2])
