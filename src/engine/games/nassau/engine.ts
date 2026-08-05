@@ -389,20 +389,37 @@ function derive(
   const pressDeficit = (
     segment: Segment,
     asOf: number,
-  ): { trailing: 'a' | 'b'; by: number } | null => {
+  ): { trailing: 'a' | 'b'; by: number; on: Bet } | null => {
     const decided = spans[segment].filter((h) => h < asOf && (holeResult.get(h) ?? null) !== null)
     const at = decided[decided.length - 1]
     if (at === undefined) return null
     let worst = 0
+    let on: Bet | undefined
     for (const b of bets) {
       if (b.segment !== segment || b.startHole >= asOf) continue
       if (b.closedAt !== undefined && b.closedAt < asOf) continue
       const d = b.history.get(at)
-      if (d !== undefined && Math.abs(d) > Math.abs(worst)) worst = d
+      if (d !== undefined && Math.abs(d) > Math.abs(worst)) {
+        worst = d
+        on = b
+      }
     }
-    if (worst === 0) return null
-    return { trailing: worst > 0 ? 'b' : 'a', by: Math.abs(worst) }
+    if (worst === 0 || on === undefined) return null
+    return { trailing: worst > 0 ? 'b' : 'a', by: Math.abs(worst), on }
   }
+
+  /**
+   * "Colby 1 down" — plus WHICH bet, when it isn't the segment's original.
+   *
+   * Naming it is the whole difference between an offer that makes sense and one
+   * that contradicts the screen above it. Once the F9 match is won, the ledger
+   * says "F9 · Benjamin wins 3&2" while a live press underneath is still 1 down;
+   * an offer reading "Press F9 · Colby 1 down" then looks like the app forgot
+   * the match is over. Same for the case N13 documents, where the parent sits
+   * all square and it is a PRESS that went 2 down.
+   */
+  const deficitPhrase = (down: { trailing: 'a' | 'b'; by: number; on: Bet }): string =>
+    `${sideShort(down.trailing)} ${down.by} down${down.on.depth > 0 ? ` on ${betLabel(down.on)}` : ''}`
 
   // play order: each nine's bet followed by its presses, overall last.
   // Presses sort by the hole they START from, not by press depth — a press of a
@@ -478,7 +495,7 @@ function derive(
       ).length
       const last = spans[seg][spans[seg].length - 1]!
       const span = frontier === last ? `hole ${last}` : `holes ${frontier}–${last}`
-      const why = down ? `${sideShort(down.trailing)} ${down.by} down · ${toPlay} to play` : `${toPlay} to play`
+      const why = down ? `${deficitPhrase(down)} · ${toPlay} to play` : `${toPlay} to play`
       // Quote the stake to the side being INVITED to press — the one that's
       // down. In a 2-v-1 the lone player books this bet against each opponent,
       // so a "$5" press costs them $10; telling them $5 in the one line meant
@@ -535,7 +552,7 @@ function derive(
         const down = pressDeficit(b.segment, h)
         const auto = autoWanted.has(pressKey(b.segment, h))
         const why = down
-          ? `${sideShort(down.trailing)} ${down.by} down${auto ? ' → auto-press' : ' → pressed'}`
+          ? `${deficitPhrase(down)}${auto ? ' → auto-press' : ' → pressed'}`
           : auto
             ? 'auto-press'
             : 'pressed'
