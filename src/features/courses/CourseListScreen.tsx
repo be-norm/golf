@@ -3,6 +3,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { courseRepo } from '../../db/repos'
 import { CourseSearch } from './CourseSearch'
 import { ScanButton } from './ScanButton'
+import { CourseSourceMark } from '../../components/CourseSourceMark'
 
 export function CourseListScreen() {
   const navigate = useNavigate()
@@ -45,6 +46,7 @@ export function CourseListScreen() {
                 className="pixel block w-full border-stone-700 bg-stone-900/70 px-4 py-3 text-left"
               >
                 <span className="text-lg font-semibold">{c.name}</span>
+                <CourseSourceMark source={c.source} />
                 <span className="ml-2 text-stone-400">
                   {c.holeCount} holes{c.location ? ` · ${c.location}` : ''}
                 </span>

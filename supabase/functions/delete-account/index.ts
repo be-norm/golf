@@ -95,17 +95,21 @@ async function archive(
   }
 
   try {
-    const [rounds, players] = await Promise.all([
+    const [rounds, players, savedCourses] = await Promise.all([
       // `deleted_at=is.null` — tombstoned rounds are ones the user deliberately
       // deleted before closing the account. Archiving them would resurrect them
       // on reinstatement.
       read(`round_archives?user_id=eq.${uid}&deleted_at=is.null&select=round_id,data`),
       read(`players?user_id=eq.${uid}&deleted_at=is.null&select=*`),
+      // The saved library is owned data too, and cascades away with the user —
+      // so reinstatement without it would hand someone back their rounds and an
+      // empty course list (MAI-76).
+      read(`saved_courses?user_id=eq.${uid}&deleted_at=is.null&select=course_id,data`),
     ])
 
     // Nothing worth keeping — skip the row rather than bank an empty archive
     // that still holds the email for 30 days.
-    if (!rounds.length && !players.length) {
+    if (!rounds.length && !players.length && !savedCourses.length) {
       console.info(`[delete-account] nothing to archive for ${uid}`)
       return
     }
@@ -118,7 +122,7 @@ async function archive(
       body: JSON.stringify({
         original_user_id: uid,
         email,
-        payload: { rounds, players },
+        payload: { rounds, players, savedCourses },
       }),
     })
 

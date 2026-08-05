@@ -4,7 +4,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import type { Course, TeeSet } from '../../engine/core/types'
 import { courseRepo } from '../../db/repos'
 import { newId } from '../../db/ids'
-import { enqueuePushCourse } from '../../remote/outbox'
+import { enqueueDeleteSavedCourse, enqueuePushCourse } from '../../remote/outbox'
 import { isStrokeIndexPermutation, looksLikeEighteenHoleRating } from '../../engine/core/tees'
 import { useAuth } from '../../auth/AuthProvider'
 import { BigButton } from '../../components/BigButton'
@@ -124,6 +124,10 @@ export function CourseEditorScreen() {
 
   const remove = async () => {
     await courseRepo.delete(course.id)
+    // Tombstone it for the account, or the next pull restores the course this
+    // very tap removed. Saves need no counterpart — `pushSavedCourses`
+    // reconciles the library as a set, so a course syncs by existing (MAI-76).
+    if (!isGuest) await enqueueDeleteSavedCourse(activeUserId, course.id)
     navigate('/courses')
   }
 

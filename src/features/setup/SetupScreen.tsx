@@ -18,6 +18,7 @@ import { PlayerSearch } from '../players/PlayerSearch'
 import type { GhinPlayerHit } from '../../remote/ghinSearch'
 import { RulesSheet } from '../games/RulesSheet'
 import { GameConfigCard, type GameDraft } from './GameConfigCard'
+import { CourseSourceMark } from '../../components/CourseSourceMark'
 
 interface PlayerDraft {
   /** stable id — game configs reference THIS, so list edits never remap teams */
@@ -251,6 +252,7 @@ export function SetupScreen() {
                 }`}
               >
                 <span className="font-semibold">{c.name}</span>
+                <CourseSourceMark source={c.source} />
                 {c.location && <span className="ml-2 text-sm text-stone-400">{c.location}</span>}
               </button>
             ))}

@@ -2,7 +2,7 @@ import Dexie from 'dexie'
 import { db } from '../db/schema'
 import { LOCAL_USER } from '../db/ids'
 import { roundRepo, playerRepo } from '../db/repos'
-import type { Player, Round } from '../engine/core/types'
+import type { Course, Player, Round } from '../engine/core/types'
 import type { RoundEvent } from '../engine/core/events'
 import { supabase } from './supabase'
 import { enqueuePushCourse, enqueuePushPlayer, enqueuePushRound, flushOutbox } from './outbox'
@@ -10,27 +10,71 @@ import { enqueuePushCourse, enqueuePushPlayer, enqueuePushRound, flushOutbox } f
 /**
  * Owner-scoped cloud restore. Snapshot model: each completed round is a
  * self-contained {round, events} blob in round_archives; the roster mirrors to
- * a players table. Pull is additive + last-write-wins by updatedAt, and honors
- * soft-delete tombstones. Live rounds are never pushed or pulled — they finish
- * on the device that started them. All best-effort/silent, like flushOutbox.
+ * a players table; the saved course library mirrors to saved_courses, carrying
+ * each course's own data so it restores whether or not that course exists in
+ * the shared library. Pull is additive + last-write-wins by updatedAt, and
+ * honors soft-delete tombstones. Live rounds are never pushed or pulled — they
+ * finish on the device that started them. All best-effort/silent, like
+ * flushOutbox.
  */
 
 /** Flush pending pushes, then restore anything newer from the cloud. */
 export async function syncNow(userId: string): Promise<void> {
   if (userId === LOCAL_USER) return
+  // Order matters: removals (outbox tombstones) land BEFORE the library is
+  // reconciled up, so a course deleted on this device isn't re-uploaded by the
+  // very same sync that was meant to remove it.
   await flushOutbox()
+  await pushSavedCourses(userId)
   await pull(userId)
+}
+
+/**
+ * Reconcile the saved course library UP, as a set.
+ *
+ * Saves aren't events here. A course enters the library from four different
+ * call sites (search import, scan, manual build, editor save), none of which
+ * has the signed-in user to hand — threading one through all four is four
+ * chances to forget, and forgetting means a course that silently never syncs.
+ * Uploading the set instead makes "it is in my library" the whole condition,
+ * so a save cannot be missed. Libraries are a handful of rows and the upsert is
+ * idempotent, so re-sending is cheap.
+ *
+ * REMOVALS still need the outbox (`enqueueDeleteSavedCourse`): a course that is
+ * gone locally leaves nothing here to reconcile, and without a tombstone the
+ * next pull would hand it straight back.
+ */
+export async function pushSavedCourses(userId: string): Promise<void> {
+  if (userId === LOCAL_USER || !navigator.onLine) return
+  try {
+    const courses = await db.courses.toArray()
+    if (courses.length === 0) return
+    await supabase.from('saved_courses').upsert(
+      courses.map((c) => ({
+        user_id: userId,
+        course_id: c.id,
+        data: c,
+        updated_at: c.updatedAt,
+        // resurrects a course the user removed and then saved again
+        deleted_at: null,
+      })),
+      { onConflict: 'user_id,course_id' },
+    )
+  } catch {
+    // opportunistic, exactly like pull — a failed push retries next sync
+  }
 }
 
 export async function pull(userId: string): Promise<void> {
   if (userId === LOCAL_USER || !navigator.onLine) return
   try {
-    const [archivesRes, playersRes] = await Promise.all([
+    const [archivesRes, playersRes, coursesRes] = await Promise.all([
       supabase
         .from('round_archives')
         .select('round_id, data, updated_at, deleted_at')
         .eq('user_id', userId),
       supabase.from('players').select('*').eq('user_id', userId),
+      supabase.from('saved_courses').select('course_id, data, deleted_at').eq('user_id', userId),
     ])
 
     for (const row of archivesRes.data ?? []) {
@@ -41,9 +85,26 @@ export async function pull(userId: string): Promise<void> {
       if (row.deleted_at) await playerRepo.delete(row.id as string)
       else await applyRemotePlayer(userId, row)
     }
+    for (const row of coursesRes.data ?? []) {
+      if (row.deleted_at) await db.courses.delete(row.course_id as string)
+      else await applyRemoteCourse(row.data as Course)
+    }
   } catch {
     // opportunistic — offline or transient failure just means no restore now
   }
+}
+
+/**
+ * Courses are NOT owner-partitioned (the library is shared — CLAUDE.md), so
+ * this writes the row as-is rather than stamping a userId onto it. Goes through
+ * db.courses directly, not courseRepo.put, which re-stamps `updatedAt` and
+ * bumps `revision` — that would make every restore look like a local edit and
+ * win the next last-write-wins comparison against the real one.
+ */
+async function applyRemoteCourse(course: Course): Promise<void> {
+  const local = await db.courses.get(course.id)
+  if (local && local.updatedAt >= course.updatedAt) return
+  await db.courses.put(course)
 }
 
 async function applyRemoteRound(
@@ -112,6 +173,11 @@ export async function claimLocalData(userId: string): Promise<{ rounds: number; 
   // they reach the account (and every other user). Best-effort, same as above.
   const userCourses = await db.courses.filter((c) => c.source === 'user').toArray()
   for (const c of userCourses) await enqueuePushCourse(userId, c)
+
+  // ...and claim the LIBRARY itself, not just authorship. Courses saved while
+  // signed out are the user's saved courses too; without this they'd stay on
+  // this device only and vanish with its storage (MAI-76).
+  await pushSavedCourses(userId)
 
   return { rounds: claimed.rounds.length, players: claimed.players.length }
 }

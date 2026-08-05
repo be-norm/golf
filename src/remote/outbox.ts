@@ -35,6 +35,10 @@ interface PushCoursePayload {
   userId: string
   course: Course
 }
+interface DeleteSavedCoursePayload {
+  userId: string
+  courseId: string
+}
 
 export async function enqueuePushRound(userId: string, round: Round): Promise<void> {
   const events = await eventStore.list(round.id)
@@ -62,6 +66,18 @@ export async function enqueueDeleteRound(userId: string, roundId: string): Promi
 export async function enqueueDeletePlayer(userId: string, playerId: string): Promise<void> {
   await purgePendingFor(playerId)
   await put('deletePlayer', { userId, playerId })
+}
+
+/**
+ * Tombstone a course the user removed from their library.
+ *
+ * SAVES don't come through here — `pushSavedCourses` reconciles the whole local
+ * library on each sync, so a save is picked up by simply existing. A REMOVAL
+ * has no such trace: the row is gone locally, so nothing would ever tell the
+ * server, and the next pull would hand it straight back (MAI-76).
+ */
+export async function enqueueDeleteSavedCourse(userId: string, courseId: string): Promise<void> {
+  await put('deleteSavedCourse', { userId, courseId })
 }
 
 async function put(kind: OutboxItem['kind'], payload: unknown): Promise<void> {
@@ -165,6 +181,17 @@ async function send(item: OutboxItem, deviceId: string): Promise<boolean> {
         .update({ deleted_at: now, updated_at: now })
         .eq('user_id', userId)
         .eq('id', playerId)
+      return !error
+    }
+    case 'deleteSavedCourse': {
+      const { userId, courseId } = item.payload as DeleteSavedCoursePayload
+      // Tombstone rather than delete, so a device that has been offline learns
+      // the course was removed instead of pushing it back on its next sync.
+      const { error } = await supabase
+        .from('saved_courses')
+        .update({ deleted_at: now, updated_at: now })
+        .eq('user_id', userId)
+        .eq('course_id', courseId)
       return !error
     }
     case 'pushCourse': {

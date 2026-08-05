@@ -92,16 +92,30 @@ change, use a 6-digit code (`{{ .Token }}` + `verifyOtp`) rather than a link.
   the sentinel `LOCAL_USER = '@local'` (`src/db/ids.ts`) — a real string, since IndexedDB
   omits `undefined`-keyed rows from compound indexes. Repos scope **lists** by userId
   (`[userId+startedAt]` / `[userId+name]`); **reads-by-id stay unscoped** (an owned id is
-  the capability). Courses stay global/shared. Dexie v2 `.upgrade()` backfilled existing
-  rows to `LOCAL_USER`.
+  the capability). Course DATA stays global/shared — but which courses you SAVED is yours,
+  see saved_courses below. Dexie v2 `.upgrade()` backfilled existing rows to `LOCAL_USER`.
 - **Claim-on-login.** Signing in offers (opt-in) to rewrite this device's guest rows to the
   auth uid in one transaction, then push them — this is how pre-auth data moves into an
   account (`claimLocalData`, `src/remote/sync.ts`).
-- **Sync is snapshot + outbox, best-effort.** Only signed-in, **completed** rounds and the
-  roster sync; live rounds stay on their device. Push/delete go through the Dexie `outbox`
-  (`src/remote/outbox.ts`); `pull` (`sync.ts`) is additive + last-write-wins by `updatedAt`
-  with soft-delete tombstones. round_archives is keyed by `(user_id, round_id)`; a re-push
-  never clears a tombstone (`deleted_at` omitted from the upsert).
+- **Sync is snapshot + outbox, best-effort.** Only signed-in, **completed** rounds, the
+  roster and the **saved course library** sync; live rounds stay on their device. Push/delete
+  go through the Dexie `outbox` (`src/remote/outbox.ts`); `pull` (`sync.ts`) is additive +
+  last-write-wins by `updatedAt` with soft-delete tombstones. round_archives is keyed by
+  `(user_id, round_id)`; a re-push never clears a tombstone (`deleted_at` omitted from the
+  upsert).
+- **`saved_courses` is the user's library, and it carries the course data.** Saving a course
+  has to mean keeping it, on any device — before MAI-76 it meant keeping it on THAT phone, so
+  clearing storage restored the rounds to an empty course list. It deliberately does NOT
+  foreign-key `courses`: that table is the shared DISCOVERY library, and a course found via
+  the live OpenGolfAPI is cached locally and never upserted there, so most saved courses have
+  no row to point at. Same split as a round's `courseSnapshot`.
+  SAVES are reconciled as a SET (`pushSavedCourses`, every sync) because a course enters the
+  library from four call sites, none holding the signed-in user — "it's in my library" is the
+  whole condition, so a save can't be missed. REMOVALS still need an outbox tombstone
+  (`enqueueDeleteSavedCourse`): a course gone locally leaves nothing to reconcile, and the
+  next pull would hand it back. `flushOutbox` runs BEFORE the set push for that reason.
+  New user-owned table ⇒ it must also be archived by `delete-account` and cascade with the
+  user, or deletion leaves rows and reinstatement returns an empty library.
 - **RLS is `auth.uid() = user_id`** on `round_archives` + `players`; `courses` SELECT is
   granted to `anon, authenticated` so signed-in users keep library access. Deleting a whole
   round/player is outside the append-only event invariant (#2 governs edits *within* a round).
