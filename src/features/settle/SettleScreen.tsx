@@ -157,6 +157,19 @@ export function SettleScreen() {
                 ))}
               </ul>
             )}
+            {/* Below the money and visibly apart from it: a note is something
+                the game has to say, not a payout. The rule divides the two so
+                "3 skins died unwon" can never be read as a line where cash
+                changed hands. */}
+            {g.notes.length > 0 && (
+              <div className="mt-2.5 border-t border-stone-800 pt-2.5">
+                {g.notes.map((note, i) => (
+                  <p key={i} className="text-stone-500">
+                    {note}
+                  </p>
+                ))}
+              </div>
+            )}
           </div>
         ))}
       </section>

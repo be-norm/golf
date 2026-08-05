@@ -266,6 +266,7 @@ function settleBlock(card: SummaryCard): Block {
 
 function gameBlock(g: Ctx, game: SummaryCard['games'][number]): Block {
   const LINE = 24
+  const NOTE_LINE = 21
   const LABEL_W = 96
   // a ledger is two columns (gold chip left, value right); plain lines are a
   // list and read left-aligned, as they do on screen
@@ -276,8 +277,12 @@ function gameBlock(g: Ctx, game: SummaryCard['games'][number]): Block {
     const max = INNER - 28 - indent - (ledger ? LABEL_W : 0)
     return { ...l, indent, rows: wrap(g, l.value, max, { size: 19 }) }
   })
+  // Notes are full-width regardless of `kind` — they belong to the game, not to
+  // a column, so they never take the ledger's right-aligned value treatment.
+  const wrappedNotes = game.notes.map((n) => wrap(g, n, INNER - 28, { size: 17 }))
   const body = wrapped.reduce((h, l) => h + l.rows.length * LINE, 0) || LINE
-  const height = 16 + 22 + body + 12
+  const notesBody = wrappedNotes.reduce((h, rows) => h + rows.length * NOTE_LINE, 0)
+  const height = 16 + 22 + body + (notesBody > 0 ? notesBody + 10 : 0) + 12
   return {
     height,
     draw(g, y) {
@@ -292,8 +297,23 @@ function gameBlock(g: Ctx, game: SummaryCard['games'][number]): Block {
         })
       }
       let cursor = y + 40
+      const drawNotes = () => {
+        if (wrappedNotes.length === 0) return
+        cursor += 10
+        for (const rows of wrappedNotes) {
+          rows.forEach((row, i) => {
+            text(g, row, PAD + 14, cursor + NOTE_LINE / 2 + i * NOTE_LINE, {
+              size: 17,
+              color: C.ghost,
+            })
+          })
+          cursor += rows.length * NOTE_LINE
+        }
+      }
       if (wrapped.length === 0) {
         text(g, 'No money moved.', PAD + 14, cursor + LINE / 2, { size: 19, color: C.ghost })
+        cursor += LINE
+        drawNotes()
         return
       }
       for (const line of wrapped) {
@@ -314,6 +334,7 @@ function gameBlock(g: Ctx, game: SummaryCard['games'][number]): Block {
         })
         cursor += line.rows.length * LINE
       }
+      drawNotes()
     },
   }
 }

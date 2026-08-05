@@ -98,16 +98,10 @@ function derive(
   const diedAt =
     carryDied > 0 ? [...ctx.holesPlayed].reverse().find((h) => ctx.anyScored(h)) : undefined
 
-  if (carryDied > 0) {
-    // Skins ships no detailLines, so its settle-screen and share-card panel is
-    // built from settlement.lines (features/settle/summaryCard.ts). A pile that
-    // died has to appear there or the money pages simply never mention it —
-    // zero-money, so zero-sum is untouched.
-    addLine(settlement, {
-      label: `${deadSkins} died unwon — no outright winner left`,
-      perPlayerCents: Object.fromEntries(playerIds.map((id) => [id, 0])),
-    })
-  }
+  // A dead pile is something to SAY, not money that moved, so it rides the
+  // narration channel rather than a zero-cent settlement line. `settlement.lines`
+  // stays exactly what it claims to be: money that changed hands (MAI-40).
+  const notes = carryDied > 0 ? [`${deadSkins} died unwon — no outright winner left`] : undefined
 
   const standings: StandingLine[] = players
     .map((p) => ({
@@ -164,6 +158,7 @@ function derive(
     holeSummary,
     requiredInputs: () => [],
     settlement,
+    notes,
     holeResults,
     carrying: carry,
     carryDied,

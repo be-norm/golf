@@ -106,6 +106,23 @@ export interface GameDerivation {
    */
   availableActions?(): GameAction[]
   settlement: Settlement
+  /**
+   * Things the game has to SAY on the settle surface that are not money
+   * movements — "3 skins died unwon", say. Rendered as annotation, below the
+   * money and visibly apart from it.
+   *
+   * This channel exists so narration never has to be smuggled into
+   * `settlement.lines`. That field is the record of money that MOVED; a
+   * zero-cent row in it makes `lines.length === 0` — the model's "No money
+   * moved." signal — false for a round where no money moved, and hands every
+   * future consumer a phantom entry to special-case (MAI-40). Same reasoning
+   * as `GamePanel.kind`: carry the intent, don't overload a field and let a
+   * renderer infer it.
+   *
+   * For per-hole narration use `holeSummary`; this is for what's true of the
+   * round as a whole, once.
+   */
+  notes?: string[]
 }
 
 /**

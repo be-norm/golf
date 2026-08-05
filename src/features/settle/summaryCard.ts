@@ -60,8 +60,14 @@ export interface GamePanel {
    * non-empty — that would make an engine's label a layout switch by accident.
    */
   kind: 'ledger' | 'lines'
-  /** empty means "No money moved." */
+  /** empty means "No money moved." — and it MEANS it: every line moved money */
   lines: { label: string; value: string; depth: number }[]
+  /**
+   * What the game has to say that isn't money — "3 skins died unwon". Rendered
+   * apart from `lines` so a note can never be mistaken for a payout, and so
+   * `lines` can keep its promise about what it contains.
+   */
+  notes: string[]
 }
 
 export interface ScorecardHalf {
@@ -142,6 +148,7 @@ export function buildSummaryCard(
         lines: ledger
           ? d.detailLines!.map((l) => ({ label: l.label, value: l.value, depth: l.depth ?? 0 }))
           : d.settlement.lines.map((l) => ({ label: '', value: l.label, depth: 0 })),
+        notes: d.notes ?? [],
       },
     ]
   })
