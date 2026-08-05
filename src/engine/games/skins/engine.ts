@@ -101,7 +101,12 @@ function derive(
   // A dead pile is something to SAY, not money that moved, so it rides the
   // narration channel rather than a zero-cent settlement line. `settlement.lines`
   // stays exactly what it claims to be: money that changed hands (MAI-40).
-  const notes = carryDied > 0 ? [`${deadSkins} died unwon — no outright winner left`] : undefined
+  // ONE phrasing of the cause, shared with the hole ledger. "No outright winner
+  // left" was the reason ANY tied hole carries — a reader who has seen
+  // "tied · 2 carried" three times would get the same explanation for the
+  // opposite outcome. What actually killed the pile is that the holes ran out.
+  const deadReason = `${deadSkins} died unwon — no hole left to win them`
+  const notes = carryDied > 0 ? [deadReason] : undefined
 
   const standings: StandingLine[] = players
     .map((p) => ({
@@ -145,9 +150,7 @@ function derive(
       // only ever be a TIED hole
       return lines
     }
-    if (hole === diedAt) {
-      return ['Tied — no outright winner', `↳ ${deadSkins} died unwon — no hole left to win them`]
-    }
+    if (hole === diedAt) return ['Tied — no outright winner', `↳ ${deadReason}`]
     return [r.carryAfter > 0 ? `Tied — ${r.carryAfter} carried` : 'Tied — no skin']
   }
 

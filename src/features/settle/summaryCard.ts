@@ -60,7 +60,15 @@ export interface GamePanel {
    * non-empty — that would make an engine's label a layout switch by accident.
    */
   kind: 'ledger' | 'lines'
-  /** empty means "No money moved." — and it MEANS it: every line moved money */
+  /**
+   * Empty means "No money moved."
+   *
+   * On a `'lines'` panel these ARE the settlement lines, so every one of them
+   * moved money (enforced in replay.test.ts). A `'ledger'` panel is the game's
+   * own bet breakdown instead, which deliberately lists bets that moved nothing
+   * — a pushed Nassau bet still belongs in its ledger — so an all-push round
+   * shows three "push" rows rather than "No money moved."
+   */
   lines: { label: string; value: string; depth: number }[]
   /**
    * What the game has to say that isn't money — "3 skins died unwon". Rendered

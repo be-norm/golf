@@ -65,10 +65,15 @@ describe('skins — golden fixtures (hand-verified)', () => {
     // ...and it reaches the settle screen and share card through the NOTES
     // channel, not as a zero-cent settlement line. settlement.lines is the
     // record of money that moved, and a dead pot moved none (MAI-40).
-    expect(skins.notes).toEqual(['1 skin died unwon — no outright winner left'])
-    expect(skins.settlement.lines.every((l) =>
-      Object.values(l.perPlayerCents).some((c) => c !== 0),
-    )).toBe(true)
+    expect(skins.notes).toEqual(['1 skin died unwon — no hole left to win them'])
+    // pinned exactly, per the golden-fixture convention: the four holes that
+    // were won, and nothing else — no dead-pot row among them
+    expect(skins.settlement.lines.map((l) => l.label)).toEqual([
+      'Hole 1 — A wins 1 skin',
+      'Hole 4 — C wins 3 skins',
+      'Hole 7 — A wins 3 skins',
+      'Hole 8 — B wins 1 skin',
+    ])
   })
 
   /**
@@ -271,7 +276,7 @@ describe('skins — golden fixtures (hand-verified)', () => {
       '↳ 3 skins died unwon — no hole left to win them',
     ])
     expect(skins.holeSummary(9)).toEqual(['No scores — hole void'])
-    expect(skins.notes).toEqual(['3 skins died unwon — no outright winner left'])
+    expect(skins.notes).toEqual(['3 skins died unwon — no hole left to win them'])
     // Nothing was won, so there are NO money lines — which is what lets the
     // settle panel still say "No money moved." truthfully, with the note
     // underneath explaining where the pot went.

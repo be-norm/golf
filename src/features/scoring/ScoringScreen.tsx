@@ -383,6 +383,20 @@ export function ScoringScreen() {
                     {s}
                   </p>
                 ))}
+                {/* A pot can die before anyone taps Finish — every hole scored
+                    and the last one tied is enough (ctx.finalized). This is the
+                    screen the group is looking at while deciding what's still
+                    live, so the money surface says it here too, not only on
+                    settle. Same tier as there: below the money, behind a rule. */}
+                {d.notes && d.notes.length > 0 && (
+                  <div className="mt-2.5 border-t border-stone-800 pt-2.5">
+                    {d.notes.map((note) => (
+                      <p key={note} className="text-stone-500">
+                        {note}
+                      </p>
+                    ))}
+                  </div>
+                )}
               </div>
             )
           })}

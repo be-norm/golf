@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import fc from 'fast-check'
 import '../games/index'
-import { deriveRound } from '../catalog'
+import { deriveRound, listEngines } from '../catalog'
 import { EventLog, makePlayers, makeRound } from '../test/harness'
 import { assertZeroSum, minimalTransfers } from './money'
 import type { RoundEvent } from './events'
@@ -128,11 +128,9 @@ describe('replay invariants (fast-check)', () => {
       fc.property(arbitraryRoundAndEvents(), ({ round, log }) => {
         const { derivations } = deriveRound(round, log.events)
         for (const [gameId, d] of derivations) {
-          // WOLF IS A KNOWN EXCEPTION, not a silently weakened rule. It
-          // itemises per-PLAYER points ("A — 3 pts") rather than per-transaction
-          // money, so a player who nets exactly zero still earns a row. Same
-          // category error this test exists to catch, but its fix changes how
-          // Wolf's settle panel reads, so it is its own ticket (MAI-75).
+          // WOLF IS A KNOWN EXCEPTION, not a silently weakened rule — see the
+          // test below, which fails the moment MAI-75 fixes it and so forces
+          // this skip to be deleted rather than outliving the bug it names.
           if (round.games.find((g) => g.gameId === gameId)?.type === 'wolf') continue
           for (const line of d.settlement.lines) {
             const moved = Object.values(line.perPlayerCents).some((c) => c !== 0)
@@ -141,6 +139,49 @@ describe('replay invariants (fast-check)', () => {
         }
       }),
     )
+  })
+
+  /**
+   * The fuzz builds its games by hand, so a newly registered engine would be
+   * invisible to every property above while CLAUDE.md tells its author a test
+   * enforces them. This fails the moment an engine is registered without being
+   * added to `arbitraryRoundAndEvents`.
+   */
+  it('the fuzz covers every registered engine', () => {
+    // Across samples, not within one round: Six Point is threesome-only while
+    // Wolf and Vegas need a foursome, so no single round can hold all five.
+    const seen = new Set(
+      fc
+        .sample(arbitraryRoundAndEvents(), { numRuns: 200 })
+        .flatMap(({ round }) => round.games.map((g) => g.type)),
+    )
+    expect(seen).toEqual(new Set(listEngines().map((e) => e.type)))
+  })
+
+  /**
+   * A KNOWN VIOLATION, asserted so it self-retires. Wolf itemises per-player
+   * points ("A — 3 pts") rather than per-transaction money, so a player whose
+   * points land on the average nets zero and still earns a settlement row.
+   *
+   * This test exists to fail when MAI-75 fixes that — at which point the Wolf
+   * skip in "every settlement line moves money" must be deleted, and this test
+   * with it. A bare `continue` up there would have quietly outlived the bug.
+   */
+  it('Wolf still emits zero-money settlement lines (MAI-75 — delete this when fixed)', () => {
+    const round = makeRound({
+      players: makePlayers([{ name: 'A' }, { name: 'B' }, { name: 'C' }, { name: 'D' }]),
+      holes: 'front9',
+      games: [
+        { type: 'wolf', config: { pointCents: 100, rotation: ['p-a', 'p-b', 'p-c', 'p-d'] } },
+      ],
+    })
+    // nothing scored: every player sits on 0 points, so every row moves $0
+    const { derivations } = deriveRound(round, new EventLog().events)
+    const lines = derivations.get('game-1')!.settlement.lines
+    expect(lines.length).toBeGreaterThan(0)
+    expect(
+      lines.every((l) => Object.values(l.perPlayerCents).every((c) => c === 0)),
+    ).toBe(true)
   })
 
   it('replay is deterministic: same events, same result', () => {
