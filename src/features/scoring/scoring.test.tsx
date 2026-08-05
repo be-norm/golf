@@ -214,11 +214,21 @@ describe('ScoringScreen', () => {
     // the money is real and visible mid-round, not deferred to the 9th green
     await userEvent.click(bar)
     expect(await screen.findByText('+$5')).toBeInTheDocument()
-    expect(screen.getByText('-$5')).toBeInTheDocument()
+    const owed = screen.getByText('-$5')
     expect(screen.getByText('F9 ✓3&2 · B9 AS · 18 ↑3')).toBeInTheDocument()
+
+    // An amount NEVER wraps. Sharing a row with three bets' worth of status
+    // broke "-$5" between the minus and the digits on a phone, so the row read
+    // as a player owing "$5" with a stray dash floating above it. The status
+    // line is what yields: it sits on its own line, not beside the money.
+    expect(owed.className).toContain('whitespace-nowrap')
+    expect(owed.parentElement!.textContent).not.toContain('F9 ✓3&2')
     await userEvent.keyboard('{Escape}')
 
-    // and a won bet is not a pressable one — only the overall is left
+    // With auto-press OFF (this fixture) nothing lives under the won front, so
+    // the segment drops off the offer entirely. Auto-press ON is the other
+    // story — see nassau N21, where the surviving press keeps F9 pressable and
+    // the offer has to say which bet is down.
     await userEvent.click(await pressButton())
     expect(await screen.findByRole('button', { name: /Press 18/ })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Press F9/ })).not.toBeInTheDocument()

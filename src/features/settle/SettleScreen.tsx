@@ -79,15 +79,16 @@ export function SettleScreen() {
               initial={{ opacity: 0, x: -12 }}
               animate={{ opacity: 1, x: 0 }}
               transition={{ delay: i * 0.15, duration: 0.12, ease: (t: number) => Math.ceil(t * 3) / 3 }}
-              className="flex items-center justify-between"
+              className="flex items-center justify-between gap-3"
             >
-              <span className="text-xl font-semibold">
+              <span className="min-w-0 truncate text-xl font-semibold">
                 <span className="font-display mr-2 text-[10px] text-stone-500">{i + 1}P</span>
                 {s.leader ? '🏆 ' : ''}
                 {s.name}
               </span>
+              {/* a long name yields; the amount never breaks mid-token */}
               <span
-                className={`font-display text-sm ${
+                className={`font-display shrink-0 whitespace-nowrap text-sm ${
                   s.cents > 0
                     ? 'text-felt-300'
                     : s.cents < 0

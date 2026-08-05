@@ -235,8 +235,11 @@ describe('nassau — golden fixtures (hand-verified)', () => {
     const d = deriveRound(alive, aliveLog.events).derivations.get('game-1')!
     const live = d.availableActions!()
     expect(live.map((a) => a.label)).toEqual(['Press F9', 'Press 18'])
-    // and the reason quoted is the LIVE press's deficit, not the dead parent's
-    expect(live[0]!.detail).toBe('Bob 1 down · 4 to play')
+    // The reason quoted is the LIVE press's deficit, not the dead parent's —
+    // and it SAYS so. Without naming the bet this offer reads "Press F9 · Bob
+    // 1 down" directly under a ledger line saying "F9 · Ann wins 5&4", which
+    // looks like the app forgot the match is over.
+    expect(live[0]!.detail).toBe('Bob 1 down on Press @5 · 4 to play')
     expect(d.detailLines).toEqual([
       { label: 'F9', value: 'Ann wins 5&4', depth: 0 },
       { label: 'Press @5', value: 'Ann ↑1 · 4 to play', depth: 1 },
@@ -377,6 +380,48 @@ describe('nassau — golden fixtures (hand-verified)', () => {
     expect(d.holeSummary(3)).toContain('18 press @3 starts (Ann 2 down → auto-press)')
     // and the one that closes says which one it was
     expect(d.holeSummary(6)).toContain('F9 press @3 closes — Bob wins 4&3')
+  })
+
+  /**
+   * N21: the reported screen. Auto-press ON, win h1–h3, halve h4–h7 — so the
+   * front auto-pressed at h3 (2 up at h2) and is then WON 3&2 at h7 while that
+   * press is still live and 1 down. Standing on the 8th tee the front is
+   * legitimately pressable: you press the bet you're down on, and that bet is
+   * the press, not the finished match.
+   *
+   * What must never happen is the offer saying "Press F9 · Colby 1 down"
+   * directly under a ledger reading "F9 · Benjamin wins 3&2" — two true
+   * statements that look like a contradiction because neither names its bet.
+   */
+  it('N21: an offer under a won parent says which bet is actually down', () => {
+    const players = makePlayers([{ name: 'Benjamin' }, { name: 'Colby' }])
+    const round = makeRound({ players, games: [game({ autoPress: true })] })
+    const log = new EventLog()
+    log.scoreByHole(
+      round,
+      { Benjamin: [4, 4, 4, 4, 4, 4, 4], Colby: [5, 5, 5, 4, 4, 4, 4] },
+      [1, 2, 3, 4, 5, 6, 7],
+    )
+    const d = deriveRound(round, log.events).derivations.get('game-1')!
+
+    // the front is won, and its press is still running
+    expect(d.detailLines![0]).toEqual({ label: 'F9', value: 'Benjamin wins 3&2', depth: 0 })
+    expect(d.detailLines![1]).toEqual({
+      label: 'Press @3',
+      value: 'Benjamin ↑1 · 2 to play',
+      depth: 1,
+    })
+
+    const offers = d.availableActions!()
+    expect(offers.map((a) => a.label)).toEqual(['Press F9', 'Press 18'])
+    // the front offer names the live press it is really about...
+    expect(offers[0]!.detail).toBe('Colby 1 down on Press @3 · 2 to play')
+    expect(offers[0]!.effect).toBe('New $5 bet · holes 8–9')
+    expect(offers[0]!.recommended).toBe(false)
+    // ...while the overall, whose own parent is the bet that's down, doesn't
+    // need naming and is at the 2-down convention, so it gets the nudge
+    expect(offers[1]!.detail).toBe('Colby 3 down · 11 to play')
+    expect(offers[1]!.recommended).toBe(true)
   })
 
   /**
@@ -825,7 +870,9 @@ describe('nassau — golden fixtures (hand-verified)', () => {
     // h3: the PARENTS were 2 down (Ann up 2) → Bob is the trailing side
     expect(d.holeSummary(3)).toContain('F9 press @3 starts (Bob 2 down → auto-press)')
     // h5: F9 itself is back to all square — the press @3 is what hit 2 down.
-    // Reading the parent alone would have printed "AS" as the reason.
-    expect(d.holeSummary(5)).toContain('F9 press @5 starts (Ann 2 down → auto-press)')
+    // Reading the parent alone would have printed "AS" as the reason, so the
+    // note NAMES the bet that was down. "Ann 2 down" beside a level F9 is the
+    // kind of line that gets an app argued with on the 5th tee.
+    expect(d.holeSummary(5)).toContain('F9 press @5 starts (Ann 2 down on Press @3 → auto-press)')
   })
 })

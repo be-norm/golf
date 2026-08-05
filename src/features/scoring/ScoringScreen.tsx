@@ -343,18 +343,25 @@ export function ScoringScreen() {
                     <DetailLines lines={d.detailLines} />
                   </div>
                 )}
+                {/* Name and money share the top line; the per-bet status gets
+                    its own beneath. Squeezing all three into one row wrapped a
+                    long name onto two lines and — worse — broke "-$5" between
+                    the minus and the digits, so a player read as owing "$5"
+                    with a stray dash above it. A currency amount never wraps:
+                    it is shrink-0 and nowrap, and the status line is what
+                    yields. Nassau's detail grew to three bets' worth of state
+                    ("F9 ✓3&2 · B9 AS · 18 ↑3"), which is what tipped it over. */}
                 <ul className="space-y-2">
                   {d.standings.map((line) => (
                     <motion.li
                       layout
                       key={line.id}
-                      className="pixel flex items-center justify-between border-stone-700 bg-stone-800/70 px-3.5 py-2.5"
+                      className="pixel border-stone-700 bg-stone-800/70 px-3.5 py-2.5"
                     >
-                      <span className="text-lg font-medium">{line.label}</span>
-                      <span className="flex items-baseline gap-2.5">
-                        {line.detail && <span className="text-stone-400">{line.detail}</span>}
+                      <div className="flex items-baseline justify-between gap-3">
+                        <span className="min-w-0 truncate text-lg font-medium">{line.label}</span>
                         <span
-                          className={`font-display text-xs ${
+                          className={`font-display shrink-0 whitespace-nowrap text-xs ${
                             line.amountCents > 0
                               ? 'text-felt-300'
                               : line.amountCents < 0
@@ -364,7 +371,10 @@ export function ScoringScreen() {
                         >
                           {formatCentsSigned(line.amountCents)}
                         </span>
-                      </span>
+                      </div>
+                      {line.detail && (
+                        <p className="mt-1 text-stone-400">{line.detail}</p>
+                      )}
                     </motion.li>
                   ))}
                 </ul>
