@@ -83,7 +83,7 @@ const {
   enqueueDeleteSavedCourse,
   flushOutbox,
 } = await import('./outbox')
-const { pull, pushSavedCourses, claimLocalData, countLocalGuestData } = await import('./sync')
+const { pull, pushSavedCourses, syncNow, claimLocalData, countLocalGuestData } = await import('./sync')
 
 const U = 'user-1'
 function setOnline(v: boolean) {
@@ -328,6 +328,41 @@ describe('saved courses', () => {
     await db.courses.put(course('c1', 'Broadmoor', '2026-08-01T00:00:00Z'))
     await pushSavedCourses(LOCAL_USER)
     expect(fake.tables.saved_courses).toHaveLength(0)
+  })
+
+  /**
+   * The multi-device case the whole feature exists for. `pushSavedCourses`
+   * re-asserts the entire local set, so a device still holding a course that
+   * was deleted elsewhere would clear its tombstone and hand it back to
+   * everyone. Pulling before pushing is what stops that.
+   */
+  it('a device that missed the removal does not resurrect the course', async () => {
+    // both devices have it; "device B" removes it and tombstones the row
+    await db.courses.put(course('c1', 'Broadmoor', '2026-08-01T00:00:00Z'))
+    await pushSavedCourses(U)
+    await enqueueDeleteSavedCourse(U, 'c1')
+    await drain()
+
+    // "device A" still has it locally and now syncs: pull must win over its set
+    // push, or the tombstone is cleared and the course comes back
+    await syncNow(U)
+
+    expect(await db.courses.get('c1')).toBeUndefined()
+    const row = fake.tables.saved_courses.find((r) => r.course_id === 'c1')
+    expect(row?.deleted_at).toBeTruthy()
+  })
+
+  it('re-saving a course after removing it beats the tombstone', async () => {
+    await db.courses.put(course('c1', 'Broadmoor', '2026-08-01T00:00:00Z'))
+    await pushSavedCourses(U)
+    await enqueueDeleteSavedCourse(U, 'c1')
+    await drain()
+
+    // changed their mind and saved it again — a newer intent than the deletion
+    await db.courses.put(course('c1', 'Broadmoor', '2099-01-01T00:00:00Z'))
+    await syncNow(U)
+
+    expect(await db.courses.get('c1')).toBeDefined()
   })
 
   it('claiming guest data takes the library with it', async () => {

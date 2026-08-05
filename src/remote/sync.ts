@@ -21,12 +21,17 @@ import { enqueuePushCourse, enqueuePushPlayer, enqueuePushRound, flushOutbox } f
 /** Flush pending pushes, then restore anything newer from the cloud. */
 export async function syncNow(userId: string): Promise<void> {
   if (userId === LOCAL_USER) return
-  // Order matters: removals (outbox tombstones) land BEFORE the library is
-  // reconciled up, so a course deleted on this device isn't re-uploaded by the
-  // very same sync that was meant to remove it.
+  // ORDER IS LOAD-BEARING, and it is pull-then-push for the library.
+  //
+  // `pushSavedCourses` re-asserts the whole local set, so a device that still
+  // holds a course someone deleted elsewhere would clear its tombstone and
+  // resurrect it for everyone. Pulling first makes that device honour the
+  // tombstone and drop the course locally, so the push that follows no longer
+  // contains it. (A removal made on THIS device is tombstoned by flushOutbox
+  // and survives its own pull — see applyRemoteCourseTombstone.)
   await flushOutbox()
-  await pushSavedCourses(userId)
   await pull(userId)
+  await pushSavedCourses(userId)
 }
 
 /**
@@ -55,7 +60,9 @@ export async function pushSavedCourses(userId: string): Promise<void> {
         course_id: c.id,
         data: c,
         updated_at: c.updatedAt,
-        // resurrects a course the user removed and then saved again
+        // Safe to clear a tombstone here ONLY because pull ran first: anything
+        // still local after that is either untouched or a genuine re-save, both
+        // of which should be live again.
         deleted_at: null,
       })),
       { onConflict: 'user_id,course_id' },
@@ -74,7 +81,10 @@ export async function pull(userId: string): Promise<void> {
         .select('round_id, data, updated_at, deleted_at')
         .eq('user_id', userId),
       supabase.from('players').select('*').eq('user_id', userId),
-      supabase.from('saved_courses').select('course_id, data, deleted_at').eq('user_id', userId),
+      supabase
+        .from('saved_courses')
+        .select('course_id, data, updated_at, deleted_at')
+        .eq('user_id', userId),
     ])
 
     for (const row of archivesRes.data ?? []) {
@@ -86,8 +96,9 @@ export async function pull(userId: string): Promise<void> {
       else await applyRemotePlayer(userId, row)
     }
     for (const row of coursesRes.data ?? []) {
-      if (row.deleted_at) await db.courses.delete(row.course_id as string)
-      else await applyRemoteCourse(row.data as Course)
+      if (row.deleted_at) {
+        await applyRemoteCourseTombstone(row.course_id as string, row.updated_at as string)
+      } else await applyRemoteCourse(row.data as Course)
     }
   } catch {
     // opportunistic — offline or transient failure just means no restore now
@@ -105,6 +116,18 @@ async function applyRemoteCourse(course: Course): Promise<void> {
   const local = await db.courses.get(course.id)
   if (local && local.updatedAt >= course.updatedAt) return
   await db.courses.put(course)
+}
+
+/**
+ * Honour a removal made on another device — unless this one has since SAVED the
+ * course again, which is a newer intent than the deletion and must survive.
+ * Same last-write-wins rule the rest of pull uses, with the tombstone's
+ * timestamp standing in for the row's.
+ */
+async function applyRemoteCourseTombstone(courseId: string, deletedAt: string): Promise<void> {
+  const local = await db.courses.get(courseId)
+  if (local && local.updatedAt > deletedAt) return
+  await db.courses.delete(courseId)
 }
 
 async function applyRemoteRound(
