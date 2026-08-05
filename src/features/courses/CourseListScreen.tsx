@@ -1,12 +1,26 @@
-import { Link, useNavigate } from 'react-router'
+import { useEffect, useState } from 'react'
+import { Link, useLocation, useNavigate } from 'react-router'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { courseRepo } from '../../db/repos'
+import { useAuth } from '../../auth/AuthProvider'
+import { CourseSourceMark } from '../../components/CourseSourceMark'
 import { CourseSearch } from './CourseSearch'
 import { ScanButton } from './ScanButton'
 
 export function CourseListScreen() {
   const navigate = useNavigate()
-  const courses = useLiveQuery(() => courseRepo.list())
+  const { activeUserId } = useAuth()
+  // the signed-in user's OWN library — on a shared phone each account sees
+  // only its own list (MAI-76)
+  const courses = useLiveQuery(() => courseRepo.list(activeUserId), [activeUserId])
+  // A fork (MAI-78) states its consequence here, after the fact — an
+  // unobtrusive line, never a blocking prompt. Captured once, then scrubbed
+  // from history state so a reload or back-navigation doesn't replay it.
+  const location = useLocation()
+  const [notice] = useState(() => (location.state as { notice?: string } | null)?.notice)
+  useEffect(() => {
+    if (notice) void navigate('/courses', { replace: true, state: null })
+  }, [notice, navigate])
 
   return (
     <main className="flex min-h-dvh flex-col gap-4 py-6">
@@ -17,6 +31,8 @@ export function CourseListScreen() {
         <h1 className="font-display text-xs uppercase text-felt-300">Courses</h1>
         <span className="w-12" />
       </header>
+
+      {notice && <p className="text-sm text-coin-400">{notice}</p>}
 
       <CourseSearch localIds={new Set(courses?.map((c) => c.id))} />
 
@@ -45,6 +61,7 @@ export function CourseListScreen() {
                 className="pixel block w-full border-stone-700 bg-stone-900/70 px-4 py-3 text-left"
               >
                 <span className="text-lg font-semibold">{c.name}</span>
+                <CourseSourceMark source={c.source} />
                 <span className="ml-2 text-stone-400">
                   {c.holeCount} holes{c.location ? ` · ${c.location}` : ''}
                 </span>

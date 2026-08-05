@@ -9,6 +9,16 @@ import type { GolfDB } from './schema'
  */
 export const LOCAL_USER = '@local'
 
+/**
+ * `Course.createdBy` marker for a library course whose author deleted their
+ * account (`courses.created_by` is `on delete set null`). Distinct from
+ * `undefined`, which on a source:'user' card means "authored on this device
+ * before createdBy existed — yours": an orphan is NOT yours, and editing it
+ * must fork (MAI-78), because the server row's NULL created_by fails the
+ * update RLS for everyone.
+ */
+export const ORPHANED_AUTHOR = '@orphaned'
+
 export function newId(): string {
   return uuidv7()
 }

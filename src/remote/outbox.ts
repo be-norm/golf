@@ -1,5 +1,10 @@
 import { db } from '../db/schema'
-import type { OutboxItem } from '../db/schema'
+import type {
+  DeleteSavedCoursePayload,
+  OutboxItem,
+  PushSavedCoursePayload,
+} from '../db/schema'
+import { setOutboxNotifier } from '../db/outboxSignal'
 import { getDeviceId, newId } from '../db/ids'
 import { eventStore } from '../db/eventStore'
 import type { Course, Player, Round } from '../engine/core/types'
@@ -167,6 +172,40 @@ async function send(item: OutboxItem, deviceId: string): Promise<boolean> {
         .eq('id', playerId)
       return !error
     }
+    case 'pushSavedCourse': {
+      const { userId, course, savedAt } = item.payload as PushSavedCoursePayload
+      // updated_at is the MEMBERSHIP clock — when this user saved it — never
+      // the card's own updatedAt (the card travels inside `data` with its own
+      // stamp; conflating the two was a review finding on the last attempt).
+      // deleted_at is deliberately omitted, exactly as round_archives does it:
+      // a re-push never clears a tombstone. A genuine re-save goes through this
+      // same path with a newer updated_at, and pull treats a row whose
+      // updated_at out-dates its deleted_at as live again.
+      const { error } = await supabase.from('saved_courses').upsert(
+        { user_id: userId, course_id: course.id, data: course, updated_at: savedAt },
+        { onConflict: 'user_id,course_id' },
+      )
+      return !error
+    }
+    case 'deleteSavedCourse': {
+      const { userId, courseId, removedAt } = item.payload as DeleteSavedCoursePayload
+      // Tombstone rather than delete, so a device that was offline learns the
+      // course was removed instead of pushing it back on its next sync.
+      // Stamped with when the USER removed it, not when this flush runs, and
+      // gated on lte: if the server row's updated_at is already newer, another
+      // device re-saved the course AFTER this removal — the removal is stale
+      // news and must leave the row alone. (For rounds/players a flush-time
+      // stamp is harmless because their tombstones are forever; here the
+      // deleted_at/updated_at ordering decides liveness, so the clock is
+      // load-bearing.)
+      const { error } = await supabase
+        .from('saved_courses')
+        .update({ deleted_at: removedAt, updated_at: removedAt })
+        .eq('user_id', userId)
+        .eq('course_id', courseId)
+        .lte('updated_at', removedAt)
+      return !error
+    }
     case 'pushCourse': {
       const { userId, course } = item.payload as PushCoursePayload
       // Shared, publicly-readable library row. created_by = the owner (RLS
@@ -197,6 +236,10 @@ async function send(item: OutboxItem, deviceId: string): Promise<boolean> {
 }
 
 export function registerOutboxFlush(): void {
+  // CourseRepo writes outbox rows inside its own transactions (atomic with the
+  // membership they describe) and signals here for the flush, so the db layer
+  // never imports the network stack.
+  setOutboxNotifier(() => void flushOutbox())
   window.addEventListener('online', () => void flushOutbox())
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') void flushOutbox()

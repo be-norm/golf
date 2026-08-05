@@ -18,6 +18,7 @@ import { PlayerSearch } from '../players/PlayerSearch'
 import type { GhinPlayerHit } from '../../remote/ghinSearch'
 import { RulesSheet } from '../games/RulesSheet'
 import { GameConfigCard, type GameDraft } from './GameConfigCard'
+import { CourseSourceMark } from '../../components/CourseSourceMark'
 
 interface PlayerDraft {
   /** stable id — game configs reference THIS, so list edits never remap teams */
@@ -42,7 +43,10 @@ function computeCourseHandicap(index: number, course: Course | undefined, tee: T
 export function SetupScreen() {
   const navigate = useNavigate()
   const { activeUserId } = useAuth()
-  const courses = useLiveQuery(() => courseRepo.list())
+  // the picker offers YOUR library (MAI-76) — which is also what makes
+  // "played there ⇒ it's in My Courses" hold by construction: a course can
+  // only be selected from this list, and search-import saves before selecting
+  const courses = useLiveQuery(() => courseRepo.list(activeUserId), [activeUserId])
   const roster = useLiveQuery(() => playerRepo.list(activeUserId), [activeUserId])
 
   const [step, setStep] = useState(0)
@@ -251,6 +255,7 @@ export function SetupScreen() {
                 }`}
               >
                 <span className="font-semibold">{c.name}</span>
+                <CourseSourceMark source={c.source} />
                 {c.location && <span className="ml-2 text-sm text-stone-400">{c.location}</span>}
               </button>
             ))}

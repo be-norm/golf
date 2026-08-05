@@ -50,5 +50,23 @@ export default tseslint.config(
       ],
     },
   },
+  {
+    // MAI-76: saved-course membership has ONE write path. CourseRepo pairs
+    // every `saved_courses` write with its outbox push in a single transaction;
+    // reaching for db.saved_courses directly is exactly how the feature
+    // silently stopped syncing twice. Tests may seed state directly.
+    files: ['src/**/*.{ts,tsx}'],
+    ignores: ['src/db/**', 'src/**/*.test.{ts,tsx}'],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: "MemberExpression[property.name='saved_courses']",
+          message:
+            'saved_courses is written only through CourseRepo (src/db/repos.ts) — membership and its sync push must stay atomic (MAI-76)',
+        },
+      ],
+    },
+  },
   prettier,
 )

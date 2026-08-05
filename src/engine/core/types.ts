@@ -41,6 +41,14 @@ export interface Course {
   holes: HoleCore[]
   teeSets: TeeSet[]
   source: 'seed' | 'user' | 'remote'
+  /**
+   * Who authored this card: an auth uid, or the guest sentinel while signed
+   * out. Absent on API/seed imports and on legacy user cards. Ownership — not
+   * provenance (`source`) — decides whether an edit updates in place or forks:
+   * an imported copy of another golfer's course is `source:'user'` but still
+   * theirs, and the server refuses updates to rows you didn't create (MAI-78).
+   */
+  createdBy?: string
   updatedAt: string
   revision: number
 }

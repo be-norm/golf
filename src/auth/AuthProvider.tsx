@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useMemo, useState, type ReactNode
 import type { Session, User } from '@supabase/supabase-js'
 import { supabase } from '../remote/supabase'
 import { LOCAL_USER } from '../db/ids'
-import { syncNow } from '../remote/sync'
+import { adoptDeviceLibrary, syncNow } from '../remote/sync'
 import { deleteAccount as deleteAccountEverywhere } from '../remote/deleteAccount'
 
 export interface AuthValue {
@@ -45,6 +45,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (!active) return
         setSession(data.session)
         setLoading(false)
+        // Consume the one-shot library-adoption flag (MAI-76) now that we know
+        // who this device's first post-upgrade launch belongs to. Deliberately
+        // NOT in the catch below: a failed session read must not decide the
+        // pre-upgrade library was guest data.
+        void adoptDeviceLibrary(data.session?.user?.id ?? LOCAL_USER)
       })
       .catch(() => {
         // Never brick the boot on a session-read failure — fall back to guest.

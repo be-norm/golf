@@ -72,8 +72,9 @@ Only possible within 30 days, and only via the SQL editor with service-role acce
 
 ```sql
 select original_user_id, email, deleted_at,
-       jsonb_array_length(payload->'rounds')  as rounds,
-       jsonb_array_length(payload->'players') as players
+       jsonb_array_length(payload->'rounds')       as rounds,
+       jsonb_array_length(payload->'players')      as players,
+       jsonb_array_length(payload->'savedCourses') as saved_courses
 from deleted_account_archives
 where email = 'them@example.com'
 order by deleted_at desc;
@@ -116,10 +117,26 @@ from deleted_account_archives a,
 where a.original_user_id = '<ORIGINAL_USER_ID>';
 ```
 
-**5. Have them pull.** Signing out and back in triggers `syncNow`, which pulls the restored
-rows down. Confirm with them that their rounds are actually back before closing it out.
+**5. Re-key the saved course library.** The course id is kept as-is — it is the card's own
+id (sometimes a provider string like `gca:9`, which is why the column is text), not a
+per-account one. Archives from before MAI-76 shipped have no `savedCourses` key; skip this
+step for those.
 
-**6. Delete the archive row**, so the restored data isn't also sitting in a PII table waiting
+```sql
+insert into saved_courses (user_id, course_id, data, updated_at)
+select '<NEW_UID>', c->>'course_id', c->'data', now()
+from deleted_account_archives a,
+     jsonb_array_elements(a.payload->'savedCourses') c
+where a.original_user_id = '<ORIGINAL_USER_ID>'
+on conflict (user_id, course_id) do nothing;
+```
+
+**6. Have them pull.** Signing out and back in triggers `syncNow`, which pulls the restored
+rows down. Confirm with them that their rounds AND their course list are actually back
+before closing it out — a reinstatement that returns rounds against an empty library is the
+half-restore this step exists to catch.
+
+**7. Delete the archive row**, so the restored data isn't also sitting in a PII table waiting
 on the purge.
 
 ```sql

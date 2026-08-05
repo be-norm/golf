@@ -5,6 +5,8 @@ import {
   searchCourses,
   type CourseSearchHit,
 } from '../../remote/courseSearch'
+import { useAuth } from '../../auth/AuthProvider'
+import { CourseSourceMark } from '../../components/CourseSourceMark'
 
 interface Props {
   /** ids already in the local library — shown as saved, not re-importable */
@@ -20,6 +22,7 @@ interface Props {
  * the local library for offline use.
  */
 export function CourseSearch({ localIds, onImported, placeholder }: Props) {
+  const { activeUserId } = useAuth()
   const [query, setQuery] = useState('')
   const [hits, setHits] = useState<CourseSearchHit[]>()
   const [searching, setSearching] = useState(false)
@@ -54,7 +57,7 @@ export function CourseSearch({ localIds, onImported, placeholder }: Props) {
     setImporting(hit.id)
     setError(undefined)
     try {
-      const course = await importCourseHit(hit)
+      const course = await importCourseHit(activeUserId, hit)
       setQuery('')
       setHits(undefined)
       onImported?.(course)
@@ -90,12 +93,11 @@ export function CourseSearch({ localIds, onImported, placeholder }: Props) {
                 >
                   <span className="min-w-0 truncate">
                     <span className="text-lg font-semibold">{h.name}</span>
+                    {/* the one shared mark (MAI-77) — this used to be its own
+                        wording here and nothing at all on the two screens you
+                        actually pick from */}
+                    <CourseSourceMark source={h.source} />
                     {h.location && <span className="ml-2 text-stone-400">{h.location}</span>}
-                    {h.source === 'user' && (
-                      <span className="ml-2 whitespace-nowrap text-xs text-felt-400">
-                        · added by a golfer
-                      </span>
-                    )}
                   </span>
                   <span className="ml-2 shrink-0 text-lg text-felt-400">
                     {localIds.has(h.id) ? 'saved ✓' : importing === h.id ? '…' : '+ add'}

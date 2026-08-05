@@ -6,7 +6,10 @@ import { createMemoryRouter, RouterProvider } from 'react-router'
 import '../../engine/games'
 import type { Course } from '../../engine/core/types'
 import { db } from '../../db/schema'
+import { LOCAL_USER } from '../../db/ids'
 import { routes } from '../../app/routes'
+
+const SAVED_AT = '2026-08-01T00:00:00.000Z'
 
 /**
  * Penmar exactly as OpenGolfAPI serves it: 9 holes, par 33, slope 103, and NO
@@ -45,6 +48,9 @@ const eighteen: Course = {
 /** Step 0: land on setup and pick Penmar (which auto-selects its only tee). */
 async function pickPenmar() {
   await db.courses.put(penmar)
+  // the picker lists the SIGNED-IN USER's library, so a seeded card needs
+  // membership too — course data is shared, keeping it is owned (MAI-76)
+  await db.saved_courses.put({ userId: LOCAL_USER, courseId: penmar.id, updatedAt: SAVED_AT })
   const router = createMemoryRouter(routes, { initialEntries: ['/setup'] })
   render(<RouterProvider router={router} />)
   await userEvent.click(await screen.findByText('Penmar Golf Course'))
@@ -114,6 +120,10 @@ describe('SetupScreen — 9-hole courses', () => {
 
   it('resets the hole range when switching from a nine to an eighteen', async () => {
     await db.courses.bulkPut([penmar, eighteen])
+    await db.saved_courses.bulkPut([
+      { userId: LOCAL_USER, courseId: penmar.id, updatedAt: SAVED_AT },
+      { userId: LOCAL_USER, courseId: eighteen.id, updatedAt: SAVED_AT },
+    ])
     const router = createMemoryRouter(routes, { initialEntries: ['/setup'] })
     render(<RouterProvider router={router} />)
 
@@ -138,6 +148,7 @@ describe('SetupScreen — 9-hole courses', () => {
 
   it('halves the strokes when only the front 9 of an 18-hole course is played', async () => {
     await db.courses.put(eighteen)
+    await db.saved_courses.put({ userId: LOCAL_USER, courseId: eighteen.id, updatedAt: SAVED_AT })
     const router = createMemoryRouter(routes, { initialEntries: ['/setup'] })
     render(<RouterProvider router={router} />)
 

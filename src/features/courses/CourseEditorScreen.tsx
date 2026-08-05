@@ -106,24 +106,56 @@ export function CourseEditorScreen() {
     course.teeSets.length > 0 && course.teeSets.every((t) => t.name.trim()) && !misratedTee
 
   const save = async () => {
-    // Publish to the shared library only for genuinely user-authored courses:
-    // a brand-new course (manual or scanned) or one that was already 'user'.
-    // Editing an imported (seed/API) course saves locally but is NOT republished.
-    const publishable = isNew || existing?.source === 'user'
-    await courseRepo.put({
+    // FORKING A COURSE THAT ISN'T OURS (MAI-78). Correcting an API or seed
+    // card used to save locally and stop there, so the golfer who actually
+    // plays there — the one who knows the stroke indexes are wrong — kept the
+    // fix to themselves forever. It has to be a fork rather than an edit of
+    // the shared row: RLS only lets a user update rows they created (rightly —
+    // the alternative is anyone rewriting any course), and the original's ODbL
+    // provenance has to survive. OWNERSHIP decides, not `source`: an imported
+    // copy of another golfer's course is source:'user' but still theirs, and
+    // pushing an edit onto their row dies silently against RLS. Legacy cards
+    // authored here before `createdBy` existed count as ours. No modal in any
+    // case (decided on MAI-78): when overwrite is possible it's obviously what
+    // you want, and when it isn't, a prompt would offer something the server
+    // refuses — so your own updates in place silently, anyone else's forks
+    // silently and the list screen states the consequence after the fact.
+    const ownedByMe =
+      existing == null ||
+      existing.createdBy === activeUserId ||
+      (existing.createdBy === undefined && existing.source === 'user')
+    const forking = !isNew && !ownedByMe
+    const saved = await courseRepo.save(activeUserId, {
       ...course,
+      id: forking ? newId() : course.id,
       name: course.name.trim(),
       source: 'user',
+      createdBy: activeUserId,
+      // a fork is a new course, not revision N+1 of somebody else's
+      revision: forking ? 0 : course.revision,
     })
-    if (!isGuest && publishable) {
-      const saved = await courseRepo.get(course.id)
-      if (saved) await enqueuePushCourse(activeUserId, saved)
+    if (forking) {
+      // The corrected card replaces the original in THIS library — nobody
+      // wants both rows for the same place in their own list. The repo drops
+      // membership, queues the tombstone and GCs the orphaned card atomically.
+      await courseRepo.remove(activeUserId, course.id)
     }
-    navigate('/courses')
+    // After the save this is our own user-authored card either way — an
+    // in-place update of our row, or a fresh fork RLS accepts. Guests publish
+    // at claim time instead.
+    if (!isGuest) await enqueuePushCourse(activeUserId, saved)
+    navigate(
+      '/courses',
+      forking
+        ? { state: { notice: `Saved as your version of ${saved.name || 'this course'}.` } }
+        : undefined,
+    )
   }
 
   const remove = async () => {
-    await courseRepo.delete(course.id)
+    // membership drop + tombstone are one transaction inside the repo, so a
+    // crash between them can't remove the course locally with nothing queued
+    await courseRepo.remove(activeUserId, course.id)
     navigate('/courses')
   }
 

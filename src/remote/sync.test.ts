@@ -1,9 +1,9 @@
 import 'fake-indexeddb/auto'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Round } from '../engine/core/types'
-import { db } from '../db/schema'
+import type { Course, Round } from '../engine/core/types'
+import { ADOPT_LIBRARY_KEY, db } from '../db/schema'
 import { LOCAL_USER, newId } from '../db/ids'
-import { roundRepo } from '../db/repos'
+import { courseRepo, roundRepo } from '../db/repos'
 
 // In-memory Supabase double supporting exactly the chains outbox/sync use:
 //   from(t).upsert(v, {onConflict})           → merge by conflict cols
@@ -11,9 +11,18 @@ import { roundRepo } from '../db/repos'
 //   from(t).select('…').eq('user_id', uid)    → filtered rows
 const fake = vi.hoisted(() => {
   type Row = Record<string, unknown>
-  const tables: { round_archives: Row[]; players: Row[] } = { round_archives: [], players: [] }
+  const tables: { round_archives: Row[]; players: Row[]; saved_courses: Row[] } = {
+    round_archives: [],
+    players: [],
+    saved_courses: [],
+  }
   function from(table: string) {
-    const rows = table === 'players' ? tables.players : tables.round_archives
+    const rows =
+      table === 'players'
+        ? tables.players
+        : table === 'saved_courses'
+          ? tables.saved_courses
+          : tables.round_archives
     return {
       upsert(values: Record<string, unknown>, opts?: { onConflict?: string }) {
         const cols = (opts?.onConflict ?? 'id').split(',')
@@ -24,13 +33,26 @@ const fake = vi.hoisted(() => {
       },
       update(patch: Record<string, unknown>) {
         const filters: [string, unknown][] = []
+        const lte: [string, string][] = []
         const b = {
           eq(c: string, v: unknown) {
             filters.push([c, v])
             return b
           },
+          lte(c: string, v: unknown) {
+            lte.push([c, v as string])
+            return b
+          },
           then(res: (r: { error: null }) => void) {
-            for (const r of rows) if (filters.every(([c, v]) => r[c] === v)) Object.assign(r, patch)
+            for (const r of rows) {
+              if (
+                filters.every(([c, v]) => r[c] === v) &&
+                // timestamptz comparison, as Postgres would do it
+                lte.every(([c, v]) => Date.parse(r[c] as string) <= Date.parse(v))
+              ) {
+                Object.assign(r, patch)
+              }
+            }
             res({ error: null })
           },
         }
@@ -58,6 +80,7 @@ const fake = vi.hoisted(() => {
     reset() {
       tables.round_archives = []
       tables.players = []
+      tables.saved_courses = []
     },
   }
 })
@@ -69,7 +92,8 @@ const {
   enqueueDeleteRound,
   flushOutbox,
 } = await import('./outbox')
-const { pull, claimLocalData, countLocalGuestData } = await import('./sync')
+const { pull, syncNow, adoptDeviceLibrary, claimLocalData, countLocalGuestData } =
+  await import('./sync')
 
 const U = 'user-1'
 function setOnline(v: boolean) {
@@ -108,7 +132,15 @@ function round(userId: string, status: Round['status'], id: string, updatedAt: s
 beforeEach(async () => {
   fake.reset()
   setOnline(true)
-  await Promise.all([db.rounds.clear(), db.players.clear(), db.round_events.clear(), db.outbox.clear()])
+  await Promise.all([
+    db.rounds.clear(),
+    db.players.clear(),
+    db.round_events.clear(),
+    db.outbox.clear(),
+    db.courses.clear(),
+    db.saved_courses.clear(),
+    db.meta.clear(),
+  ])
 })
 
 describe('push', () => {
@@ -218,18 +250,276 @@ describe('claim', () => {
     await db.rounds.put(round(LOCAL_USER, 'live', 'gr2', 'g2'))
     await db.players.put({ id: 'gp1', userId: LOCAL_USER, name: 'Ben', updatedAt: 'g' })
 
-    expect(await countLocalGuestData()).toEqual({ rounds: 2, players: 1 })
+    // courses counted too — the prompt must name everything it will claim
+    expect(await countLocalGuestData()).toEqual({ rounds: 2, players: 1, courses: 0 })
 
     const res = await claimLocalData(U)
     await drain()
-    expect(res).toEqual({ rounds: 2, players: 1 })
+    expect(res).toEqual({ rounds: 2, players: 1, courses: 0 })
 
     expect((await roundRepo.get('gr1'))?.userId).toBe(U)
     expect((await db.players.get('gp1'))?.userId).toBe(U)
-    expect(await countLocalGuestData()).toEqual({ rounds: 0, players: 0 })
+    expect(await countLocalGuestData()).toEqual({ rounds: 0, players: 0, courses: 0 })
 
     // only the completed guest round is pushed; the live one stays local
     expect(fake.tables.round_archives.map((r) => r.round_id)).toEqual(['gr1'])
     expect(fake.tables.players.map((p) => p.id)).toEqual(['gp1'])
+  })
+})
+
+/**
+ * The saved library is user data, not device data (MAI-76). Saving a course
+ * used to mean saving it on THAT PHONE: `pull` restored rounds and players and
+ * nothing else, so clearing storage brought the round history back to an empty
+ * course list. These tests are all multi-device: "another device" is simulated
+ * by clearing the local Dexie tables while the fake server keeps its rows.
+ */
+describe('saved courses', () => {
+  const course = (
+    id: string,
+    name: string,
+    source: Course['source'] = 'remote',
+    extra: Partial<Course> = {},
+  ): Course => ({
+    id,
+    name,
+    holeCount: 18,
+    holes: [],
+    teeSets: [],
+    source,
+    updatedAt: '2026-08-01T00:00:00.000Z',
+    revision: 0,
+    ...extra,
+  })
+
+  /** Save through the one write path and flush — what a real device does. */
+  async function saveAndPush(userId: string, c: Course): Promise<Course> {
+    const stored = await courseRepo.save(userId, c)
+    await drain()
+    return stored
+  }
+
+  /** Simulate signing in on a different (or storage-cleared) device. */
+  async function freshDevice() {
+    await Promise.all([db.courses.clear(), db.saved_courses.clear(), db.outbox.clear()])
+  }
+
+  it('restores the library — with full scorecards — on a device that has never seen it', async () => {
+    await saveAndPush(U, {
+      ...course('c-scan', 'Muni Nobody Has', 'user'),
+      holes: [{ number: 1, par: 4, strokeIndex: 1 }],
+      teeSets: [{ id: 't', name: 'White', rating: 70, slope: 120 }],
+    })
+
+    await freshDevice()
+    await pull(U)
+
+    // the card came from saved_courses.data itself — this course exists in no
+    // shared library (scanned cards never do), so a foreign key would have
+    // had nothing to restore from
+    const restored = await db.courses.get('c-scan')
+    expect(restored?.holes).toHaveLength(1)
+    expect(restored?.teeSets[0]?.name).toBe('White')
+    expect(await db.saved_courses.get([U, 'c-scan'])).toBeDefined()
+  })
+
+  it('round-trips a non-uuid provider id (GolfCourseAPI mints `gca:` ids)', async () => {
+    // the REAL guard is saved_courses.course_id being text — a uuid column
+    // rejected `gca:9` and, pushed as one array upsert, silently killed the
+    // entire library's sync (attempt one); this pins the id arriving verbatim
+    await saveAndPush(U, course('gca:9', 'Namespaced'))
+    expect(fake.tables.saved_courses.map((r) => r.course_id)).toEqual(['gca:9'])
+
+    await freshDevice()
+    await pull(U)
+    expect((await courseRepo.list(U)).map((c) => c.id)).toEqual(['gca:9'])
+  })
+
+  it('pushes the MEMBERSHIP clock, not the card’s own stamp', async () => {
+    await courseRepo.save(LOCAL_USER, course('c1', 'Broadmoor'))
+    // age the CARD: last edited long ago — but the user claims it TODAY, and
+    // it is the claim that must win LWW against e.g. an old tombstone. The
+    // last attempt pushed the card's stamp as the membership clock, so every
+    // LWW decision downstream compared the wrong event.
+    await db.courses.update('c1', { updatedAt: '2020-01-01T00:00:00.000Z' })
+    await claimLocalData(U)
+    await drain()
+
+    const row = fake.tables.saved_courses[0]!
+    expect(row.updated_at).not.toBe('2020-01-01T00:00:00.000Z')
+    // …while the card inside `data` keeps its own, older stamp
+    expect((row.data as Course).updatedAt).toBe('2020-01-01T00:00:00.000Z')
+  })
+
+  it('a removal propagates to a device that missed it', async () => {
+    await saveAndPush(U, course('c1', 'Broadmoor'))
+    // device B learns about the course
+    await freshDevice()
+    await pull(U)
+    expect(await db.saved_courses.get([U, 'c1'])).toBeDefined()
+
+    // device A (simulated by direct repo calls) removes it; B still has it
+    await courseRepo.remove(U, 'c1')
+    await drain()
+    await db.saved_courses.put({ userId: U, courseId: 'c1', updatedAt: '2026-08-01T00:00:00.000Z' })
+    await db.courses.put(course('c1', 'Broadmoor'))
+
+    await syncNow(U)
+    expect(await db.saved_courses.get([U, 'c1'])).toBeUndefined()
+    // the tombstone row stays server-side for the NEXT stale device
+    expect(fake.tables.saved_courses[0]!.deleted_at).toBeTruthy()
+  })
+
+  /**
+   * The forever-tombstone defect from the last review: the tombstone gate
+   * compared against LOCAL membership, which a fresh device doesn't have, so
+   * remove-then-re-save stayed dead on every other device forever. The gate is
+   * now deleted_at >= updated_at on the row itself.
+   */
+  it('re-saving after a removal beats the tombstone — including on a fresh device', async () => {
+    await saveAndPush(U, course('c1', 'Broadmoor'))
+    await courseRepo.remove(U, 'c1')
+    await drain()
+
+    // changed their mind. The pause matters: a tombstone row has
+    // deleted_at == updated_at, so LWW ties go to the removal — the re-save
+    // must actually be LATER, which outside a test it always is.
+    await new Promise((r) => setTimeout(r, 5))
+    await saveAndPush(U, course('c1', 'Broadmoor'))
+
+    await freshDevice()
+    await pull(U)
+    expect(await db.saved_courses.get([U, 'c1'])).toBeDefined()
+  })
+
+  it('a plain tombstone stays dead on a fresh device', async () => {
+    await saveAndPush(U, course('c1', 'Broadmoor'))
+    await courseRepo.remove(U, 'c1')
+    await drain()
+
+    await freshDevice()
+    await pull(U)
+    expect(await db.saved_courses.get([U, 'c1'])).toBeUndefined()
+  })
+
+  it('a pull racing an un-flushed removal does not resurrect the course', async () => {
+    await saveAndPush(U, course('c1', 'Broadmoor'))
+    await courseRepo.remove(U, 'c1') // tombstone queued, NOT flushed
+    await pull(U) // server still shows the course as live
+
+    expect(await db.saved_courses.get([U, 'c1'])).toBeUndefined()
+    await drain()
+    await pull(U)
+    expect(await db.saved_courses.get([U, 'c1'])).toBeUndefined()
+  })
+
+  it('an offline removal that flushes late does not kill a NEWER save from another device', async () => {
+    await saveAndPush(U, course('c1', 'Broadmoor'))
+    // removal queued while offline — it will flush LATER than it happened
+    await courseRepo.remove(U, 'c1')
+
+    // meanwhile another device re-saves the course, after the removal
+    await new Promise((r) => setTimeout(r, 5))
+    Object.assign(fake.tables.saved_courses[0]!, { updated_at: new Date().toISOString() })
+
+    await syncNow(U)
+
+    // the tombstone carries the REMOVAL time and is lte-gated, so it matched
+    // nothing (stamping it at flush time was a review finding: Monday's
+    // removal, flushed Wednesday, would have killed Tuesday's save) — and the
+    // pull hands the newer save back to this device
+    expect(fake.tables.saved_courses[0]!.deleted_at).toBeFalsy()
+    expect(await db.saved_courses.get([U, 'c1'])).toBeDefined()
+  })
+
+  it('two users keep the same course independently', async () => {
+    await saveAndPush(U, course('c1', 'Broadmoor'))
+    await saveAndPush('user-2', course('c1', 'Broadmoor'))
+    await courseRepo.remove(U, 'c1')
+    await drain()
+
+    const rows = fake.tables.saved_courses
+    expect(rows.find((r) => r.user_id === U)!.deleted_at).toBeTruthy()
+    expect(rows.find((r) => r.user_id === 'user-2')!.deleted_at).toBeFalsy()
+  })
+
+  it('stays local for a guest — nothing is pushed while signed out', async () => {
+    await courseRepo.save(LOCAL_USER, course('c1', 'Broadmoor'))
+    await drain()
+    await syncNow(LOCAL_USER)
+    expect(fake.tables.saved_courses).toHaveLength(0)
+  })
+
+  it('claiming guest data re-keys the library to the account and pushes it', async () => {
+    await courseRepo.save(LOCAL_USER, course('c1', 'Broadmoor'))
+    expect(await countLocalGuestData()).toEqual({ rounds: 0, players: 0, courses: 1 })
+
+    const res = await claimLocalData(U)
+    await drain()
+
+    expect(res.courses).toBe(1)
+    expect(await db.saved_courses.get([LOCAL_USER, 'c1'])).toBeUndefined()
+    expect(await db.saved_courses.get([U, 'c1'])).toBeDefined()
+    expect(fake.tables.saved_courses.map((r) => r.course_id)).toEqual(['c1'])
+  })
+
+  it('claim publishes guest-authored cards under the account, not other users’ cards', async () => {
+    await courseRepo.save(LOCAL_USER, course('mine', 'Scanned Muni', 'user'))
+    await db.courses.put(course('theirs', 'Their Fork', 'user', { createdBy: 'someone-else' }))
+
+    await claimLocalData(U)
+
+    expect((await db.courses.get('mine'))?.createdBy).toBe(U)
+    expect((await db.courses.get('theirs'))?.createdBy).toBe('someone-else')
+  })
+})
+
+/**
+ * One-shot adoption of the pre-MAI-76 library (the Dexie v3 upgrade arms the
+ * flag; db.test.ts covers the upgrade itself).
+ */
+describe('adoptDeviceLibrary', () => {
+  const seedPreUpgradeLibrary = async () => {
+    await db.courses.put({
+      id: 'c-old',
+      name: 'Pre-upgrade CC',
+      holeCount: 18,
+      holes: [],
+      teeSets: [],
+      source: 'remote',
+      updatedAt: '2026-08-01T00:00:00.000Z',
+      revision: 1,
+    })
+    await db.saved_courses.put({
+      userId: LOCAL_USER,
+      courseId: 'c-old',
+      updatedAt: '2026-08-01T00:00:00.000Z',
+    })
+    await db.meta.put({ key: ADOPT_LIBRARY_KEY, value: '1' })
+  }
+
+  it('signed in: adopts the device library into the account, once', async () => {
+    await seedPreUpgradeLibrary()
+    await adoptDeviceLibrary(U)
+    await drain()
+
+    expect(await db.saved_courses.get([U, 'c-old'])).toBeDefined()
+    expect(await db.saved_courses.get([LOCAL_USER, 'c-old'])).toBeUndefined()
+    expect(fake.tables.saved_courses.map((r) => r.course_id)).toEqual(['c-old'])
+    // one-shot: a later launch (or a different account) adopts nothing
+    expect(await db.meta.get(ADOPT_LIBRARY_KEY)).toBeUndefined()
+  })
+
+  it('guest: consumes the flag and leaves the library to the claim prompt', async () => {
+    await seedPreUpgradeLibrary()
+    await adoptDeviceLibrary(LOCAL_USER)
+    await drain()
+
+    expect(await db.saved_courses.get([LOCAL_USER, 'c-old'])).toBeDefined()
+    expect(fake.tables.saved_courses).toHaveLength(0)
+    // the flag must die here — armed until some future sign-in, it would
+    // silently absorb a DIFFERENT person's library
+    expect(await db.meta.get(ADOPT_LIBRARY_KEY)).toBeUndefined()
+    expect((await countLocalGuestData()).courses).toBe(1)
   })
 })

@@ -24,8 +24,9 @@ vi.mock('../../remote/supabase', () => ({ supabase: { auth: authMock.auth } }))
 // a partial mock here leaves it calling `undefined` and crashes the whole tree.
 vi.mock('../../remote/sync', () => ({
   syncNow: vi.fn(async () => {}),
-  countLocalGuestData: vi.fn(async () => ({ rounds: 0, players: 0 })),
-  claimLocalData: vi.fn(async () => ({ rounds: 0, players: 0 })),
+  adoptDeviceLibrary: vi.fn(async () => {}),
+  countLocalGuestData: vi.fn(async () => ({ rounds: 0, players: 0, courses: 0 })),
+  claimLocalData: vi.fn(async () => ({ rounds: 0, players: 0, courses: 0 })),
 }))
 vi.mock('../../remote/deleteAccount', () => ({ deleteAccount: deleteAccountMock }))
 

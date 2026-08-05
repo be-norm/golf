@@ -83,13 +83,28 @@ describe('wipeUserData', () => {
     expect(await db.rounds.where('userId').equals(UID).count()).toBe(0)
   })
 
-  it('keeps courses — the library is shared, and the server only nulls authorship', async () => {
-    await db.courses.put(makeCourse([4, 4, 5], [2, 1, 3]))
-    await seedRound(db, UID)
+  it('drops the owner’s library; cards survive only while something still references them', async () => {
+    const base = makeCourse([4, 4, 5], [2, 1, 3])
+    await db.courses.bulkPut([
+      { ...base, id: 'course-shared' },
+      { ...base, id: 'course-only-mine' },
+    ])
+    await db.saved_courses.bulkPut([
+      { userId: UID, courseId: 'course-shared', updatedAt: 't' },
+      { userId: LOCAL_USER, courseId: 'course-shared', updatedAt: 't' },
+      { userId: UID, courseId: 'course-only-mine', updatedAt: 't' },
+    ])
 
     await wipeUserData(UID, db)
 
-    expect(await db.courses.count()).toBe(1)
+    // the deleted account's membership is gone (it cascades away server-side,
+    // and leaving it would show their library to whoever signs in next)…
+    expect(await db.saved_courses.where('userId').equals(UID).count()).toBe(0)
+    // …the guest's copy of the shared card survives, card and all…
+    expect(await db.saved_courses.get([LOCAL_USER, 'course-shared'])).toBeDefined()
+    expect(await db.courses.get('course-shared')).toBeDefined()
+    // …and a card only the deleted account referenced is GC'd with it
+    expect(await db.courses.get('course-only-mine')).toBeUndefined()
   })
 
   it('drops queued outbox ops for the deleted user, keeping everyone else’s', async () => {
