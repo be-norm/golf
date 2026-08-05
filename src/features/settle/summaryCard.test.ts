@@ -132,13 +132,13 @@ describe('buildSummaryCard', () => {
     log.append({ type: 'round/completed' })
 
     const skins = card(round, log).games[0]!
-    // no detailLines, so the settle panel is built from settlement lines —
-    // without the dead-pot line this panel would read "No money moved." and
-    // never account for the two skins the group put up
+    // Nothing was won, so the money panel is genuinely empty and the screen's
+    // "No money moved." is TRUE — while the note underneath still accounts for
+    // the two skins the group put up. Before MAI-40 the note was a $0 money
+    // line, which made "no money moved" false on a round where none did.
     expect(skins.kind).toBe('lines')
-    expect(skins.lines.map((l) => l.value)).toEqual([
-      '2 skins died unwon — no outright winner left',
-    ])
+    expect(skins.lines).toEqual([])
+    expect(skins.notes).toEqual(['2 skins died unwon — no outright winner left'])
   })
 
   it('falls back to settlement lines for games without a ledger', () => {

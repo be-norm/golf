@@ -113,6 +113,36 @@ describe('replay invariants (fast-check)', () => {
     )
   })
 
+  /**
+   * `settlement.lines` is the record of money that MOVED. A zero-cent row in it
+   * is a category error: it makes `lines.length === 0` — the settle screen's
+   * "No money moved." signal — false for a round where no money moved, and it
+   * hands every consumer that counts or sums lines a phantom entry.
+   *
+   * Skins broke this reaching for somewhere to say "3 skins died unwon"; the
+   * fix was a `notes` channel on the derivation, and this is the guard that
+   * keeps the next game from reaching for the same shortcut (MAI-40).
+   */
+  it('every settlement line moves money', () => {
+    fc.assert(
+      fc.property(arbitraryRoundAndEvents(), ({ round, log }) => {
+        const { derivations } = deriveRound(round, log.events)
+        for (const [gameId, d] of derivations) {
+          // WOLF IS A KNOWN EXCEPTION, not a silently weakened rule. It
+          // itemises per-PLAYER points ("A — 3 pts") rather than per-transaction
+          // money, so a player who nets exactly zero still earns a row. Same
+          // category error this test exists to catch, but its fix changes how
+          // Wolf's settle panel reads, so it is its own ticket (MAI-75).
+          if (round.games.find((g) => g.gameId === gameId)?.type === 'wolf') continue
+          for (const line of d.settlement.lines) {
+            const moved = Object.values(line.perPlayerCents).some((c) => c !== 0)
+            expect(moved, `settlement line moved nothing: "${line.label}"`).toBe(true)
+          }
+        }
+      }),
+    )
+  })
+
   it('replay is deterministic: same events, same result', () => {
     fc.assert(
       fc.property(arbitraryRoundAndEvents(), ({ round, log }) => {

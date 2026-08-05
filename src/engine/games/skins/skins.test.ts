@@ -62,13 +62,13 @@ describe('skins — golden fixtures (hand-verified)', () => {
       'Tied — no outright winner',
       '↳ 1 skin died unwon — no hole left to win them',
     ])
-    // and it reaches the settle screen / share card, which are built from
-    // settlement.lines for games without a detail ledger — at zero cents, so
-    // the settlement stays zero-sum
-    expect(skins.settlement.lines.at(-1)).toEqual({
-      label: '1 skin died unwon — no outright winner left',
-      perPlayerCents: { 'p-a': 0, 'p-b': 0, 'p-c': 0, 'p-d': 0 },
-    })
+    // ...and it reaches the settle screen and share card through the NOTES
+    // channel, not as a zero-cent settlement line. settlement.lines is the
+    // record of money that moved, and a dead pot moved none (MAI-40).
+    expect(skins.notes).toEqual(['1 skin died unwon — no outright winner left'])
+    expect(skins.settlement.lines.every((l) =>
+      Object.values(l.perPlayerCents).some((c) => c !== 0),
+    )).toBe(true)
   })
 
   /**
@@ -271,12 +271,11 @@ describe('skins — golden fixtures (hand-verified)', () => {
       '↳ 3 skins died unwon — no hole left to win them',
     ])
     expect(skins.holeSummary(9)).toEqual(['No scores — hole void'])
-    expect(skins.settlement.lines).toEqual([
-      {
-        label: '3 skins died unwon — no outright winner left',
-        perPlayerCents: { 'p-a': 0, 'p-b': 0 },
-      },
-    ])
+    expect(skins.notes).toEqual(['3 skins died unwon — no outright winner left'])
+    // Nothing was won, so there are NO money lines — which is what lets the
+    // settle panel still say "No money moved." truthfully, with the note
+    // underneath explaining where the pot went.
+    expect(skins.settlement.lines).toEqual([])
     expect(skins.settlement.perPlayerCents).toEqual({ 'p-a': 0, 'p-b': 0 })
   })
 

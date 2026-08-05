@@ -142,6 +142,15 @@ change, use a 6-digit code (`{{ .Token }}` + `verifyOtp`) rather than a link.
   happened is a fabrication — it degrades to the plainly true `2 up`. Skins'
   equivalent is the carry that can no longer be won: it is declared dead rather
   than left reading as "carried" onto a hole that doesn't exist (MAI-38).
+- **`settlement.lines` is money that MOVED; narration goes on `notes`.** A game
+  with something to say on the settle surface that isn't a payout ("3 skins died
+  unwon") puts it in `GameDerivation.notes`, rendered below the money and visibly
+  apart from it. A zero-cent settlement line instead makes `lines.length === 0` —
+  the settle panel's "No money moved." signal — false on exactly the round it was
+  written for, and hands every future consumer a phantom row to special-case.
+  Same rule as `GamePanel.kind`: carry the intent, don't overload a field. A
+  property test enforces it (`replay.test.ts`); Wolf is a known, commented
+  exception pending MAI-75 (MAI-40).
 - **The ledger explains WHY, not just what.** Each engine's `holeSummary` states
   the outcome, then explains the cause of anything non-obvious on a "↳ "
   continuation line (birdie→flip, carry→multi-skin, 2-down→press, lone/blind→

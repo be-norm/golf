@@ -55,6 +55,40 @@ describe('SettleScreen', () => {
     expect(screen.getByText(/collects/)).toBeInTheDocument()
     expect(screen.getAllByText('+$1').length).toBeGreaterThan(0)
   })
+
+  /**
+   * A dead skins pot is something the game SAYS, not money that moved. It has
+   * to reach the settle screen — it is the group's stake — without pretending
+   * to be a payout, and without making "No money moved." a lie (MAI-40).
+   */
+  it('reports a dead skins pot as a note, not as a money line', async () => {
+    const round = makeRound({
+      players: makePlayers([{ name: 'Ben' }, { name: 'Alice' }]),
+      holes: 'front9',
+      games: [{ type: 'skins', config: { stakeCents: 100, carryover: true } }],
+    })
+    round.id = 'round-settle-dead-pot'
+    round.status = 'completed'
+    const log = new EventLog(round.id)
+    // both holes tied, then the round ends — 2 skins on the pile, nobody left
+    // to win them
+    log.scoreByHole(round, { Ben: [4, 4], Alice: [4, 4] }, [1, 2])
+    log.append({ type: 'round/completed' })
+    await db.rounds.put(round)
+    await db.round_events.bulkAdd(log.events)
+
+    const router = createMemoryRouter(routes, { initialEntries: [`/round/${round.id}/settle`] })
+    render(<RouterProvider router={router} />)
+
+    // the money statement stays true...
+    expect(await screen.findByText('No money moved.')).toBeInTheDocument()
+    // ...and the pot is still accounted for
+    expect(
+      screen.getByText('2 skins died unwon — no outright winner left'),
+    ).toBeInTheDocument()
+    // nobody collects anything, so there is no settle-up section at all
+    expect(screen.queryByText('Settle up')).not.toBeInTheDocument()
+  })
 })
 
 describe('sharing the summary image', () => {

@@ -27,9 +27,10 @@ Each hole worth one skin; outright lowest (gross or net) wins it, any tie = no s
   Final-hole tie: pot dies (current impl) — alternates: split, playoff.
 - **A dead pot is declared dead.** Once every hole is decided with skins still on the pile —
   the last hole tied, or the round finished early — the app says "N skins died unwon" instead
-  of "N carried", which would promise a roll onto a hole that no longer exists. Skins ships no
-  detail ledger, so this also rides a zero-money settlement line to reach the settle screen and
-  the share card (MAI-38).
+  of "N carried", which would promise a roll onto a hole that no longer exists (MAI-38). It
+  reaches the settle screen and share card on the derivation's `notes` channel, rendered under
+  the money and apart from it — never as a zero-cent settlement line, which would make the
+  panel's "No money moved." read false on the very round where none did (MAI-40).
 - **Validation variant (not yet impl):** skin banked only if winner ties-or-beats field on next hole.
 - **Money:** winner collects stake × (n−1) per skin.
 - Config: stakeCents, carryover, handicap mode (gross / net full / net off-low).
