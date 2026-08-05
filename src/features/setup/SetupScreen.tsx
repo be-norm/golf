@@ -8,7 +8,7 @@ import { applyTee, doubleNine } from '../../engine/core/tees'
 import type { Course, GameConfig, RoundHoles, TeeSet } from '../../engine/core/types'
 import { courseRepo, playerRepo, roundRepo } from '../../db/repos'
 import { LOCAL_USER, newId } from '../../db/ids'
-import { enqueuePushPlayer } from '../../remote/outbox'
+import { enqueuePushPlayer, enqueuePushSavedCourse } from '../../remote/outbox'
 import { useAuth } from '../../auth/AuthProvider'
 import { BigButton } from '../../components/BigButton'
 import { selectOnFocus } from '../../components/inputs'
@@ -43,7 +43,7 @@ function computeCourseHandicap(index: number, course: Course | undefined, tee: T
 export function SetupScreen() {
   const navigate = useNavigate()
   const { activeUserId } = useAuth()
-  const courses = useLiveQuery(() => courseRepo.list())
+  const courses = useLiveQuery(() => courseRepo.list(activeUserId), [activeUserId])
   const roster = useLiveQuery(() => playerRepo.list(activeUserId), [activeUserId])
 
   const [step, setStep] = useState(0)
@@ -161,6 +161,13 @@ export function SetupScreen() {
     // guard on the RESOLVED tee, not just the id: an unresolvable id would fall
     // through to the un-rated handicap path and drop the tee's par/SI overlay
     if (!course || !played || !playedTee) return
+    // Playing somewhere IS saving it. Normally the import already recorded
+    // membership, but a round can reach a device without one — restored from
+    // another phone, or imported from JSON — and "I played there" should always
+    // put it in My Courses (MAI-76).
+    if (await courseRepo.ensureSaved(activeUserId, course.id)) {
+      if (activeUserId !== LOCAL_USER) void enqueuePushSavedCourse(activeUserId, course)
+    }
     const draftToReal = new Map<string, string>()
     const roundPlayers = await Promise.all(
       players.map(async (p) => {

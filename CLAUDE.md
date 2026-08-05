@@ -103,19 +103,23 @@ change, use a 6-digit code (`{{ .Token }}` + `verifyOtp`) rather than a link.
   last-write-wins by `updatedAt` with soft-delete tombstones. round_archives is keyed by
   `(user_id, round_id)`; a re-push never clears a tombstone (`deleted_at` omitted from the
   upsert).
-- **`saved_courses` is the user's library, and it carries the course data.** Saving a course
-  has to mean keeping it, on any device — before MAI-76 it meant keeping it on THAT phone, so
-  clearing storage restored the rounds to an empty course list. It deliberately does NOT
-  foreign-key `courses`: that table is the shared DISCOVERY library, and a course found via
-  the live OpenGolfAPI is cached locally and never upserted there, so most saved courses have
-  no row to point at. Same split as a round's `courseSnapshot`.
-  SAVES are reconciled as a SET (`pushSavedCourses`, every sync) because a course enters the
-  library from four call sites, none holding the signed-in user — "it's in my library" is the
-  whole condition, so a save can't be missed. REMOVALS still need an outbox tombstone
-  (`enqueueDeleteSavedCourse`): a course gone locally leaves nothing to reconcile, and the
-  next pull would hand it back. `flushOutbox` runs BEFORE the set push for that reason.
-  New user-owned table ⇒ it must also be archived by `delete-account` and cascade with the
-  user, or deletion leaves rows and reinstatement returns an empty library.
+- **`saved_courses` is the user's library: DATA IS SHARED, MEMBERSHIP IS OWNED.** `courses`
+  caches scorecards — the same card serves everyone who plays there, so it has no owner and
+  is never scoped. Which courses are YOURS is a different, owned fact: it follows you between
+  devices and must not leak to whoever signs in on your phone next. Conflating the two is how
+  the first attempt at MAI-76 uploaded one person's library into another person's account.
+  Locally that split is `courses` (shared cards) + `saved_courses` (`[userId+courseId]`, with
+  the `LOCAL_USER` sentinel and claim-on-login, like rounds and players); remotely it is
+  `courses` + `saved_courses(user_id, course_id, data)`.
+  The remote row **copies the card** rather than foreign-keying `courses`: that table is the
+  shared DISCOVERY library, and a course found via the live OpenGolfAPI is cached locally and
+  never upserted there, so most saved courses have no row to point at. `course_id` is **text**,
+  not uuid — GolfCourseAPI ids are namespaced strings (`gca:9`), and a uuid column rejects
+  them outright, silently killing the whole push.
+  `courseRepo` is the ONE write path (`save`/`remove`/`ensureSaved`), so membership and its
+  outbox push cannot drift. Playing a round asserts membership — "I played there" is a way of
+  saving a course. New user-owned table ⇒ it must cascade with the user, be archived by
+  `delete-account`, be restored by the runbook, and be dropped by `wipeUserData`.
 - **RLS is `auth.uid() = user_id`** on `round_archives` + `players`; `courses` SELECT is
   granted to `anon, authenticated` so signed-in users keep library access. Deleting a whole
   round/player is outside the append-only event invariant (#2 governs edits *within* a round).

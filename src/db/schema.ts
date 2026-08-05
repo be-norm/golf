@@ -12,6 +12,7 @@ export interface OutboxItem {
     | 'deleteRound'
     | 'deletePlayer'
     | 'pushCourse'
+    | 'pushSavedCourse'
     | 'deleteSavedCourse'
   payload: unknown
   createdAt: string
@@ -23,6 +24,23 @@ export interface MetaEntry {
   value: string
 }
 
+/**
+ * One user keeping one course. THE library is this table, not `courses`.
+ *
+ * `courses` is shared course DATA — the same scorecard serves everyone who
+ * plays there, so it carries no owner and never has. Which courses are YOURS is
+ * a different fact, and an owned one: it has to follow you between devices, and
+ * it must not leak to whoever signs in on your phone next. Conflating the two
+ * is what made the first attempt at MAI-76 upload one person's library into
+ * another person's account.
+ */
+export interface SavedCourse {
+  userId: string
+  courseId: string
+  /** when this user saved it — the LWW clock for membership, not for the card */
+  updatedAt: string
+}
+
 export class GolfDB extends Dexie {
   courses!: Table<Course, string>
   players!: Table<Player, string>
@@ -30,6 +48,7 @@ export class GolfDB extends Dexie {
   round_events!: Table<RoundEvent, [string, number]>
   outbox!: Table<OutboxItem, string>
   meta!: Table<MetaEntry, string>
+  saved_courses!: Table<SavedCourse, [string, string]>
 
   constructor(name = 'golf') {
     super(name)
@@ -63,6 +82,21 @@ export class GolfDB extends Dexie {
           .modify((r) => {
             r.userId ??= LOCAL_USER
           })
+      })
+    // v3: the saved library becomes owned (MAI-76). Membership moves out of
+    // "it's in `courses`" and into its own table, so it can be scoped to a user
+    // and synced. Existing rows backfill to the guest sentinel — the same move
+    // v2 made for rounds and players, and for the same reason: this device
+    // cannot know WHO saved them, so they stay visible signed-out and the
+    // claim prompt offers to move them into the account.
+    this.version(3)
+      .stores({ saved_courses: '[userId+courseId], userId, courseId' })
+      .upgrade(async (tx) => {
+        const courses = await tx.table<Course>('courses').toArray()
+        const now = new Date().toISOString()
+        await tx.table<SavedCourse>('saved_courses').bulkPut(
+          courses.map((c) => ({ userId: LOCAL_USER, courseId: c.id, updatedAt: now })),
+        )
       })
   }
 }

@@ -5,7 +5,13 @@ import { roundRepo, playerRepo } from '../db/repos'
 import type { Course, Player, Round } from '../engine/core/types'
 import type { RoundEvent } from '../engine/core/events'
 import { supabase } from './supabase'
-import { enqueuePushCourse, enqueuePushPlayer, enqueuePushRound, flushOutbox } from './outbox'
+import {
+  enqueuePushCourse,
+  enqueuePushPlayer,
+  enqueuePushRound,
+  enqueuePushSavedCourse,
+  flushOutbox,
+} from './outbox'
 
 /**
  * Owner-scoped cloud restore. Snapshot model: each completed round is a
@@ -21,55 +27,8 @@ import { enqueuePushCourse, enqueuePushPlayer, enqueuePushRound, flushOutbox } f
 /** Flush pending pushes, then restore anything newer from the cloud. */
 export async function syncNow(userId: string): Promise<void> {
   if (userId === LOCAL_USER) return
-  // ORDER IS LOAD-BEARING, and it is pull-then-push for the library.
-  //
-  // `pushSavedCourses` re-asserts the whole local set, so a device that still
-  // holds a course someone deleted elsewhere would clear its tombstone and
-  // resurrect it for everyone. Pulling first makes that device honour the
-  // tombstone and drop the course locally, so the push that follows no longer
-  // contains it. (A removal made on THIS device is tombstoned by flushOutbox
-  // and survives its own pull — see applyRemoteCourseTombstone.)
   await flushOutbox()
   await pull(userId)
-  await pushSavedCourses(userId)
-}
-
-/**
- * Reconcile the saved course library UP, as a set.
- *
- * Saves aren't events here. A course enters the library from four different
- * call sites (search import, scan, manual build, editor save), none of which
- * has the signed-in user to hand — threading one through all four is four
- * chances to forget, and forgetting means a course that silently never syncs.
- * Uploading the set instead makes "it is in my library" the whole condition,
- * so a save cannot be missed. Libraries are a handful of rows and the upsert is
- * idempotent, so re-sending is cheap.
- *
- * REMOVALS still need the outbox (`enqueueDeleteSavedCourse`): a course that is
- * gone locally leaves nothing here to reconcile, and without a tombstone the
- * next pull would hand it straight back.
- */
-export async function pushSavedCourses(userId: string): Promise<void> {
-  if (userId === LOCAL_USER || !navigator.onLine) return
-  try {
-    const courses = await db.courses.toArray()
-    if (courses.length === 0) return
-    await supabase.from('saved_courses').upsert(
-      courses.map((c) => ({
-        user_id: userId,
-        course_id: c.id,
-        data: c,
-        updated_at: c.updatedAt,
-        // Safe to clear a tombstone here ONLY because pull ran first: anything
-        // still local after that is either untouched or a genuine re-save, both
-        // of which should be live again.
-        deleted_at: null,
-      })),
-      { onConflict: 'user_id,course_id' },
-    )
-  } catch {
-    // opportunistic, exactly like pull — a failed push retries next sync
-  }
 }
 
 export async function pull(userId: string): Promise<void> {
@@ -97,8 +56,11 @@ export async function pull(userId: string): Promise<void> {
     }
     for (const row of coursesRes.data ?? []) {
       if (row.deleted_at) {
-        await applyRemoteCourseTombstone(row.course_id as string, row.updated_at as string)
-      } else await applyRemoteCourse(row.data as Course)
+        // deleted_at, NOT updated_at: a re-push deliberately omits deleted_at
+        // but does rewrite updated_at, so only deleted_at still says WHEN the
+        // removal happened.
+        await applyRemoteCourseTombstone(userId, row.course_id as string, row.deleted_at as string)
+      } else await applyRemoteSavedCourse(userId, row.data as Course, row.updated_at as string)
     }
   } catch {
     // opportunistic — offline or transient failure just means no restore now
@@ -106,28 +68,38 @@ export async function pull(userId: string): Promise<void> {
 }
 
 /**
- * Courses are NOT owner-partitioned (the library is shared — CLAUDE.md), so
- * this writes the row as-is rather than stamping a userId onto it. Goes through
- * db.courses directly, not courseRepo.put, which re-stamps `updatedAt` and
- * bumps `revision` — that would make every restore look like a local edit and
- * win the next last-write-wins comparison against the real one.
+ * Restore one saved course: cache the card (shared, unscoped) and record that
+ * this user keeps it (owned).
+ *
+ * Writes db.courses directly rather than through courseRepo.save, which
+ * re-stamps `updatedAt` and bumps `revision` — that would make every restore
+ * look like a local edit and win the next last-write-wins comparison against
+ * the real one.
  */
-async function applyRemoteCourse(course: Course): Promise<void> {
+async function applyRemoteSavedCourse(
+  userId: string,
+  course: Course,
+  savedAt: string,
+): Promise<void> {
   const local = await db.courses.get(course.id)
-  if (local && local.updatedAt >= course.updatedAt) return
-  await db.courses.put(course)
+  if (!local || local.updatedAt < course.updatedAt) await db.courses.put(course)
+  await db.saved_courses.put({ userId, courseId: course.id, updatedAt: savedAt })
 }
 
 /**
  * Honour a removal made on another device — unless this one has since SAVED the
  * course again, which is a newer intent than the deletion and must survive.
- * Same last-write-wins rule the rest of pull uses, with the tombstone's
- * timestamp standing in for the row's.
+ * Only membership is dropped: the card itself is shared, other accounts on this
+ * device may keep it, and frozen round snapshots never depend on it.
  */
-async function applyRemoteCourseTombstone(courseId: string, deletedAt: string): Promise<void> {
-  const local = await db.courses.get(courseId)
-  if (local && local.updatedAt > deletedAt) return
-  await db.courses.delete(courseId)
+async function applyRemoteCourseTombstone(
+  userId: string,
+  courseId: string,
+  deletedAt: string,
+): Promise<void> {
+  const saved = await db.saved_courses.get([userId, courseId])
+  if (saved && saved.updatedAt > deletedAt) return
+  await db.saved_courses.delete([userId, courseId])
 }
 
 async function applyRemoteRound(
@@ -172,7 +144,7 @@ async function applyRemotePlayer(userId: string, row: Record<string, unknown>): 
  * Returns how much was claimed so the UI can confirm it.
  */
 export async function claimLocalData(userId: string): Promise<{ rounds: number; players: number }> {
-  const claimed = await db.transaction('rw', db.rounds, db.players, async () => {
+  const claimed = await db.transaction('rw', db.rounds, db.players, db.saved_courses, async () => {
     const rounds = await db.rounds
       .where('[userId+startedAt]')
       .between([LOCAL_USER, Dexie.minKey], [LOCAL_USER, Dexie.maxKey])
@@ -181,9 +153,17 @@ export async function claimLocalData(userId: string): Promise<{ rounds: number; 
       .where('[userId+name]')
       .between([LOCAL_USER, Dexie.minKey], [LOCAL_USER, Dexie.maxKey])
       .toArray()
+    // Membership is keyed [userId+courseId], so claiming is a re-key: write the
+    // owned row, drop the guest one. Same intent as the round/player rewrites
+    // above, just spelled differently because the owner is part of the key.
+    const guestSaved = await db.saved_courses.where('userId').equals(LOCAL_USER).toArray()
     for (const r of rounds) await db.rounds.update(r.id, { userId })
     for (const p of players) await db.players.update(p.id, { userId })
-    return { rounds, players }
+    for (const sc of guestSaved) {
+      await db.saved_courses.put({ ...sc, userId })
+      await db.saved_courses.delete([LOCAL_USER, sc.courseId])
+    }
+    return { rounds, players, savedCourseIds: guestSaved.map((sc) => sc.courseId) }
   })
 
   for (const p of claimed.players) await enqueuePushPlayer(userId, { ...p, userId })
@@ -200,13 +180,20 @@ export async function claimLocalData(userId: string): Promise<{ rounds: number; 
   // ...and claim the LIBRARY itself, not just authorship. Courses saved while
   // signed out are the user's saved courses too; without this they'd stay on
   // this device only and vanish with its storage (MAI-76).
-  await pushSavedCourses(userId)
+  for (const id of claimed.savedCourseIds) {
+    const card = await db.courses.get(id)
+    if (card) await enqueuePushSavedCourse(userId, card)
+  }
 
   return { rounds: claimed.rounds.length, players: claimed.players.length }
 }
 
 /** How many guest rows exist locally — drives the claim prompt. */
-export async function countLocalGuestData(): Promise<{ rounds: number; players: number }> {
+export async function countLocalGuestData(): Promise<{
+  rounds: number
+  players: number
+  courses: number
+}> {
   const rounds = await db.rounds
     .where('[userId+startedAt]')
     .between([LOCAL_USER, Dexie.minKey], [LOCAL_USER, Dexie.maxKey])
@@ -215,5 +202,7 @@ export async function countLocalGuestData(): Promise<{ rounds: number; players: 
     .where('[userId+name]')
     .between([LOCAL_USER, Dexie.minKey], [LOCAL_USER, Dexie.maxKey])
     .count()
-  return { rounds, players }
+  // courses count too, or the prompt offers to claim a library it never mentions
+  const courses = await db.saved_courses.where('userId').equals(LOCAL_USER).count()
+  return { rounds, players, courses }
 }

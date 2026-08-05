@@ -4,10 +4,12 @@ import { courseRepo } from '../../db/repos'
 import { CourseSearch } from './CourseSearch'
 import { ScanButton } from './ScanButton'
 import { CourseSourceMark } from '../../components/CourseSourceMark'
+import { useAuth } from '../../auth/AuthProvider'
 
 export function CourseListScreen() {
   const navigate = useNavigate()
-  const courses = useLiveQuery(() => courseRepo.list())
+  const { activeUserId } = useAuth()
+  const courses = useLiveQuery(() => courseRepo.list(activeUserId), [activeUserId])
 
   return (
     <main className="flex min-h-dvh flex-col gap-4 py-6">

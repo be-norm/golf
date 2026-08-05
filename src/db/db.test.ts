@@ -254,16 +254,55 @@ function makeCourse(id: string, source: Course['source']): Course {
 }
 
 describe('CourseRepo', () => {
-  it('saves, reads, and deletes a course from the library', async () => {
-    const repo = new CourseRepo(freshDb())
-    await repo.put(makeCourse('c1', 'user'))
-    await repo.put(makeCourse('c2', 'remote'))
-    expect(await repo.get('c1')).toBeDefined()
-    expect(await repo.list()).toHaveLength(2)
+  const A = 'user-a'
+  const B = 'user-b'
 
-    await repo.delete('c1')
-    expect(await repo.get('c1')).toBeUndefined()
-    expect((await repo.list()).map((c) => c.id)).toEqual(['c2'])
+  it('saves, reads, and removes a course from one library', async () => {
+    const repo = new CourseRepo(freshDb())
+    await repo.save(A, makeCourse('c1', 'user'))
+    await repo.save(A, makeCourse('c2', 'remote'))
+    expect(await repo.get('c1')).toBeDefined()
+    expect(await repo.list(A)).toHaveLength(2)
+
+    await repo.remove(A, 'c1')
+    expect((await repo.list(A)).map((c) => c.id)).toEqual(['c2'])
+    // the CARD survives — it's shared, and a round snapshot may reference it
+    expect(await repo.get('c1')).toBeDefined()
+  })
+
+  /**
+   * The consent property (MAI-76). Course data is shared, but "these are MY
+   * courses" is owned — a friend signing in on your phone must not see, or
+   * later upload, your library.
+   */
+  it('scopes the library per user on a shared device', async () => {
+    const repo = new CourseRepo(freshDb())
+    await repo.save(A, makeCourse('mine', 'user'))
+    await repo.save(B, makeCourse('theirs', 'user'))
+
+    expect((await repo.list(A)).map((c) => c.id)).toEqual(['mine'])
+    expect((await repo.list(B)).map((c) => c.id)).toEqual(['theirs'])
+  })
+
+  it('two users can keep the same course, and one removing it leaves the other alone', async () => {
+    const repo = new CourseRepo(freshDb())
+    const shared = makeCourse('shared', 'remote')
+    await repo.save(A, shared)
+    await repo.save(B, shared)
+
+    await repo.remove(A, 'shared')
+    expect(await repo.list(A)).toHaveLength(0)
+    expect((await repo.list(B)).map((c) => c.id)).toEqual(['shared'])
+  })
+
+  it('ensureSaved adds membership once and reports whether it did', async () => {
+    const repo = new CourseRepo(freshDb())
+    await repo.save(A, makeCourse('c1', 'remote'))
+    // already theirs — nothing to add, nothing to push
+    expect(await repo.ensureSaved(A, 'c1')).toBe(false)
+    // played it, never saved it (a round restored from another device)
+    expect(await repo.ensureSaved(B, 'c1')).toBe(true)
+    expect((await repo.list(B)).map((c) => c.id)).toEqual(['c1'])
   })
 })
 

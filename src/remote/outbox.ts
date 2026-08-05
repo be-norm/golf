@@ -39,6 +39,10 @@ interface DeleteSavedCoursePayload {
   userId: string
   courseId: string
 }
+interface PushSavedCoursePayload {
+  userId: string
+  course: Course
+}
 
 export async function enqueuePushRound(userId: string, round: Round): Promise<void> {
   const events = await eventStore.list(round.id)
@@ -69,13 +73,15 @@ export async function enqueueDeletePlayer(userId: string, playerId: string): Pro
 }
 
 /**
- * Tombstone a course the user removed from their library.
- *
- * SAVES don't come through here — `pushSavedCourses` reconciles the whole local
- * library on each sync, so a save is picked up by simply existing. A REMOVAL
- * has no such trace: the row is gone locally, so nothing would ever tell the
- * server, and the next pull would hand it straight back (MAI-76).
+ * Record that this user keeps this course. Carries the card itself, so the
+ * library restores whether or not the course exists in the shared `courses`
+ * table — most don't, since live-API imports are never published there.
  */
+export async function enqueuePushSavedCourse(userId: string, course: Course): Promise<void> {
+  await put('pushSavedCourse', { userId, course })
+}
+
+/** Tombstone a course the user removed from their library. */
 export async function enqueueDeleteSavedCourse(userId: string, courseId: string): Promise<void> {
   await put('deleteSavedCourse', { userId, courseId })
 }
@@ -181,6 +187,23 @@ async function send(item: OutboxItem, deviceId: string): Promise<boolean> {
         .update({ deleted_at: now, updated_at: now })
         .eq('user_id', userId)
         .eq('id', playerId)
+      return !error
+    }
+    case 'pushSavedCourse': {
+      const { userId, course } = item.payload as PushSavedCoursePayload
+      const { error } = await supabase.from('saved_courses').upsert(
+        {
+          user_id: userId,
+          course_id: course.id,
+          data: course,
+          updated_at: course.updatedAt,
+        },
+        { onConflict: 'user_id,course_id' },
+      )
+      // `deleted_at` is deliberately omitted, exactly as round_archives does it:
+      // a re-push must never clear a tombstone. Re-SAVING a removed course goes
+      // through the same path with a newer updated_at, and pull's LWW lets that
+      // win — see applyRemoteCourseTombstone.
       return !error
     }
     case 'deleteSavedCourse': {

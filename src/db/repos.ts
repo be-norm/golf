@@ -1,32 +1,91 @@
 import Dexie from 'dexie'
 import type { Course, Player, Round } from '../engine/core/types'
-import { db as defaultDb, type GolfDB } from './schema'
+import { db as defaultDb, type GolfDB, type SavedCourse } from './schema'
 import { LOCAL_USER, newId } from './ids'
 
+/**
+ * Course DATA is shared; MEMBERSHIP is owned.
+ *
+ * `courses` caches scorecards — the same card serves everyone who plays there,
+ * so it has no owner and is never scoped. `saved_courses` records which courses
+ * are a given user's, which is owned data: it follows them between devices and
+ * must not leak to whoever signs in on this phone next.
+ *
+ * Every save goes through `save()` and every removal through `remove()`, so
+ * membership and its sync push cannot drift apart — the same
+ * one-write-path rule `EventStore.append` follows for events (MAI-76).
+ */
 export class CourseRepo {
   constructor(private db: GolfDB = defaultDb) {}
 
-  list(): Promise<Course[]> {
-    return this.db.courses.orderBy('name').toArray()
+  /** This user's saved library, sorted by name. */
+  async list(userId: string): Promise<Course[]> {
+    const ids = await this.db.saved_courses.where('userId').equals(userId).toArray()
+    const courses = await this.db.courses.bulkGet(ids.map((s) => s.courseId))
+    return courses
+      .filter((c): c is Course => c !== undefined)
+      .sort((a, b) => a.name.localeCompare(b.name))
   }
 
+  /** Course data by id, unscoped — an id you hold is the capability, and a
+   *  round's course must resolve whether or not it's still in your library. */
   get(id: string): Promise<Course | undefined> {
     return this.db.courses.get(id)
   }
 
-  async put(course: Course): Promise<void> {
-    await this.db.courses.put({
+  isSaved(userId: string, courseId: string): Promise<SavedCourse | undefined> {
+    return this.db.saved_courses.get([userId, courseId])
+  }
+
+  /**
+   * Cache the card and record that this user keeps it. Returns the stored
+   * course so callers push exactly what landed.
+   */
+  async save(userId: string, course: Course): Promise<Course> {
+    const stored: Course = {
       ...course,
       updatedAt: new Date().toISOString(),
       revision: course.revision + 1,
+    }
+    const now = new Date().toISOString()
+    await this.db.transaction('rw', this.db.courses, this.db.saved_courses, async () => {
+      await this.db.courses.put(stored)
+      // keep the ORIGINAL save time if it's already theirs — re-importing a
+      // course you already had isn't a new decision, and bumping it would win
+      // a last-write-wins race against a deletion made elsewhere since
+      const existing = await this.db.saved_courses.get([userId, course.id])
+      if (!existing) {
+        await this.db.saved_courses.put({ userId, courseId: course.id, updatedAt: now })
+      }
     })
+    return stored
   }
 
-  /** Remove a course from this device's library. Local only — the shared
-   *  Supabase library and any frozen round snapshots are untouched, and the
-   *  course stays re-importable via search. */
-  async delete(id: string): Promise<void> {
-    await this.db.courses.delete(id)
+  /**
+   * Make sure this user keeps this course, without touching the card.
+   *
+   * "I played there" is a way of saving a course, not a thing that happens to
+   * saved courses — so teeing off asserts membership rather than assuming the
+   * import already did. Returns true if it added one, so the caller knows
+   * whether there's anything new to push.
+   */
+  async ensureSaved(userId: string, courseId: string): Promise<boolean> {
+    if (await this.db.saved_courses.get([userId, courseId])) return false
+    await this.db.saved_courses.put({
+      userId,
+      courseId,
+      updatedAt: new Date().toISOString(),
+    })
+    return true
+  }
+
+  /**
+   * Drop it from THIS user's library. The cached card stays: it is shared, other
+   * accounts on this device may keep it, and frozen round snapshots are
+   * untouched either way (invariant #4).
+   */
+  async remove(userId: string, courseId: string): Promise<void> {
+    await this.db.saved_courses.delete([userId, courseId])
   }
 }
 

@@ -4,7 +4,11 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import type { Course, TeeSet } from '../../engine/core/types'
 import { courseRepo } from '../../db/repos'
 import { newId } from '../../db/ids'
-import { enqueueDeleteSavedCourse, enqueuePushCourse } from '../../remote/outbox'
+import {
+  enqueueDeleteSavedCourse,
+  enqueuePushCourse,
+  enqueuePushSavedCourse,
+} from '../../remote/outbox'
 import { isStrokeIndexPermutation, looksLikeEighteenHoleRating } from '../../engine/core/tees'
 import { useAuth } from '../../auth/AuthProvider'
 import { BigButton } from '../../components/BigButton'
@@ -106,28 +110,45 @@ export function CourseEditorScreen() {
     course.teeSets.length > 0 && course.teeSets.every((t) => t.name.trim()) && !misratedTee
 
   const save = async () => {
-    // Publish to the shared library only for genuinely user-authored courses:
-    // a brand-new course (manual or scanned) or one that was already 'user'.
-    // Editing an imported (seed/API) course saves locally but is NOT republished.
-    const publishable = isNew || existing?.source === 'user'
-    await courseRepo.put({
+    // FORKING A COURSE THAT ISN'T OURS (MAI-78). Correcting an API or seed card
+    // used to save locally and stop there, so the person who actually plays
+    // there — the one who knows the stroke indexes are wrong — kept the fix to
+    // themselves forever.
+    //
+    // It has to be a fork rather than an edit of the library row: those rows
+    // have `created_by IS NULL` and the update policy is `auth.uid() =
+    // created_by`, so RLS refuses (rightly — the alternative is letting anyone
+    // rewrite any course), and the original's ODbL provenance has to survive.
+    // So the correction becomes a course of its own, owned and publishable,
+    // and the untouched original stays in the library beside it.
+    const forking = !isNew && existing !== null && existing?.source !== 'user'
+    const saved = await courseRepo.save(activeUserId, {
       ...course,
+      id: forking ? newId() : course.id,
       name: course.name.trim(),
       source: 'user',
+      // a fork is a new course, not revision N+1 of somebody else's
+      revision: forking ? 0 : course.revision,
     })
-    if (!isGuest && publishable) {
-      const saved = await courseRepo.get(course.id)
-      if (saved) await enqueuePushCourse(activeUserId, saved)
+    if (forking) {
+      // the corrected card replaces the original in THIS library — nobody wants
+      // both rows for the same course in their own list
+      await courseRepo.remove(activeUserId, course.id)
+      if (!isGuest) await enqueueDeleteSavedCourse(activeUserId, course.id)
+    }
+    if (!isGuest) {
+      await enqueuePushCourse(activeUserId, saved)
+      await enqueuePushSavedCourse(activeUserId, saved)
     }
     navigate('/courses')
   }
 
   const remove = async () => {
-    await courseRepo.delete(course.id)
-    // Tombstone it for the account, or the next pull restores the course this
-    // very tap removed. Saves need no counterpart — `pushSavedCourses`
-    // reconciles the library as a set, so a course syncs by existing (MAI-76).
+    // Tombstone FIRST: if the outbox write throws, the course is still in the
+    // library and the next attempt can retry. Removing locally first would drop
+    // it with nothing queued, and the next pull would hand it straight back.
     if (!isGuest) await enqueueDeleteSavedCourse(activeUserId, course.id)
+    await courseRepo.remove(activeUserId, course.id)
     navigate('/courses')
   }
 

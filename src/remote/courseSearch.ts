@@ -163,14 +163,20 @@ async function golfCourseApiSearch(q: string): Promise<CourseSearchHit[]> {
 
 // --- import a chosen hit into the local library -----------------------------
 
-/** Pull a search hit's full scorecard and cache it in the local library. */
-export async function importCourseHit(hit: CourseSearchHit): Promise<Course> {
-  if (hit.origin === 'library') return importFromLibrary(hit)
-  if (hit.origin === 'golfcourseapi') return importFromGolfCourseApi(hit)
-  return importFromOpenGolf(hit)
+/**
+ * Pull a search hit's full scorecard and save it to `userId`'s library.
+ *
+ * Takes the owner explicitly: saving is now an owned act (MAI-76), and the
+ * caller is the only one who knows who is signed in. Guests pass LOCAL_USER,
+ * exactly like every other owned write.
+ */
+export async function importCourseHit(userId: string, hit: CourseSearchHit): Promise<Course> {
+  if (hit.origin === 'library') return importFromLibrary(userId, hit)
+  if (hit.origin === 'golfcourseapi') return importFromGolfCourseApi(userId, hit)
+  return importFromOpenGolf(userId, hit)
 }
 
-async function importFromLibrary(hit: CourseSearchHit): Promise<Course> {
+async function importFromLibrary(userId: string, hit: CourseSearchHit): Promise<Course> {
   const { data, error } = await supabase.from('courses').select('data').eq('id', hit.id).single()
   if (error || !data) throw new Error('course fetch failed')
   // The library is the one import path that skips buildRemoteCourse — a doc
@@ -179,12 +185,20 @@ async function importFromLibrary(hit: CourseSearchHit): Promise<Course> {
   // Return the NORMALIZED course (not the raw library doc), matching what we
   // cached — bar courseRepo.put's own revision bump / updatedAt stamp, same as
   // the other import paths below.
-  const course = { ...normalizeTeeRatings(data.data as Course), source: 'remote' as const, revision: 0 }
-  await courseRepo.put(course)
-  return course
+  // Keep the library row's OWN source rather than flattening to 'remote': a
+  // golfer-contributed course must still read as one after import, or the mark
+  // that distinguishes it from the API's version flips the moment you save it
+  // (MAI-77).
+  const published = data.data as Course
+  const course = {
+    ...normalizeTeeRatings(published),
+    source: published.source === 'user' ? ('user' as const) : ('remote' as const),
+    revision: 0,
+  }
+  return courseRepo.save(userId, course)
 }
 
-async function importFromOpenGolf(hit: CourseSearchHit): Promise<Course> {
+async function importFromOpenGolf(userId: string, hit: CourseSearchHit): Promise<Course> {
   const res = await fetch(`${OPENGOLF_BASE}/api/v1/courses/${hit.id}`, {
     signal: AbortSignal.timeout(10000),
   })
@@ -226,8 +240,7 @@ async function importFromOpenGolf(hit: CourseSearchHit): Promise<Course> {
       slope: t.slope,
     })),
   })
-  await courseRepo.put({ ...course, revision: 0 })
-  return course
+  return courseRepo.save(userId, { ...course, revision: 0 })
 }
 
 interface GolfApiTee {
@@ -237,7 +250,7 @@ interface GolfApiTee {
   holes?: { par?: number; yardage?: number | null; handicap?: number | null }[]
 }
 
-async function importFromGolfCourseApi(hit: CourseSearchHit): Promise<Course> {
+async function importFromGolfCourseApi(userId: string, hit: CourseSearchHit): Promise<Course> {
   const id = hit.id.startsWith('gca:') ? hit.id.slice(4) : hit.id
   const res = await fetch(`${GOLFCOURSEAPI_BASE}/v1/courses/${id}`, {
     headers: GOLFCOURSEAPI_KEY ? { Authorization: `Key ${GOLFCOURSEAPI_KEY}` } : undefined,
@@ -287,6 +300,5 @@ async function importFromGolfCourseApi(hit: CourseSearchHit): Promise<Course> {
     holes,
     tees: rawTees,
   })
-  await courseRepo.put({ ...built, revision: 0 })
-  return built
+  return courseRepo.save(userId, { ...built, revision: 0 })
 }

@@ -80,10 +80,11 @@ vi.mock('./supabase', () => ({ supabase: { from: fake.from } }))
 const {
   enqueuePushRound,
   enqueueDeleteRound,
+  enqueuePushSavedCourse,
   enqueueDeleteSavedCourse,
   flushOutbox,
 } = await import('./outbox')
-const { pull, pushSavedCourses, syncNow, claimLocalData, countLocalGuestData } = await import('./sync')
+const { pull, syncNow, claimLocalData, countLocalGuestData } = await import('./sync')
 
 const U = 'user-1'
 function setOnline(v: boolean) {
@@ -128,6 +129,7 @@ beforeEach(async () => {
     db.round_events.clear(),
     db.outbox.clear(),
     db.courses.clear(),
+    db.saved_courses.clear(),
   ])
 })
 
@@ -238,7 +240,8 @@ describe('claim', () => {
     await db.rounds.put(round(LOCAL_USER, 'live', 'gr2', 'g2'))
     await db.players.put({ id: 'gp1', userId: LOCAL_USER, name: 'Ben', updatedAt: 'g' })
 
-    expect(await countLocalGuestData()).toEqual({ rounds: 2, players: 1 })
+    // courses counted too — the prompt must name everything it will claim
+    expect(await countLocalGuestData()).toEqual({ rounds: 2, players: 1, courses: 0 })
 
     const res = await claimLocalData(U)
     await drain()
@@ -246,7 +249,7 @@ describe('claim', () => {
 
     expect((await roundRepo.get('gr1'))?.userId).toBe(U)
     expect((await db.players.get('gp1'))?.userId).toBe(U)
-    expect(await countLocalGuestData()).toEqual({ rounds: 0, players: 0 })
+    expect(await countLocalGuestData()).toEqual({ rounds: 0, players: 0, courses: 0 })
 
     // only the completed guest round is pushed; the live one stays local
     expect(fake.tables.round_archives.map((r) => r.round_id)).toEqual(['gr1'])
@@ -261,10 +264,15 @@ describe('claim', () => {
  * list.
  */
 describe('saved courses', () => {
-  const course = (id: string, name: string, updatedAt: string, source: Course['source'] = 'remote') => ({
+  const course = (
+    id: string,
+    name: string,
+    updatedAt: string,
+    source: Course['source'] = 'remote',
+  ): Course => ({
     id,
     name,
-    holeCount: 18 as const,
+    holeCount: 18,
     holes: [],
     teeSets: [],
     source,
@@ -272,28 +280,32 @@ describe('saved courses', () => {
     revision: 1,
   })
 
-  it('restores the library on a device that has never seen it', async () => {
-    await db.courses.bulkPut([course('c1', 'Broadmoor', '2026-08-01T00:00:00Z')])
-    await pushSavedCourses(U)
+  async function saveAndPush(userId: string, c: Course) {
+    await db.courses.put(c)
+    await db.saved_courses.put({ userId, courseId: c.id, updatedAt: c.updatedAt })
+    await enqueuePushSavedCourse(userId, c)
+    await drain()
+  }
 
-    // the storage-cleared / new-phone case: local is empty, the account is not
-    await db.courses.clear()
+  it('restores the library on a device that has never seen it', async () => {
+    await saveAndPush(U, course('c1', 'Broadmoor', '2026-08-01T00:00:00Z'))
+
+    // the storage-cleared / new-phone case
+    await Promise.all([db.courses.clear(), db.saved_courses.clear()])
     await pull(U)
 
-    expect((await db.courses.toArray()).map((c) => c.name)).toEqual(['Broadmoor'])
+    expect((await db.saved_courses.toArray()).map((s) => s.courseId)).toEqual(['c1'])
+    expect((await db.courses.get('c1'))?.name).toBe('Broadmoor')
   })
 
   it('carries the full scorecard, so a course missing from the shared library still restores', async () => {
-    // scanned by hand and never published — nothing in `courses` to point at,
-    // which is why saved_courses copies the data rather than holding an FK
     const scanned = {
       ...course('c-scan', 'Muni Nobody Has', '2026-08-01T00:00:00Z', 'user'),
       holes: [{ number: 1, par: 4, strokeIndex: 1 }],
       teeSets: [{ id: 't', name: 'White', rating: 70, slope: 120 }],
     }
-    await db.courses.put(scanned)
-    await pushSavedCourses(U)
-    await db.courses.clear()
+    await saveAndPush(U, scanned)
+    await Promise.all([db.courses.clear(), db.saved_courses.clear()])
     await pull(U)
 
     const restored = await db.courses.get('c-scan')
@@ -301,73 +313,83 @@ describe('saved courses', () => {
     expect(restored?.teeSets[0]?.name).toBe('White')
   })
 
-  it('a removal propagates instead of the course coming back', async () => {
-    await db.courses.put(course('c1', 'Broadmoor', '2026-08-01T00:00:00Z'))
-    await pushSavedCourses(U)
+  it('a non-uuid provider id round-trips (GolfCourseAPI mints `gca:` ids)', async () => {
+    await saveAndPush(U, course('gca:9', 'Namespaced', '2026-08-01T00:00:00Z'))
+    await Promise.all([db.courses.clear(), db.saved_courses.clear()])
+    await pull(U)
+    expect((await db.saved_courses.toArray()).map((s) => s.courseId)).toEqual(['gca:9'])
+  })
 
-    // remove it here, exactly as the editor does
-    await db.courses.delete('c1')
+  it('a removal propagates instead of the course coming back', async () => {
+    await saveAndPush(U, course('c1', 'Broadmoor', '2026-08-01T00:00:00Z'))
+    await db.saved_courses.delete([U, 'c1'])
     await enqueueDeleteSavedCourse(U, 'c1')
     await drain()
 
     await pull(U)
-    expect(await db.courses.get('c1')).toBeUndefined()
-  })
-
-  it('keeps a newer local edit over an older remote copy (LWW)', async () => {
-    await db.courses.put(course('c1', 'Old Name', '2026-08-01T00:00:00Z'))
-    await pushSavedCourses(U)
-
-    await db.courses.put(course('c1', 'Corrected Name', '2026-08-02T00:00:00Z'))
-    await pull(U)
-
-    expect((await db.courses.get('c1'))?.name).toBe('Corrected Name')
-  })
-
-  it('stays local for a guest — nothing is pushed while signed out', async () => {
-    await db.courses.put(course('c1', 'Broadmoor', '2026-08-01T00:00:00Z'))
-    await pushSavedCourses(LOCAL_USER)
-    expect(fake.tables.saved_courses).toHaveLength(0)
+    expect(await db.saved_courses.get([U, 'c1'])).toBeUndefined()
   })
 
   /**
-   * The multi-device case the whole feature exists for. `pushSavedCourses`
-   * re-asserts the entire local set, so a device still holding a course that
-   * was deleted elsewhere would clear its tombstone and hand it back to
-   * everyone. Pulling before pushing is what stops that.
+   * The multi-device case the whole feature exists for: a device that missed
+   * the removal must not hand the course back to everyone.
    */
   it('a device that missed the removal does not resurrect the course', async () => {
-    // both devices have it; "device B" removes it and tombstones the row
-    await db.courses.put(course('c1', 'Broadmoor', '2026-08-01T00:00:00Z'))
-    await pushSavedCourses(U)
+    await saveAndPush(U, course('c1', 'Broadmoor', '2026-08-01T00:00:00Z'))
     await enqueueDeleteSavedCourse(U, 'c1')
     await drain()
 
-    // "device A" still has it locally and now syncs: pull must win over its set
-    // push, or the tombstone is cleared and the course comes back
+    // this device still has membership locally and now syncs
     await syncNow(U)
 
-    expect(await db.courses.get('c1')).toBeUndefined()
+    expect(await db.saved_courses.get([U, 'c1'])).toBeUndefined()
     const row = fake.tables.saved_courses.find((r) => r.course_id === 'c1')
     expect(row?.deleted_at).toBeTruthy()
   })
 
   it('re-saving a course after removing it beats the tombstone', async () => {
-    await db.courses.put(course('c1', 'Broadmoor', '2026-08-01T00:00:00Z'))
-    await pushSavedCourses(U)
+    await saveAndPush(U, course('c1', 'Broadmoor', '2026-08-01T00:00:00Z'))
     await enqueueDeleteSavedCourse(U, 'c1')
     await drain()
 
-    // changed their mind and saved it again — a newer intent than the deletion
-    await db.courses.put(course('c1', 'Broadmoor', '2099-01-01T00:00:00Z'))
-    await syncNow(U)
+    // changed their mind: a newer save than the deletion
+    await saveAndPush(U, course('c1', 'Broadmoor', '2099-01-01T00:00:00Z'))
+    await pull(U)
 
-    expect(await db.courses.get('c1')).toBeDefined()
+    expect(await db.saved_courses.get([U, 'c1'])).toBeDefined()
   })
 
-  it('claiming guest data takes the library with it', async () => {
+  it('one user removing a shared course leaves another user\'s copy alone', async () => {
     await db.courses.put(course('c1', 'Broadmoor', '2026-08-01T00:00:00Z'))
+    await db.saved_courses.bulkPut([
+      { userId: U, courseId: 'c1', updatedAt: '2026-08-01T00:00:00Z' },
+      { userId: 'other', courseId: 'c1', updatedAt: '2026-08-01T00:00:00Z' },
+    ])
+    await enqueuePushSavedCourse(U, course('c1', 'Broadmoor', '2026-08-01T00:00:00Z'))
+    await drain()
+    await enqueueDeleteSavedCourse(U, 'c1')
+    await drain()
+    await pull(U)
+
+    expect(await db.saved_courses.get([U, 'c1'])).toBeUndefined()
+    expect(await db.saved_courses.get(['other', 'c1'])).toBeDefined()
+  })
+
+  it('stays local for a guest — nothing is pushed while signed out', async () => {
+    await db.courses.put(course('c1', 'Broadmoor', '2026-08-01T00:00:00Z'))
+    await db.saved_courses.put({ userId: LOCAL_USER, courseId: 'c1', updatedAt: '2026-08-01T00:00:00Z' })
+    await syncNow(LOCAL_USER)
+    expect(fake.tables.saved_courses).toHaveLength(0)
+  })
+
+  it('claiming guest data re-keys the library to the account and pushes it', async () => {
+    await db.courses.put(course('c1', 'Broadmoor', '2026-08-01T00:00:00Z'))
+    await db.saved_courses.put({ userId: LOCAL_USER, courseId: 'c1', updatedAt: '2026-08-01T00:00:00Z' })
     await claimLocalData(U)
+    await drain()
+
+    expect(await db.saved_courses.get([LOCAL_USER, 'c1'])).toBeUndefined()
+    expect(await db.saved_courses.get([U, 'c1'])).toBeDefined()
     expect(fake.tables.saved_courses.map((r) => r.course_id)).toEqual(['c1'])
   })
 })

@@ -6,6 +6,7 @@ import {
   type CourseSearchHit,
 } from '../../remote/courseSearch'
 import { CourseSourceMark } from '../../components/CourseSourceMark'
+import { useAuth } from '../../auth/AuthProvider'
 
 interface Props {
   /** ids already in the local library — shown as saved, not re-importable */
@@ -21,6 +22,7 @@ interface Props {
  * the local library for offline use.
  */
 export function CourseSearch({ localIds, onImported, placeholder }: Props) {
+  const { activeUserId } = useAuth()
   const [query, setQuery] = useState('')
   const [hits, setHits] = useState<CourseSearchHit[]>()
   const [searching, setSearching] = useState(false)
@@ -55,7 +57,7 @@ export function CourseSearch({ localIds, onImported, placeholder }: Props) {
     setImporting(hit.id)
     setError(undefined)
     try {
-      const course = await importCourseHit(hit)
+      const course = await importCourseHit(activeUserId, hit)
       setQuery('')
       setHits(undefined)
       onImported?.(course)
