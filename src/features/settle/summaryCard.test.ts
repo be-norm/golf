@@ -138,7 +138,7 @@ describe('buildSummaryCard', () => {
     // line, which made "no money moved" false on a round where none did.
     expect(skins.kind).toBe('lines')
     expect(skins.lines).toEqual([])
-    expect(skins.notes).toEqual(['2 skins died unwon — no outright winner left'])
+    expect(skins.notes).toEqual(['2 skins died unwon — no hole left to win them'])
   })
 
   it('falls back to settlement lines for games without a ledger', () => {

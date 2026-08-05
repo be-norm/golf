@@ -84,7 +84,7 @@ describe('SettleScreen', () => {
     expect(await screen.findByText('No money moved.')).toBeInTheDocument()
     // ...and the pot is still accounted for
     expect(
-      screen.getByText('2 skins died unwon — no outright winner left'),
+      screen.getByText('2 skins died unwon — no hole left to win them'),
     ).toBeInTheDocument()
     // nobody collects anything, so there is no settle-up section at all
     expect(screen.queryByText('Settle up')).not.toBeInTheDocument()

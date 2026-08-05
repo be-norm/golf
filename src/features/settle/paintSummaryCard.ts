@@ -267,6 +267,8 @@ function settleBlock(card: SummaryCard): Block {
 function gameBlock(g: Ctx, game: SummaryCard['games'][number]): Block {
   const LINE = 24
   const NOTE_LINE = 21
+  const NOTE_GAP = 10
+  const RULE_H = 2
   const LABEL_W = 96
   // a ledger is two columns (gold chip left, value right); plain lines are a
   // list and read left-aligned, as they do on screen
@@ -279,10 +281,16 @@ function gameBlock(g: Ctx, game: SummaryCard['games'][number]): Block {
   })
   // Notes are full-width regardless of `kind` — they belong to the game, not to
   // a column, so they never take the ledger's right-aligned value treatment.
-  const wrappedNotes = game.notes.map((n) => wrap(g, n, INNER - 28, { size: 17 }))
+  // Empty ones are dropped here so `wrappedNotes.length` and the reserved
+  // height can't disagree: one predicate decides whether the section exists.
+  const wrappedNotes = game.notes
+    .map((n) => wrap(g, n, INNER - 28, { size: 17 }))
+    .filter((rows) => rows.length > 0)
   const body = wrapped.reduce((h, l) => h + l.rows.length * LINE, 0) || LINE
   const notesBody = wrappedNotes.reduce((h, rows) => h + rows.length * NOTE_LINE, 0)
-  const height = 16 + 22 + body + (notesBody > 0 ? notesBody + 10 : 0) + 12
+  // gap · rule · gap · the notes — mirrors the screen's `mt-2.5 border-t pt-2.5`
+  const notesExtra = wrappedNotes.length > 0 ? NOTE_GAP + RULE_H + NOTE_GAP + notesBody : 0
+  const height = 16 + 22 + body + notesExtra + 12
   return {
     height,
     draw(g, y) {
@@ -297,9 +305,40 @@ function gameBlock(g: Ctx, game: SummaryCard['games'][number]): Block {
         })
       }
       let cursor = y + 40
-      const drawNotes = () => {
-        if (wrappedNotes.length === 0) return
-        cursor += 10
+      if (wrapped.length === 0) {
+        text(g, 'No money moved.', PAD + 14, cursor + LINE / 2, { size: 19, color: C.ghost })
+        cursor += LINE
+      } else {
+        for (const line of wrapped) {
+          const x = PAD + 14 + line.indent
+          if (ledger && line.label) {
+            text(g, line.label.toUpperCase(), x, cursor + LINE / 2 + 1, {
+              size: 9,
+              display: true,
+              color: C.gold,
+            })
+          }
+          line.rows.forEach((row, i) => {
+            text(g, row, ledger ? W - PAD - 14 : x, cursor + LINE / 2 + i * LINE, {
+              size: 19,
+              color: C.dim,
+              align: ledger ? 'right' : 'left',
+            })
+          })
+          cursor += line.rows.length * LINE
+        }
+      }
+      // The rule is the whole point of the notes tier: without it a note sits
+      // left-aligned at the same x as the money lines, 10px below them, telling
+      // them apart only by being two points smaller and a shade dimmer. The
+      // screen draws this separator (SettleScreen's `border-t border-stone-800`,
+      // which C.rule matches); the card has to as well, or the surface people
+      // actually SHARE keeps the ambiguity the channel exists to remove.
+      if (wrappedNotes.length > 0) {
+        cursor += NOTE_GAP
+        g.fillStyle = C.rule
+        g.fillRect(PAD + 14, cursor, INNER - 28, RULE_H)
+        cursor += RULE_H + NOTE_GAP
         for (const rows of wrappedNotes) {
           rows.forEach((row, i) => {
             text(g, row, PAD + 14, cursor + NOTE_LINE / 2 + i * NOTE_LINE, {
@@ -310,31 +349,6 @@ function gameBlock(g: Ctx, game: SummaryCard['games'][number]): Block {
           cursor += rows.length * NOTE_LINE
         }
       }
-      if (wrapped.length === 0) {
-        text(g, 'No money moved.', PAD + 14, cursor + LINE / 2, { size: 19, color: C.ghost })
-        cursor += LINE
-        drawNotes()
-        return
-      }
-      for (const line of wrapped) {
-        const x = PAD + 14 + line.indent
-        if (ledger && line.label) {
-          text(g, line.label.toUpperCase(), x, cursor + LINE / 2 + 1, {
-            size: 9,
-            display: true,
-            color: C.gold,
-          })
-        }
-        line.rows.forEach((row, i) => {
-          text(g, row, ledger ? W - PAD - 14 : x, cursor + LINE / 2 + i * LINE, {
-            size: 19,
-            color: C.dim,
-            align: ledger ? 'right' : 'left',
-          })
-        })
-        cursor += line.rows.length * LINE
-      }
-      drawNotes()
     },
   }
 }
