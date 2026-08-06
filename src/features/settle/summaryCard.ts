@@ -1,4 +1,5 @@
-import { getEngine, type GameDerivation } from '../../engine/catalog'
+import type { GameDerivation } from '../../engine/catalog'
+import { gameLabel } from '../../engine/label'
 import type { RoundContext } from '../../engine/core/context'
 import {
   collectorsFrom,
@@ -147,7 +148,7 @@ export function buildSummaryCard(
     return [
       {
         gameId: g.gameId,
-        name: getEngine(g.type)?.meta.name ?? g.type,
+        name: gameLabel(g, round.games),
         allowance:
           g.handicap.mode === 'net' && g.handicap.allowancePct !== 100
             ? `${g.handicap.allowancePct}%`
@@ -167,7 +168,7 @@ export function buildSummaryCard(
   // setup enforces at least one), so this stays optional throughout.
   const strokeGame = round.games.find((g) => g.handicap.mode === 'net')
   const strokeNote = strokeGame
-    ? `underline = handicap stroke (${getEngine(strokeGame.type)?.meta.name ?? strokeGame.type})`
+    ? `underline = handicap stroke (${gameLabel(strokeGame, round.games)})`
     : undefined
 
   const half = (holes: number[]): ScorecardHalf | null => {

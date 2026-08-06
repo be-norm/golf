@@ -6,6 +6,7 @@ import { roundRepo } from '../../db/repos'
 import { effectiveEvents } from '../../engine/core/replay'
 import { formatCentsSigned } from '../../engine/core/money'
 import type { GameAction, InputRequest } from '../../engine/catalog'
+import { gameLabel } from '../../engine/label'
 import { ActionsSheet } from './ActionsSheet'
 import { Sheet } from '../../components/Sheet'
 import { GameSummary } from '../../components/GameSummary'
@@ -299,7 +300,7 @@ export function ScoringScreen() {
                 return (
                   <div key={g.gameId} className="flex items-baseline justify-between gap-3 py-0.5">
                     <span className="font-display text-[10px] uppercase text-felt-300">
-                      {gameName(g.type)}
+                      {gameLabel(g, round.games)}
                     </span>
                     <GameSummary derivation={d} />
                   </div>
@@ -325,13 +326,13 @@ export function ScoringScreen() {
               <div key={g.gameId}>
                 <div className="mb-2.5 flex items-baseline justify-between">
                   <h3 className="font-display flex items-baseline gap-2 text-xs uppercase text-felt-300">
-                    {gameName(g.type)}
+                    {gameLabel(g, round.games)}
                     {g.handicap.mode === 'net' && g.handicap.allowancePct !== 100 && (
                       <span className="text-[10px] text-stone-400">{g.handicap.allowancePct}%</span>
                     )}
                   </h3>
                   <button
-                    aria-label={`${g.type} rules`}
+                    aria-label={`${gameLabel(g, round.games)} rules`}
                     className="font-display text-[10px] uppercase text-felt-400"
                     onClick={() => setRulesFor(g.type)}
                   >
@@ -419,7 +420,7 @@ export function ScoringScreen() {
         actions={actions}
         games={round.games.flatMap((g) => {
           const d = derivations.get(g.gameId)
-          return d ? [{ gameId: g.gameId, name: gameName(g.type), derivation: d }] : []
+          return d ? [{ gameId: g.gameId, name: gameLabel(g, round.games), derivation: d }] : []
         })}
         onTake={takeAction}
         onUndo={undoAction}
@@ -449,8 +450,4 @@ function HoleArrow({
       {dir === 'prev' ? '◀' : '▶'}
     </button>
   )
-}
-
-function gameName(type: string): string {
-  return type.charAt(0).toUpperCase() + type.slice(1)
 }
