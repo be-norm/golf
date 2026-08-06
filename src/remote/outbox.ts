@@ -8,7 +8,7 @@ import type {
 import { setOutboxNotifier } from '../db/outboxSignal'
 import { getDeviceId, newId } from '../db/ids'
 import { eventStore } from '../db/eventStore'
-import type { Course, Player, Round } from '../engine/core/types'
+import type { Player, Round } from '../engine/core/types'
 import type { RoundEvent } from '../engine/core/events'
 import { supabase } from './supabase'
 
@@ -46,14 +46,9 @@ export async function enqueuePushPlayer(userId: string, player: Player): Promise
   await put('pushPlayer', { userId, player })
 }
 
-/**
- * Publish a user-authored course to the shared library so every user can find
- * it. Only ever called for source:'user' courses owned by a signed-in user;
- * RLS pins the row's created_by to the caller.
- */
-export async function enqueuePushCourse(userId: string, course: Course): Promise<void> {
-  await put('pushCourse', { userId, course })
-}
+// pushCourse ops (shared-library publish) are enqueued by CourseRepo itself —
+// saveAuthored/fork/claim write them in the same transaction as the membership
+// they ride with, so there is deliberately no enqueue helper for them here.
 
 export async function enqueueDeleteRound(userId: string, roundId: string): Promise<void> {
   await purgePendingFor(roundId)
