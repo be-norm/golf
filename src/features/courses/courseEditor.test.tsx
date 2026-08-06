@@ -155,4 +155,47 @@ describe('CourseEditorScreen — fork vs update in place (MAI-78)', () => {
     })
     expect((await db.courses.toArray())[0]!.id).not.toBe('lib-orphan')
   })
+
+  it("a foreign card GC'd mid-edit still forks — the draft remembers its owner", async () => {
+    // The card vanishing under an open editor is routine (a removal pulled
+    // from another device GCs it); the draft keeps Save reachable. Deciding
+    // fork-vs-update off `existing` alone then defaulted to "mine" and
+    // stamped our createdBy onto the foreign id — RLS-dead pushes forever
+    // (delta-review finding). The draft still knows who owns the card.
+    await seed(card('lib-import', { createdBy: 'another-golfer-uid' }))
+    const router = createMemoryRouter(routes, { initialEntries: ['/courses/lib-import/edit'] })
+    render(<RouterProvider router={router} />)
+    // start editing, so the screen lives on the draft…
+    await userEvent.type(await screen.findByPlaceholderText('Course name'), '!')
+    // …then the removal lands underneath it
+    await db.saved_courses.delete([LOCAL_USER, 'lib-import'])
+    await db.courses.delete('lib-import')
+    await userEvent.click(screen.getByRole('button', { name: 'Save course' }))
+
+    await waitFor(async () => {
+      expect(await db.courses.count()).toBe(1)
+    })
+    const fork = (await db.courses.toArray())[0]!
+    expect(fork.id).not.toBe('lib-import') // NOT stamped onto the foreign id
+    expect(fork.createdBy).toBe(LOCAL_USER)
+    expect(fork.sourceId).toBe('lib-import')
+    expect(await screen.findByText(/Saved as your version of/)).toBeInTheDocument()
+  })
+})
+
+/** The missing-card render states (both minted by GC: fork + Back, or a
+ *  removal pulled from another device) — a blank page here was a review
+ *  finding, and this pins the fix as reachable UI, not dead code. */
+describe('CourseEditorScreen — missing course', () => {
+  beforeEach(async () => {
+    await Promise.all([db.courses.clear(), db.saved_courses.clear(), db.outbox.clear()])
+  })
+
+  it('shows "Course not found" with a way back, not a permanent blank page', async () => {
+    const router = createMemoryRouter(routes, { initialEntries: ['/courses/gone/edit'] })
+    render(<RouterProvider router={router} />)
+
+    expect(await screen.findByText('Course not found.')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '← Courses' })).toBeInTheDocument()
+  })
 })

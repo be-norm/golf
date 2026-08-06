@@ -126,7 +126,13 @@ export function CourseEditorScreen() {
     // want, and when it isn't, a prompt would offer something the server
     // refuses — so your own updates in place silently, anyone else's forks
     // silently and the list screen states the consequence after the fact.
-    const forking = !isNew && existing != null && !ownsCourse(existing, activeUserId)
+    // Decide off the loaded card while it's there, else off the draft — which
+    // still carries the ORIGINAL createdBy. Gating on `existing != null` alone
+    // minted a trap: a foreign card GC'd mid-edit (its removal pulled from
+    // another device) left `forking` false, and Save stamped our createdBy
+    // onto the foreign id — the permanent RLS-dead-push state ownsCourse
+    // exists to prevent (delta-review finding).
+    const forking = !isNew && !ownsCourse(existing ?? course, activeUserId)
     const base: Course = {
       ...course,
       name: course.name.trim(),

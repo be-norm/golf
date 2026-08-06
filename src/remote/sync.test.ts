@@ -11,23 +11,34 @@ import { courseRepo, roundRepo } from '../db/repos'
 //   from(t).select('…').eq('user_id', uid)    → filtered rows
 const fake = vi.hoisted(() => {
   type Row = Record<string, unknown>
-  const tables: { round_archives: Row[]; players: Row[]; saved_courses: Row[] } = {
+  type SbError = { message: string } | null
+  const tables: { round_archives: Row[]; players: Row[]; saved_courses: Row[]; courses: Row[] } = {
     round_archives: [],
     players: [],
     saved_courses: [],
+    courses: [],
   }
+  // Tables currently failing every write — lets tests exercise the flush's
+  // failure semantics (op retained, attempts+1, capped ops skipped), which a
+  // fake that can never error would leave permanently untested.
+  const failing = new Set<string>()
   function from(table: string) {
     const rows =
       table === 'players'
         ? tables.players
         : table === 'saved_courses'
           ? tables.saved_courses
-          : tables.round_archives
+          : table === 'courses'
+            ? tables.courses
+            : tables.round_archives
+    const errorFor = (): SbError => (failing.has(table) ? { message: 'injected failure' } : null)
     return {
       upsert(
         values: Record<string, unknown>,
         opts?: { onConflict?: string; ignoreDuplicates?: boolean },
       ) {
+        const error = errorFor()
+        if (error) return Promise.resolve({ error })
         const cols = (opts?.onConflict ?? 'id').split(',')
         const i = rows.findIndex((r) => cols.every((c) => r[c] === values[c]))
         if (i >= 0) {
@@ -48,7 +59,9 @@ const fake = vi.hoisted(() => {
             lte.push([c, v as string])
             return b
           },
-          then(res: (r: { error: null }) => void) {
+          then(res: (r: { error: SbError }) => void) {
+            const error = errorFor()
+            if (error) return res({ error })
             for (const r of rows) {
               if (
                 filters.every(([c, v]) => r[c] === v) &&
@@ -85,10 +98,17 @@ const fake = vi.hoisted(() => {
     signedIn: true,
     // whose session the flush runs under — ops for anyone else must wait
     sessionUserId: 'user-1',
+    /** Make (or stop making) every write to a table fail. */
+    fail(table: string, on = true) {
+      if (on) failing.add(table)
+      else failing.delete(table)
+    },
     reset() {
       tables.round_archives = []
       tables.players = []
       tables.saved_courses = []
+      tables.courses = []
+      failing.clear()
       this.signedIn = true
       this.sessionUserId = 'user-1'
     },
@@ -527,6 +547,50 @@ describe('saved courses', () => {
     // other devices then forked their own course on edit (review finding)
     const pushed = fake.tables.saved_courses.find((r) => r.course_id === 'mine')!
     expect((pushed.data as Course).createdBy).toBe(U)
+    // …and the shared-library publish itself lands, under the account —
+    // "publishes" in this test's name used to be asserted nowhere (the fake
+    // routed unknown tables into round_archives, delta-review finding)
+    expect(fake.tables.courses.map((r) => r.id)).toEqual(['mine'])
+    expect(fake.tables.courses[0]!.created_by).toBe(U)
+  })
+
+  it('saveAuthored publishes to the shared library with its provenance chain (ODbL)', async () => {
+    // a fork-shaped card: sourceId names the original it was derived from
+    await courseRepo.saveAuthored(U, {
+      ...course('fork-1', 'Broadmoor (fixed SIs)', 'user', { createdBy: U }),
+      sourceId: 'gca:9',
+    })
+    await drain()
+
+    const row = fake.tables.courses[0]!
+    expect(row.id).toBe('fork-1')
+    expect(row.created_by).toBe(U)
+    expect(row.source).toBe('user')
+    // the ODbL derivation survives into the provenance column — publishing a
+    // derived card as an unattributed original was the review's MAI-78 finding
+    expect(row.source_id).toBe('gca:9')
+    // and the membership push rode the same transaction
+    expect(fake.tables.saved_courses.map((r) => r.course_id)).toEqual(['fork-1'])
+  })
+
+  it('a failed send keeps the op (attempts+1); a capped op is skipped, never sent or deleted', async () => {
+    fake.fail('saved_courses')
+    await courseRepo.save(U, course('c1', 'Broadmoor'))
+    await flushOutbox()
+
+    // failure semantics: retained for retry, one attempt recorded
+    let op = (await db.outbox.toArray())[0]!
+    expect(op.kind).toBe('pushSavedCourse')
+    expect(op.attempts).toBe(1)
+
+    // at the cap the flush walks past it — dead ops must not block the queue,
+    // and applyRemoteSave's tombstone veto is premised on "capped never flushes"
+    await db.outbox.update(op.id, { attempts: 10 })
+    fake.fail('saved_courses', false)
+    await flushOutbox()
+    op = (await db.outbox.toArray())[0]!
+    expect(op.attempts).toBe(10)
+    expect(fake.tables.saved_courses).toHaveLength(0)
   })
 
   it('a stale queued push flushing late cannot rewind a newer save or revive a tombstone flip', async () => {

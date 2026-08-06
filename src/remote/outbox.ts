@@ -106,6 +106,12 @@ export function flushOutbox(): Promise<void> {
   }
   inFlight = drainQueue().finally(() => {
     inFlight = null
+    // A join can land between drainQueue's final `while (rerun)` check and
+    // this cleanup — its flag would be set on a run that will never re-read
+    // it, and the op it announced would sit until the next external trigger.
+    // Relaunch instead; the new run resets `rerun` first thing, so this can't
+    // spin (an offline relaunch no-ops and stops).
+    if (rerun) void flushOutbox()
   })
   return inFlight
 }
