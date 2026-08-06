@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import fc from 'fast-check'
 import '../games/index'
-import { deriveRound, listEngines } from '../catalog'
+import { deriveRound, getEngine, listEngines } from '../catalog'
 import { EventLog, makePlayers, makeRound } from '../test/harness'
-import { arbitraryRoundAndEvents, GAME_FUZZ } from '../test/arbitraries'
+import { arbitraryRoundAndEvents, GAME_FUZZ, GUARD_ENGINE_TYPE } from '../test/arbitraries'
 import { assertZeroSum, minimalTransfers } from './money'
 import type { RoundEvent } from './events'
 import { effectiveEvents } from './replay'
@@ -55,9 +55,31 @@ describe('replay invariants (fast-check)', () => {
    * in `GAME_FUZZ` (src/engine/test/arbitraries.ts), and the failure says so.
    */
   it('every registered engine contributes an arbitrary', () => {
-    expect(new Set(GAME_FUZZ.map((g) => g.type))).toEqual(
-      new Set(listEngines().map((e) => e.type)),
-    )
+    // the guard file's deliberately broken engine is excluded BY NAME rather
+    // than by trusting vitest to isolate modules per file — see GUARD_ENGINE_TYPE
+    const registered = listEngines()
+      .map((e) => e.type)
+      .filter((t) => t !== GUARD_ENGINE_TYPE)
+    expect(new Set(GAME_FUZZ.map((g) => g.type))).toEqual(new Set(registered))
+  })
+
+  /**
+   * A fuzz entry whose config the engine rejects would leave the game inert —
+   * Nassau sides that post no scores, a Wolf rotation naming nobody — and every
+   * property above would pass over rounds that exercise nothing. Cheaper to
+   * check once here than inside the generator, which runs thousands of times.
+   */
+  it('every fuzzed config is one its engine would actually accept', () => {
+    for (const playerCount of [2, 3, 4]) {
+      const { round } = fc
+        .sample(arbitraryRoundAndEvents(), { numRuns: 40, seed: 7 })
+        .find((s) => s.round.players.length === playerCount)!
+      for (const game of round.games) {
+        const engine = getEngine(game.type)!
+        expect(engine.configSchema.safeParse(game.config).success, `${game.type} config`).toBe(true)
+        expect(engine.validateSetup(game, round.players), `${game.type} setup`).toEqual([])
+      }
+    }
   })
 
   /**

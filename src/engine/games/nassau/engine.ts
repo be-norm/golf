@@ -115,7 +115,7 @@ function derive(
       segment: seg,
       startHole: spans[seg][0]!,
       depth: 0,
-      ...newMatch(),
+      ...newMatch(spans[seg], spans[seg][0]!),
     }))
 
   for (const press of manualPresses.values()) {
@@ -126,7 +126,7 @@ function derive(
       segment: press.segment,
       startHole: press.hole,
       depth: 1,
-      ...newMatch(),
+      ...newMatch(spans[press.segment], press.hole),
     })
   }
 
@@ -140,7 +140,6 @@ function derive(
     back: toPlayAfterIn(spans.back),
     overall: toPlayAfterIn(spans.overall),
   }
-  const toPlayAfter = (segment: Segment, hole: number) => toPlayAfterBySegment[segment](hole)
 
   // Single accumulation walk. Auto-presses spawn when a bet's diff transitions
   // into exactly ±2 (from a smaller gap), starting the NEXT hole of the same
@@ -164,7 +163,7 @@ function derive(
         bet,
         hole,
         result,
-        toPlayAfter(bet.segment, hole),
+        toPlayAfterBySegment[bet.segment](hole),
         // whether a to-play count may be quoted: a bet that runs out of room on
         // a hole nobody played degrades to "2 up" (core/match.ts)
         ctx.anyScored(hole),
@@ -193,7 +192,7 @@ function derive(
           segment: bet.segment,
           startHole: nextHole,
           depth: bet.depth + 1,
-          ...newMatch(),
+          ...newMatch(spans[bet.segment], nextHole),
         })
       }
     }
@@ -254,8 +253,8 @@ function derive(
     if (won === null) continue
     const winSide: MatchSide = bet.diff > 0 ? 'a' : 'b'
     const loseSide: MatchSide = winSide === 'a' ? 'b' : 'a'
-    const winners = bet.diff > 0 ? sideA : sideB
-    const losers = bet.diff > 0 ? sideB : sideA
+    const winners = sides[winSide]
+    const losers = sides[loseSide]
     const winEach = sideStake(stakeCents, sides, winSide)
     const loseEach = sideStake(stakeCents, sides, loseSide)
     addLine(settlement, {

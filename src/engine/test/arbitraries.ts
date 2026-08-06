@@ -28,33 +28,47 @@ export interface FuzzEvent {
   data: Record<string, unknown>
 }
 
+/** A game's config for a round, plus the events it emits as holes are scored. */
+export interface FuzzGame {
+  config: unknown
+  /**
+   * Per-hole game events, called in log order AFTER that hole's scores are
+   * appended — the same interleaving a scorekeeper produces.
+   */
+  events?: (hole: number, idx: number) => FuzzEvent[]
+}
+
 export interface GameFuzz {
   /** must match the registered engine's `type` */
   type: string
   /** can this engine legally join a round of this size? */
   eligible(playerCount: number): boolean
   /**
-   * This game's config, plus optional per-hole events. `events(hole, idx)` is
-   * called in log order, AFTER that hole's scores are appended — the same
-   * interleaving a scorekeeper produces.
+   * Seeds for this game, resolved into a config once the round's players exist.
+   *
+   * The two-step shape — an arbitrary of a FUNCTION of ids, rather than an
+   * arbitrary taking ids — is what lets the generator keep every random field
+   * in ONE flat `fc.record`. Deciding the player count first and generating
+   * configs inside a `.chain()` would put the whole round behind a combinator
+   * fast-check documents as shrinking poorly, and a suite whose entire value is
+   * the MINIMAL counterexample cannot afford that: a real zero-sum bug would
+   * report a full 18×4 score matrix instead of the two holes that cause it.
    */
-  arbitrary(ids: readonly Uuid[]): fc.Arbitrary<{
-    config: unknown
-    events?: (hole: number, idx: number) => FuzzEvent[]
-  }>
+  arbitrary(): fc.Arbitrary<(ids: readonly Uuid[]) => FuzzGame>
 }
 
 const skinsFuzz: GameFuzz = {
   type: 'skins',
   eligible: (n) => n >= 2,
-  arbitrary: () => fc.boolean().map((carryover) => ({ config: { stakeCents: 100, carryover } })),
+  arbitrary: () =>
+    fc.boolean().map((carryover) => () => ({ config: { stakeCents: 100, carryover } })),
 }
 
 const nassauFuzz: GameFuzz = {
   type: 'nassau',
   eligible: (n) => n >= 2,
-  arbitrary: (ids) =>
-    fc.boolean().map((autoPress) => ({
+  arbitrary: () =>
+    fc.boolean().map((autoPress) => (ids) => ({
       config: {
         stakeCents: 500,
         // 2 → singles, 3 → 2v1 (uneven split), 4 → 2v2. The 2v1 is the point:
@@ -75,43 +89,45 @@ const sixPointFuzz: GameFuzz = {
   type: 'sixPoint',
   // threesome-only, but it joins the fuzz like every other money game
   eligible: (n) => n === 3,
-  arbitrary: () => fc.constant({ config: { pointCents: 25 } }),
+  arbitrary: () => fc.constant(() => ({ config: { pointCents: 25 } })),
 }
 
 const vegasFuzz: GameFuzz = {
   type: 'vegas',
   eligible: (n) => n === 4,
-  arbitrary: (ids) =>
-    fc.constant({
+  arbitrary: () =>
+    fc.constant((ids: readonly Uuid[]) => ({
       config: {
         pointCents: 10,
         teams: { a: [ids[0]!, ids[2]!], b: [ids[1]!, ids[3]!] },
         birdieFlip: true,
         eagleDouble: true,
       },
-    }),
+    })),
 }
 
 const wolfFuzz: GameFuzz = {
   type: 'wolf',
   eligible: (n) => n === 4,
-  arbitrary: (ids) =>
+  arbitrary: () =>
     // one pick seed per hole: 0-2 partner index, 3 lone, 4 blind, 5 no pick yet
-    fc.array(fc.integer({ min: 0, max: 5 }), { minLength: 18, maxLength: 18 }).map((seeds) => ({
-      config: { pointCents: 100, rotation: [...ids] },
-      events: (hole: number, idx: number) => {
-        const seed = seeds[idx]!
-        if (seed >= 5) return []
-        // the wolf the rotation assigns, mirroring the engine. On the last
-        // holes the engine switches to fewest-points, so a seeded pick can go
-        // stale there — which is itself worth fuzzing, since a stale pick must
-        // fall back to pending rather than compute a degenerate side.
-        const wolfId = ids[idx % 4]!
-        const others = ids.filter((id) => id !== wolfId)
-        const choice = seed < 3 ? others[seed]! : seed === 3 ? 'lone' : 'blind'
-        return [{ kind: 'wolf/pick', data: { hole, choice } }]
-      },
-    })),
+    fc
+      .array(fc.integer({ min: 0, max: 5 }), { minLength: 18, maxLength: 18 })
+      .map((seeds) => (ids: readonly Uuid[]) => ({
+        config: { pointCents: 100, rotation: [...ids] },
+        events: (hole: number, idx: number) => {
+          const seed = seeds[idx]!
+          if (seed >= 5) return []
+          // the wolf the rotation assigns, mirroring the engine. On the last
+          // holes the engine switches to fewest-points, so a seeded pick can go
+          // stale there — which is itself worth fuzzing, since a stale pick must
+          // fall back to pending rather than compute a degenerate side.
+          const wolfId = ids[idx % 4]!
+          const others = ids.filter((id) => id !== wolfId)
+          const choice = seed < 3 ? others[seed]! : seed === 3 ? 'lone' : 'blind'
+          return [{ kind: 'wolf/pick', data: { hole, choice } }]
+        },
+      })),
 }
 
 /**
@@ -126,15 +142,25 @@ export const GAME_FUZZ: readonly GameFuzz[] = [
   wolfFuzz,
 ]
 
-const PLAYER_NAMES = ['A', 'B', 'C', 'D'] as const
+/**
+ * The engine type `replay.guard.test.ts` registers to prove the suite catches a
+ * non-zero-sum settlement. Named here, and excluded by name from the
+ * every-engine-has-an-arbitrary check, so that check does not depend on vitest
+ * isolating modules per file — a `pool`/`isolate` change in vitest.config.ts
+ * would otherwise fail the wrong test in the wrong file.
+ */
+export const GUARD_ENGINE_TYPE = 'broken'
 
-/** Player ids as `makePlayers` mints them, known before the players exist. */
-const idsFor = (playerCount: number): Uuid[] =>
-  PLAYER_NAMES.slice(0, playerCount).map((name) => `p-${name.toLowerCase()}`)
+const PLAYER_NAMES = ['A', 'B', 'C', 'D'] as const
 
 /**
  * A round of 2–4 players with every eligible game, and a log of hole-by-hole
  * scores interleaved with each game's own events.
+ *
+ * Every random field lives in ONE flat `fc.record` — including the player
+ * count — so fast-check can shrink them jointly. Games are generated for all
+ * entries and the ineligible ones dropped afterwards, which costs a few unused
+ * draws and buys minimal counterexamples. See `GameFuzz.arbitrary`.
  *
  * `extra` appends fuzz entries for engines registered by the calling test —
  * used by `replay.guard.test.ts` to prove the suite actually fails on a broken
@@ -143,57 +169,63 @@ const idsFor = (playerCount: number): Uuid[] =>
  */
 export function arbitraryRoundAndEvents(extra: readonly GameFuzz[] = []) {
   const registry = [...GAME_FUZZ, ...extra]
-  return fc.integer({ min: 2, max: 4 }).chain((playerCount) => {
-    const ids = idsFor(playerCount)
-    const entries = registry.filter((g) => g.eligible(playerCount))
-    return fc
-      .record({
-        handicaps: fc.array(fc.integer({ min: -3, max: 24 }), { minLength: 4, maxLength: 4 }),
-        net: fc.boolean(),
-        // per hole per player: gross score or null (unscored)
-        scores: fc.array(
-          fc.array(fc.option(fc.integer({ min: 1, max: 12 }), { nil: null }), {
-            minLength: 4,
-            maxLength: 4,
-          }),
-          { minLength: 1, maxLength: 18 },
-        ),
-        games: fc.tuple(...entries.map((g) => g.arbitrary(ids))),
-      })
-      .map(({ handicaps, net, scores, games }) => {
-        const players = makePlayers(
-          PLAYER_NAMES.slice(0, playerCount).map((name, i) => ({ name, ch: handicaps[i]! })),
-        )
-        const handicap: HandicapSettings = net
-          ? { mode: 'net', allowancePct: 100, reference: 'offLow' }
-          : { mode: 'gross', allowancePct: 100, reference: 'absolute' }
+  return fc
+    .record({
+      playerCount: fc.integer({ min: 2, max: 4 }),
+      handicaps: fc.array(fc.integer({ min: -3, max: 24 }), { minLength: 4, maxLength: 4 }),
+      net: fc.boolean(),
+      // per hole per player: gross score or null (unscored)
+      scores: fc.array(
+        fc.array(fc.option(fc.integer({ min: 1, max: 12 }), { nil: null }), {
+          minLength: 4,
+          maxLength: 4,
+        }),
+        { minLength: 1, maxLength: 18 },
+      ),
+      games: fc.tuple(...registry.map((g) => g.arbitrary())),
+    })
+    .map(({ playerCount, handicaps, net, scores, games }) => {
+      const players = makePlayers(
+        PLAYER_NAMES.slice(0, playerCount).map((name, i) => ({ name, ch: handicaps[i]! })),
+      )
+      // READ the ids off the players rather than re-deriving the harness's id
+      // scheme. A private copy that drifts would point every `teams` and
+      // `rotation` at players who aren't in the round — and the games would
+      // still derive, settling $0 for everyone. Zero-sum, determinism and
+      // retraction-equivalence would all pass over rounds that test nothing.
+      const ids = players.map((p) => p.playerId)
+      const handicap: HandicapSettings = net
+        ? { mode: 'net', allowancePct: 100, reference: 'offLow' }
+        : { mode: 'gross', allowancePct: 100, reference: 'absolute' }
 
-        const round = makeRound({
-          players,
-          holes: 'full18',
-          games: entries.map((g, i) => ({ type: g.type, config: games[i]!.config, handicap })),
-        })
+      const entries = registry
+        .map((g, i) => ({ type: g.type, game: games[i]!(ids), eligible: g.eligible(playerCount) }))
+        .filter((e) => e.eligible)
 
-        const log = new EventLog()
-        scores.forEach((byPlayer, holeIdx) => {
-          const hole = holeIdx + 1
-          players.forEach((p, pi) => {
-            const gross = byPlayer[pi]
-            if (gross !== null && gross !== undefined) {
-              log.append({ type: 'score/set', playerId: p.playerId, hole, gross })
-            }
-          })
-          // each game's own events land after that hole's scores, in log order
-          entries.forEach((_, gi) => {
-            const emit = games[gi]!.events
-            if (!emit) return
-            const gameId = round.games[gi]!.gameId
-            for (const e of emit(hole, holeIdx)) {
-              log.append({ type: 'game/event', gameId, kind: e.kind, data: e.data })
-            }
-          })
-        })
-        return { round, log }
+      const round = makeRound({
+        players,
+        holes: 'full18',
+        games: entries.map((e) => ({ type: e.type, config: e.game.config, handicap })),
       })
-  })
+
+      const log = new EventLog()
+      scores.forEach((byPlayer, holeIdx) => {
+        const hole = holeIdx + 1
+        players.forEach((p, pi) => {
+          const gross = byPlayer[pi]
+          if (gross !== null && gross !== undefined) {
+            log.append({ type: 'score/set', playerId: p.playerId, hole, gross })
+          }
+        })
+        // each game's own events land after that hole's scores, in log order
+        entries.forEach((e, gi) => {
+          if (!e.game.events) return
+          const gameId = round.games[gi]!.gameId
+          for (const ev of e.game.events(hole, holeIdx)) {
+            log.append({ type: 'game/event', gameId, kind: ev.kind, data: ev.data })
+          }
+        })
+      })
+      return { round, log }
+    })
 }

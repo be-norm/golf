@@ -4,7 +4,7 @@ import { z } from 'zod'
 import '../games/index'
 import { deriveRound, registerEngine, type GameEngine } from '../catalog'
 import { addLine, assertZeroSum, emptySettlement } from './money'
-import { arbitraryRoundAndEvents, type GameFuzz } from '../test/arbitraries'
+import { arbitraryRoundAndEvents, GUARD_ENGINE_TYPE, type GameFuzz } from '../test/arbitraries'
 
 /**
  * Is the alarm wired to anything?
@@ -14,14 +14,16 @@ import { arbitraryRoundAndEvents, type GameFuzz } from '../test/arbitraries'
  * silently stopped running. This registers an engine that invents money out of
  * nothing and proves the property FAILS on it (MAI-51).
  *
- * The bogus engine is registered into the module-global registry, which is safe
- * because vitest isolates modules per test FILE: nothing here reaches the real
- * suite. It still ships complete `meta.rules` so that even if isolation were
- * ever turned off, it would not also trip `catalog.test.ts` and send the next
- * reader hunting the wrong bug.
+ * The bogus engine is registered into the module-global registry, and there is
+ * no unregister. Vitest isolates modules per test FILE, so it does not reach the
+ * real suite — but that is a CONFIG DEFAULT, not a guarantee: flipping `isolate`
+ * in vitest.config.ts would leak it. So the two tests it could break are both
+ * defended by name instead of by isolation. `replay.test.ts` excludes
+ * GUARD_ENGINE_TYPE from its every-engine-has-an-arbitrary check, and this
+ * engine ships complete `meta.rules` so `catalog.test.ts` stays green too.
  */
 const brokenEngine: GameEngine<{ stakeCents: number }> = {
-  type: 'broken',
+  type: GUARD_ENGINE_TYPE,
   meta: {
     name: 'Broken',
     blurb: 'Test-only engine that pays a player from nowhere.',
@@ -59,9 +61,9 @@ const brokenEngine: GameEngine<{ stakeCents: number }> = {
 }
 
 const brokenFuzz: GameFuzz = {
-  type: 'broken',
+  type: GUARD_ENGINE_TYPE,
   eligible: () => true,
-  arbitrary: () => fc.constant({ config: { stakeCents: 100 } }),
+  arbitrary: () => fc.constant(() => ({ config: { stakeCents: 100 } })),
 }
 
 describe('the property suite catches a broken engine', () => {
@@ -81,9 +83,14 @@ describe('the property suite catches a broken engine', () => {
       // the mechanism itself is named by the assertions below
     ).toThrow(/Property failed/)
 
-    const { round, log } = fc.sample(arbitraryRoundAndEvents([brokenFuzz]), { numRuns: 1 })[0]!
+    // an explicit seed: a test written to prove the alarm is reliable must not
+    // itself draw a different round on every CI run
+    const { round, log } = fc.sample(arbitraryRoundAndEvents([brokenFuzz]), {
+      numRuns: 1,
+      seed: 1,
+    })[0]!
     const { derivations } = deriveRound(round, log.events)
-    const broken = round.games.find((g) => g.type === 'broken')!
+    const broken = round.games.find((g) => g.type === GUARD_ENGINE_TYPE)!
     expect(() => assertZeroSum(derivations.get(broken.gameId)!.settlement)).toThrow(
       /not zero-sum/,
     )

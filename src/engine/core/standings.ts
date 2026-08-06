@@ -1,5 +1,5 @@
 import type { Settlement } from './money'
-import type { RoundPlayer, StandingLine, Uuid } from './types'
+import type { RoundPlayer, StandingLine } from './types'
 
 /**
  * The standings every game shows: one row per player, richest first, each
@@ -11,6 +11,10 @@ import type { RoundPlayer, StandingLine, Uuid } from './types'
  * could see. It lives in its own module rather than beside the points helpers
  * because Skins and Nassau are not points games and their imports should not
  * imply they are.
+ *
+ * PLAYER ROWS ONLY. `StandingLine.id` is documented as "playerId or team key",
+ * but this builds one row per player; a game that wants to stand teams up as
+ * rows needs its own builder rather than a widened parameter here.
  */
 export function standingsFromSettlement(
   players: readonly RoundPlayer[],
@@ -20,7 +24,7 @@ export function standingsFromSettlement(
 ): StandingLine[] {
   return players
     .map((p) => ({
-      id: p.playerId as Uuid,
+      id: p.playerId,
       label: p.name,
       detail: detail?.(p),
       amountCents: settlement.perPlayerCents[p.playerId] ?? 0,

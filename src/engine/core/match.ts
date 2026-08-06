@@ -55,7 +55,11 @@ export interface MatchSides {
 export function matchHoleResults(
   ctx: RoundContext,
   gameId: Uuid,
-  sides: MatchSides,
+  // only the rosters, not a full MatchSides: a game may want hole results
+  // before it has anything to name the sides with, and demanding a `short` it
+  // will never call invites exactly the throwaway stub that field is named to
+  // prevent. MatchSides satisfies this structurally, so callers pass it as-is.
+  sides: { a: readonly Uuid[]; b: readonly Uuid[] },
 ): Map<number, MatchHoleResult> {
   const results = new Map<number, MatchHoleResult>()
   for (const hole of ctx.holesPlayed) {
@@ -118,6 +122,16 @@ export interface MatchState {
   diff: number
   /** diff after each decided hole, recorded during the accumulation walk */
   history: Map<number, number>
+  /**
+   * Holes of this match's stretch that are not yet decided. Seeded to the whole
+   * stretch by `newMatch` and re-derived by the engine (`holesRemainingIn`) once
+   * it knows which holes decided — `scoreMatchHole` can't maintain it, since a
+   * match doesn't carry its own span.
+   *
+   * Seeded rather than left at 0 because `matchClosed` reads it: a fresh match
+   * starting at 0 would report as a PUSH before a ball was struck, and the
+   * engine that noticed would be the one whose money settled early.
+   */
   holesRemaining: number
   /**
    * The hole this match became mathematically decided on — up more holes than
@@ -130,8 +144,16 @@ export interface MatchState {
   closeToPlay?: number
 }
 
-export function newMatch(): MatchState {
-  return { diff: 0, history: new Map(), holesRemaining: 0 }
+/**
+ * A live match over `span` from `startHole` on. The span is required precisely
+ * so `holesRemaining` starts honest — see the note on that field.
+ */
+export function newMatch(span: readonly number[], startHole: number): MatchState {
+  return {
+    diff: 0,
+    history: new Map(),
+    holesRemaining: span.filter((h) => h >= startHole).length,
+  }
 }
 
 /**
@@ -149,6 +171,16 @@ export function newMatch(): MatchState {
  * once. Quoting a count there invents golf: an 18 abandoned after 5 holes would
  * announce "won 2&1" about a match whose last 13 holes never happened. Falling
  * back to the plain "2 up" is the honest statement of where the bet ended.
+ *
+ * A DECIDED MATCH IS INERT HERE. A match that is over is over: its remaining
+ * holes must not drift the margin the group wrote down, so 3&2 stays 3&2 even
+ * if the loser takes the last two. Nassau enforced this by filtering closed
+ * bets out of its walk, and that filter is a Nassau implementation detail —
+ * leaving the rule there would mean every match game the kit was written for
+ * re-deriving it, and the one that forgot would rewrite `closedAt` to a later
+ * hole, report "1 up" for a match won 3&2, and pay whichever side happened to
+ * be ahead at the end. Zero-sum still holds through all of that, so no property
+ * test would see it. The rule belongs at the choke point.
  */
 export function scoreMatchHole(
   match: MatchState,
@@ -157,6 +189,7 @@ export function scoreMatchHole(
   toPlayAfter: number,
   played: boolean,
 ): number {
+  if (match.closedAt !== undefined) return match.diff
   const before = match.diff
   match.diff += result
   match.history.set(hole, match.diff)

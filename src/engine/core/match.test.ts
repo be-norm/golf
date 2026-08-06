@@ -102,13 +102,15 @@ describe('toPlayAfterIn', () => {
 })
 
 describe('match state', () => {
+  /** a full nine, for matches whose span doesn't matter to the assertion */
+  const FULL = [1, 2, 3, 4, 5, 6, 7, 8, 9]
   const decided = (holes: number[]) =>
     new Map<number, MatchHoleResult>(holes.map((h) => [h, 1 as MatchHoleResult]))
 
   it('closes when a side is up more holes than the match has left, and freezes there', () => {
     const span = [1, 2, 3, 4, 5]
     const after = toPlayAfterIn(span)
-    const m = newMatch()
+    const m = newMatch(span, 1)
     // A wins 1, 2, 3 → 3 up with 2 to play, decided on hole 3
     for (const hole of [1, 2, 3]) scoreMatchHole(m, hole, 1, after(hole), true)
     expect(m.closedAt).toBe(3)
@@ -116,8 +118,30 @@ describe('match state', () => {
     expect(matchWonLabel(m, sides(['Ann'], ['Bob']))).toBe('Ann wins 3&2')
   })
 
+  /**
+   * A match that is over is over. Nassau enforced this by filtering closed bets
+   * out of its walk, which meant every other match game had to re-derive the
+   * rule — and the one that forgot would rewrite `closedAt` to a later hole and
+   * pay whichever side was ahead at the end, with zero-sum intact the whole way.
+   */
+  it('is inert once decided — the margin cannot drift on later holes', () => {
+    const span = [1, 2, 3, 4, 5]
+    const after = toPlayAfterIn(span)
+    const m = newMatch(span, 1)
+    for (const hole of [1, 2, 3]) scoreMatchHole(m, hole, 1, after(hole), true)
+    expect(matchWonLabel(m, sides(['Ann'], ['Bob']))).toBe('Ann wins 3&2')
+
+    // B takes the dead holes — a caller without Nassau's filter would score them
+    for (const hole of [4, 5]) scoreMatchHole(m, hole, -1, after(hole), true)
+    expect(m.closedAt).toBe(3)
+    expect(m.closeToPlay).toBe(2)
+    expect(m.diff).toBe(3)
+    expect(m.history.has(4)).toBe(false)
+    expect(matchWonLabel(m, sides(['Ann'], ['Bob']))).toBe('Ann wins 3&2')
+  })
+
   it('returns the diff BEFORE the hole, so callers can see the crossing', () => {
-    const m = newMatch()
+    const m = newMatch(FULL, 1)
     expect(scoreMatchHole(m, 1, 1, 8, true)).toBe(0)
     expect(scoreMatchHole(m, 2, 1, 7, true)).toBe(1)
     expect(m.diff).toBe(2)
@@ -129,28 +153,38 @@ describe('match state', () => {
    * "2&1" there describes holes that never happened (MAI-38).
    */
   it('degrades to a plain N up when the deciding hole was never played', () => {
-    const m = newMatch()
+    const m = newMatch([6], 6)
     scoreMatchHole(m, 6, 1, 0, false)
     expect(m.closedAt).toBe(6)
     expect(m.closeToPlay).toBe(0)
     expect(matchWonLabel(m, sides(['Ann'], ['Bob']))).toBe(`Ann wins 1${NBSP}up`)
   })
 
-  it('reports a live match and a push as unwon', () => {
-    const live = newMatch()
+  /**
+   * `holesRemaining` is seeded by `newMatch` and re-derived by the engine once
+   * it knows which holes decided — `scoreMatchHole` cannot maintain it, because
+   * a match doesn't carry its own span. Both halves are exercised here rather
+   * than hand-patching the field: seeding is what stops a fresh match reading
+   * as a push, and the re-derive is what makes a real push read as one.
+   */
+  it('reports a live match as live and a played-out tie as a push', () => {
+    const live = newMatch(FULL, 1)
     scoreMatchHole(live, 1, 1, 8, true)
-    live.holesRemaining = 8
+    expect(matchClosed(live)).toBe(false)
+    live.holesRemaining = holesRemainingIn(FULL, 1, decided([1]))
     expect(matchWonLabel(live, sides(['Ann'], ['Bob']))).toBeNull()
     expect(matchClosed(live)).toBe(false)
 
-    const push = newMatch()
+    const push = newMatch([1], 1)
+    expect(matchClosed(push)).toBe(false) // not decided before a ball is struck
     scoreMatchHole(push, 1, 0, 0, true)
+    push.holesRemaining = holesRemainingIn([1], 1, decided([1]))
     expect(matchWonLabel(push, sides(['Ann'], ['Bob']))).toBeNull()
     expect(matchClosed(push)).toBe(true)
   })
 
   it('agrees with the side on the verb — a pair win, a lone player wins', () => {
-    const m = newMatch()
+    const m = newMatch([3], 3)
     scoreMatchHole(m, 3, -1, 0, true)
     expect(matchWonLabel(m, sides(['Ann'], ['Bob & Cy']))).toBe(`Bob & Cy wins 1${NBSP}up`)
     expect(matchWonLabel(m, sides(['Ann'], ['Bob', 'Cy']))).toBe(`Bob & Cy win 1${NBSP}up`)

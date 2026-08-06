@@ -2,31 +2,44 @@ import type { Uuid } from './types'
 
 /**
  * The points kit: hand out a hole's prizes by rank, then turn a round's points
- * into money. Six Point and Wolf each had one half of this privately; Nines,
- * Aces & Deuces, Defender, Quota and Stableford need them both (MAI-49).
+ * into money. Six Point and Wolf each had one half of this privately.
+ *
+ * `rankPoints` is for games that rank a field and split fixed prizes — Nines,
+ * Aces & Deuces, Defender. `pointsToMoney` settles any game that keeps a
+ * running point total, which is those plus Stableford and Quota (they award
+ * points off a table, with no ranking step) (MAI-49).
  */
 
 /**
- * Rank slots — the field sorted by score, ties sharing the AVERAGE of the slots
- * they span. Every tie rule a rank-points game needs falls out of that one
- * sentence rather than being enumerated per game. With Six Point's `[4, 2, 0]`:
+ * Rank slots — the field sorted by score ASCENDING (golf: lowest wins, so slot
+ * 0 goes to the lowest `score`), ties sharing the AVERAGE of the slots they
+ * span. Every tie rule a rank-points game needs falls out of that one sentence
+ * rather than being enumerated per game. With Six Point's `[4, 2, 0]`:
  *
  *   distinct scores      → 4 · 2 · 0
  *   two tie for low      → (4+2)/2 each → 3 · 3 · 0
  *   two tie for worst    → 4 · (2+0)/2 each → 4 · 1 · 1
  *   all three tie        → (4+2+0)/3 each → 2 · 2 · 2
  *
- * CHOOSE SLOTS SO EVERY TIE AVERAGE IS WHOLE, or points stop being integers and
- * the money that rides on them stops being cents. `[4,2,0]` and Nines' `[5,3,1]`
- * both satisfy it for every tie shape; `points.test.ts` pins that for the sets
- * we ship.
+ * A HIGHER-IS-BETTER game must negate before calling: pass Stableford points as
+ * `-points` or the top slot goes to the worst player, which is a settlement that
+ * is exactly inverted and still perfectly zero-sum — no property test can see it.
  *
- * NULL when the field doesn't match the slots — the hole has no distribution,
- * which is Six Point's existing "void". Deliberately not a throw: `deriveRound`
- * has no try/catch and reducers stay total (catalog.ts), so throwing here is a
- * live round crashing over a missing score. Returning null puts the constraint
- * IN the choke point, where a game that forgets to pre-check still cannot
- * compute a bogus distribution.
+ * NULL in two cases, both of which mean "this hole has no distribution" — which
+ * is Six Point's existing "void":
+ *
+ *  1. The field doesn't match the slots (a missing score). A runtime condition.
+ *  2. A tie average isn't a whole number. That is a CHOICE OF SLOTS being wrong,
+ *     and it is refused rather than described, because CLAUDE.md invariant #3 is
+ *     that money is integer cents: `[4,3,0]` ties two low players at 3.5, and
+ *     `pointsToMoney` would happily settle that as half a cent. `[4,2,0]` and
+ *     Nines' `[5,3,1]` satisfy it for every tie shape. A game wired to slots
+ *     that don't will void its first tied hole and its golden test will say so
+ *     immediately — far better than money that doesn't reconcile.
+ *
+ * Deliberately not a throw for either: `deriveRound` has no try/catch and
+ * reducers stay total (catalog.ts), so throwing here is a live round crashing
+ * over a missing score.
  */
 export function rankPoints(
   scored: readonly { id: Uuid; score: number }[],
@@ -41,6 +54,8 @@ export function rankPoints(
     while (j < sorted.length && sorted[j]!.score === sorted[i]!.score) j++
     const span = slots.slice(i, j)
     const avg = span.reduce((a, b) => a + b, 0) / span.length
+    // the slot-choice constraint, enforced rather than described
+    if (!Number.isInteger(avg)) return null
     for (let k = i; k < j; k++) points[sorted[k]!.id] = avg
     i = j
   }

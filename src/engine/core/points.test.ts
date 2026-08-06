@@ -66,7 +66,7 @@ describe('rankPoints', () => {
     expect(rankPoints([], [4, 2, 0])).toBeNull()
   })
 
-  it('conserves the pot: the distribution always sums to the slots', () => {
+  it('conserves the pot EXACTLY whenever it distributes at all', () => {
     fc.assert(
       fc.property(
         fc.integer({ min: 2, max: 5 }).chain((n) =>
@@ -76,35 +76,61 @@ describe('rankPoints', () => {
           ),
         ),
         ([scores, slots]) => {
-          const points = rankPoints(scoredFrom(scores), slots)!
+          const points = rankPoints(scoredFrom(scores), slots)
+          // a slot set whose ties don't average whole returns null rather than
+          // fractions, so this is exact equality — no float tolerance needed
+          if (points === null) return
           const dealt = Object.values(points).reduce((a, b) => a + b, 0)
-          const available = slots.reduce((a, b) => a + b, 0)
-          // tolerance, not equality: an arbitrary slot set can average to a
-          // repeating fraction. Integrality is a constraint on the slot sets we
-          // CHOOSE, asserted exactly below.
-          expect(dealt).toBeCloseTo(available, 9)
+          expect(dealt).toBe(slots.reduce((a, b) => a + b, 0))
         },
       ),
     )
   })
 
   /**
-   * The real constraint behind slot choice: with these sets, every tie average
-   * is a whole number, so points stay integers and the money riding on them
-   * stays cents. A future game picking [4,3,0] would tie two low players at 3.5
-   * and this is where it finds out.
+   * CLAUDE.md invariant #3: money is integer cents. `pointsToMoney` multiplies
+   * these straight into cents, so fractional points would settle half-pennies —
+   * zero-sum, unroundable, and impossible to reconcile against what players
+   * actually hand each other. The constraint is enforced here rather than
+   * described: a game wired to [4,3,0] ties two low players at 3.5, and gets
+   * null (a void hole its golden test will shout about) instead of 12.5¢.
    */
-  it('keeps points integral for every tie shape of the slot sets we ship', () => {
+  it('refuses slots whose ties do not average whole', () => {
+    expect(rankPoints(scoredFrom([4, 4, 5]), [4, 3, 0])).toBeNull()
+    expect(rankPoints(scoredFrom([4, 4, 4]), [1, 0, 0])).toBeNull()
+    // distinct scores never average, so the same slots are fine untied
+    expect(rankPoints(scoredFrom([4, 5, 6]), [4, 3, 0])).toEqual({
+      'p-0': 4,
+      'p-1': 3,
+      'p-2': 0,
+    })
+  })
+
+  it('always yields integral points for the slot sets we ship', () => {
     fc.assert(
       fc.property(
         fc.constantFrom(...SHIPPED_SLOTS),
         fc.array(fc.integer({ min: 1, max: 3 }), { minLength: 3, maxLength: 3 }),
         (slots, scores) => {
-          const points = rankPoints(scoredFrom(scores), slots)!
-          for (const p of Object.values(points)) expect(Number.isInteger(p)).toBe(true)
+          const points = rankPoints(scoredFrom(scores), slots)
+          // never null for these: that IS the property that makes them shippable
+          expect(points).not.toBeNull()
+          for (const p of Object.values(points!)) expect(Number.isInteger(p)).toBe(true)
         },
       ),
     )
+  })
+
+  /**
+   * Golf ranks ascending — lowest score takes the top slot. A higher-is-better
+   * game (Stableford, Quota) that forgets to negate gets an exactly inverted
+   * settlement that is still zero-sum, so no property here would catch it.
+   * Pinning the direction is the only warning available.
+   */
+  it('ranks ascending: the LOWEST score takes the first slot', () => {
+    const points = rankPoints(scoredFrom([9, 2]), [10, 0])!
+    expect(points['p-1']).toBe(10)
+    expect(points['p-0']).toBe(0)
   })
 })
 
