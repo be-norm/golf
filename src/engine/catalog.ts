@@ -140,6 +140,66 @@ export type ConfigFieldSpec =
   | { key: string; kind: 'teams'; label: string }
   | { key: string; kind: 'rotation'; label: string }
 
+/**
+ * Whether a game can be the round's main event, a side bet alongside one, or
+ * either. ELIGIBILITY AND DEFAULT — not the per-round truth, which is
+ * `GameConfig.role`: Skins is routinely the main game AND routinely a side bet
+ * next to a Nassau, and only the round knows which it is this time.
+ */
+export type GameCategory = 'main' | 'side' | 'either'
+
+/**
+ * HOW THE BET IS DECIDED — the picker sheet's default grouping.
+ *
+ * One axis, chosen deliberately over the two alternatives (MAI-43):
+ *
+ * - "Who plays whom" (solo/teams/partners) reads better in a picker, but it
+ *   CANNOT live on `meta`: Nassau is 1v1 or 2v2 by config, and so are Best Ball
+ *   and Skins. An axis that can't file the three most-played games without
+ *   reading their config isn't a property of the engine. It survives as
+ *   `shapes` below, as a SET rather than a single value.
+ * - "How scores are entered" (strokes / team gross / extra inputs) is what
+ *   docs/games-catalog.md tags games with and it predicts build cost well, but
+ *   22 of the catalog's 29 games are strokes-only — one giant bucket is not a
+ *   grouping. It stays in the doc, where it belongs.
+ *
+ * What is left is how the money gets decided, which is also the vocabulary
+ * golfers actually use ("let's play a match" / "skins" / "Stableford").
+ */
+export type GameFamily =
+  /** holes won, lost or halved against a side; decided when a side is up more than remains */
+  | 'match'
+  /** total strokes decide it */
+  | 'stroke'
+  /** points accumulate and settle on the spread between players */
+  | 'points'
+  /** a prize per hole, won outright or carried forward */
+  | 'pot'
+  /** discrete achievements, tallied */
+  | 'award'
+  /** a bet offered and accepted mid-hole, escalating its value */
+  | 'wager'
+
+/**
+ * The social shapes a game SUPPORTS — a set, not a single value, which is what
+ * lets it stay on `meta` where `family`'s rejected team axis could not: Nassau
+ * genuinely is both `headToHead` and `teams`, and says so.
+ *
+ * Powers the picker's alternate "what team games can we play?" view. Because
+ * the roster is already chosen by the time the picker opens, that view can
+ * intersect these with the player count — showing Nassau's 2v1 at three players
+ * while hiding Vegas, which needs four.
+ */
+export type GameShape =
+  /** every player for themselves */
+  | 'solo'
+  /** one against one */
+  | 'headToHead'
+  /** fixed sides for the whole round */
+  | 'teams'
+  /** sides that re-form each hole */
+  | 'partners'
+
 /** Player-facing rules, rendered generically by the rules sheet. Must describe
  *  THIS implementation (our point tables, our press conventions), not folklore. */
 export interface GameRules {
@@ -156,6 +216,17 @@ export interface GameEngine<C = unknown> {
     blurb: string
     minPlayers: number
     maxPlayers: number
+    /**
+     * PRESENTATION ONLY, all three of these. They drive setup grouping, the
+     * picker sheet and display density — `deriveRound` never reads them, and
+     * neither does any engine's `derive`. A game's money is a pure function of
+     * (config, its own events, RoundContext); taxonomy is how the app talks
+     * about games, not how they compute.
+     */
+    category: GameCategory
+    family: GameFamily
+    /** every shape this game can be played in; see GameShape */
+    shapes: readonly GameShape[]
     rules: GameRules
   }
   configSchema: z.ZodType<C>

@@ -238,6 +238,9 @@ export const vegasEngine: GameEngine<VegasConfig> = {
     blurb: 'Pair up. Team scores combine into one number — birdies flip the other side.',
     minPlayers: 4,
     maxPlayers: 4,
+    category: 'main',
+    family: 'points',
+    shapes: ['teams'],
     rules: {
       tagline: "Two teams, one number each. Birdies flip the other side's digits.",
       howToPlay: [

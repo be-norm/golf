@@ -37,7 +37,24 @@ Full plan/architecture history: see `docs/` and the games catalog in `docs/games
    (`nineOfEighteen` halves the course handicap for 9 of 18 — a different adjustment, because
    rating − par is an 18-hole term). A tee's rating shares that dimension: a 9-hole card carrying
    an 18-hole rating inflates every handicap by ~30, so imports normalize it (`normalizeTeeRatings`).
-7. **Sync-ready IDs.** Locally-minted entity IDs are UUIDv7; rows carry `updatedAt`.
+7. **A side bet IS a peer game, and taxonomy never touches money.** A side bet is an ordinary
+   `GameEngine` sitting in `round.games` next to the main game — not a child, no
+   `parentGameId`. It is tagged three ways, all of them PRESENTATION ONLY:
+   `meta.category` ('main'|'side'|'either') is eligibility and the default;
+   `GameConfig.role` is the per-round truth (Skins is the main event one round and a $1 side
+   bet the next, and only the round knows); `meta.family` groups the picker by how the bet is
+   decided, with `meta.shapes` as the set of social shapes a game supports — a SET because
+   Nassau is 1v1 or 2v2 by config, which is exactly why that can't be `family`'s axis.
+   **`deriveRound` reads none of them**, and `catalog.test.ts` proves it: the same card must
+   settle identically whether its games are labelled main, side, or nothing at all. Missing
+   `role` means 'main' — rounds predate it.
+   **The one-way rule:** an engine is a pure function of `(config, its own events,
+   RoundContext)` and engines NEVER read each other. That purity is why the app layer has zero
+   per-game branching, and why a game can be added without touching a screen. The escape hatch
+   for genuine overlays (Criers & Whiners' mulligan credits, putts shared between Snake and
+   Dots) is **contributing to `RoundContext` before any engine derives** — context to engines,
+   never engine to engine. Design toward it; don't build it until something needs it.
+8. **Sync-ready IDs.** Locally-minted entity IDs are UUIDv7; rows carry `updatedAt`.
    Exception: courses imported from OpenGolfAPI keep the provider's UUID as their id —
    deliberate, so the same course dedupes across devices and the shared library
    (provenance lives in `source`/`source_id`). Tee-set ids are course-scoped slugs.

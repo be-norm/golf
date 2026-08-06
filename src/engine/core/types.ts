@@ -128,6 +128,19 @@ export interface GameConfig<C = unknown> {
   /** instance id — two skins games could coexist in one round */
   gameId: Uuid
   type: string
+  /**
+   * Whether THIS round treats the game as its main event or a side bet.
+   *
+   * The per-round truth, where `meta.category` is only the eligibility and the
+   * default: Skins is the main game in one round and a side bet next to a
+   * Nassau in the next, and the display density rules need to know which. Set
+   * at setup from `meta.category`, overridable when that is `'either'`.
+   *
+   * Optional because rounds predating it have none — and they are `'main'`,
+   * since side bets did not exist to be one. PRESENTATION ONLY: `deriveRound`
+   * never reads it, so an absent value can never change what anybody is owed.
+   */
+  role?: 'main' | 'side'
   handicap: HandicapSettings
   config: C
 }

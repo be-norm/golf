@@ -211,6 +211,11 @@ export const sixPointEngine: GameEngine<SixPointConfig> = {
     blurb: 'Threesomes only. Six points split every hole by score: 4 · 2 · 0.',
     minPlayers: 3,
     maxPlayers: 3,
+    category: 'main',
+    // a per-hole points game like Wolf and Vegas, and grouped with them: that
+    // is the axis being honest, not ambiguous — all three settle on a spread
+    family: 'points',
+    shapes: ['solo'],
     rules: {
       tagline: 'Six points per hole, split three ways by who scores lowest.',
       howToPlay: [

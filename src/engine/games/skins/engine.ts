@@ -172,6 +172,11 @@ export const skinsEngine: GameEngine<SkinsConfig> = {
     blurb: 'Win the hole outright, win the skin. Ties carry over.',
     minPlayers: 2,
     maxPlayers: 8,
+    // EITHER, and it is the reason `role` exists: skins is as often the $1
+    // side bet running under a Nassau as it is the main event.
+    category: 'either',
+    family: 'pot',
+    shapes: ['solo'],
     rules: {
       tagline: 'Every hole is worth money. Win it outright or nobody does.',
       howToPlay: [

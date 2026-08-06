@@ -192,6 +192,10 @@ export function SetupScreen() {
     const gameConfigs: GameConfig[] = games.map((g) => ({
       gameId: newId(),
       type: g.type,
+      // The per-round truth, defaulted from the engine's eligibility. 'either'
+      // games (Skins) start as the main event; the picker will let that be
+      // overridden per round once there is a side-bet section to move them to.
+      role: getEngine(g.type)?.meta.category === 'side' ? 'side' : 'main',
       handicap: g.handicap,
       config: resolveDraftPlayers(g.config, draftToReal),
     }))
