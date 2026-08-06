@@ -125,12 +125,20 @@ async function drainQueue(): Promise<void> {
       // UPDATE then matches nothing, reads as success, and the removal is
       // destroyed. Wait for a session instead of burning the ops.
       const { data } = await supabase.auth.getSession()
-      if (!data.session) return
+      const uid = data.session?.user?.id
+      if (!uid) return
       const items = await db.outbox.orderBy('createdAt').toArray()
       const deviceId = await getDeviceId(db)
       for (const item of items) {
         // give up quietly after repeated permanent failures — sync is best-effort
         if (item.attempts >= 10) continue
+        // Only the owner's session may flush an op: under anyone else's, RLS
+        // filters their rows and a tombstone UPDATE "succeeds" against
+        // nothing — the signed-out trap one account deeper. A foreign op
+        // waits (no attempt burned) for its owner to sign back in;
+        // wipeUserData drops it if that account is deleted on this device.
+        const owner = (item.payload as { userId?: string })?.userId
+        if (owner !== undefined && owner !== uid) continue
         const ok = await send(item, deviceId)
         if (ok) await db.outbox.delete(item.id)
         else await db.outbox.update(item.id, { attempts: item.attempts + 1 })

@@ -83,11 +83,14 @@ const fake = vi.hoisted(() => {
     tables,
     from,
     signedIn: true,
+    // whose session the flush runs under — ops for anyone else must wait
+    sessionUserId: 'user-1',
     reset() {
       tables.round_archives = []
       tables.players = []
       tables.saved_courses = []
       this.signedIn = true
+      this.sessionUserId = 'user-1'
     },
   }
 })
@@ -99,7 +102,10 @@ vi.mock('./supabase', () => ({
   supabase: {
     from: fake.from,
     auth: {
-      getSession: () => Promise.resolve({ data: { session: fake.signedIn ? {} : null } }),
+      getSession: () =>
+        Promise.resolve({
+          data: { session: fake.signedIn ? { user: { id: fake.sessionUserId } } : null },
+        }),
     },
   },
 }))
@@ -450,13 +456,37 @@ describe('saved courses', () => {
 
   it('two users keep the same course independently', async () => {
     await saveAndPush(U, course('c1', 'Broadmoor'))
+    // the second account pushes under ITS OWN session, as it would on-device
+    fake.sessionUserId = 'user-2'
     await saveAndPush('user-2', course('c1', 'Broadmoor'))
+    fake.sessionUserId = U
     await courseRepo.remove(U, 'c1')
     await drain()
 
     const rows = fake.tables.saved_courses
     expect(rows.find((r) => r.user_id === U)!.deleted_at).toBeTruthy()
     expect(rows.find((r) => r.user_id === 'user-2')!.deleted_at).toBeFalsy()
+  })
+
+  it("another account's queued ops wait — they are not burned under the wrong session", async () => {
+    await saveAndPush(U, course('c1', 'Broadmoor'))
+    await courseRepo.remove(U, 'c1') // tombstone queued for U
+
+    // a different account signs in on this phone before the flush lands.
+    // Under their session RLS filters U's rows, the UPDATE would match
+    // nothing, read as success, and destroy the removal — so the op must
+    // simply wait, with no attempt burned.
+    fake.sessionUserId = 'someone-else'
+    await flushOutbox()
+    const queued = await db.outbox.toArray()
+    expect(queued).toHaveLength(1)
+    expect(queued[0]!.attempts).toBe(0)
+    expect(fake.tables.saved_courses[0]!.deleted_at).toBeFalsy()
+
+    fake.sessionUserId = U
+    await drain()
+    expect(await db.outbox.count()).toBe(0)
+    expect(fake.tables.saved_courses[0]!.deleted_at).toBeTruthy()
   })
 
   it('stays local for a guest — nothing is pushed while signed out', async () => {

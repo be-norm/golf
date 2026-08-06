@@ -75,7 +75,7 @@ async function applyRemoteRound(
 ): Promise<void> {
   const round = { ...data.round, userId }
   const local = await roundRepo.get(round.id)
-  if (local && local.updatedAt >= round.updatedAt) return // local same-or-newer → keep
+  if (local && epoch(local.updatedAt) >= epoch(round.updatedAt)) return // local same-or-newer → keep
   await db.transaction('rw', db.rounds, db.round_events, async () => {
     await db.rounds.put(round)
     // Only replace the event log when the snapshot actually carries events —
@@ -100,7 +100,8 @@ async function applyRemotePlayer(userId: string, row: Record<string, unknown>): 
     updatedAt: row.updated_at as string,
   }
   const local = await playerRepo.get(remote.id)
-  if (local && local.updatedAt >= remote.updatedAt) return
+  // instants, not strings: the local stamp ends `Z`, the pulled one `+00:00`
+  if (local && epoch(local.updatedAt) >= epoch(remote.updatedAt)) return
   await db.players.put(remote)
 }
 

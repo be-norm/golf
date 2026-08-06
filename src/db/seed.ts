@@ -1,4 +1,4 @@
-import { db as defaultDb, type GolfDB, type PushSavedCoursePayload } from './schema'
+import { db as defaultDb, savedCourseOp, type GolfDB } from './schema'
 
 /**
  * Courses are opt-in — nothing is pre-saved. A course is cached into the local
@@ -18,19 +18,18 @@ export async function pruneSeededCourses(db: GolfDB = defaultDb): Promise<void> 
     await db.courses.bulkDelete(seededIds)
     // A device pruning and upgrading to v3 in the same boot backfilled guest
     // membership for these cards moments ago — drop it with them, for EVERY
-    // owner: boot order against adoptDeviceLibrary isn't guaranteed, so a
-    // signed-in launch may already have claimed them.
+    // owner: this prune runs unawaited, so an unusually quick claim (the
+    // prompt fires as soon as auth + counts resolve) could already have
+    // re-keyed them and queued pushes. Purge those too, or a flushed push
+    // re-adds the seed to the account's library on the next pull.
     for (const id of seededIds) {
       await db.saved_courses.where('courseId').equals(id).delete()
     }
-    // …and if adoption already queued their pushes, purge those too, or a
-    // flushed push re-adds the seed to the account's library on the next pull.
     const stale = await db.outbox
-      .filter(
-        (i) =>
-          i.kind === 'pushSavedCourse' &&
-          seededIds.includes((i.payload as PushSavedCoursePayload).course.id),
-      )
+      .filter((i) => {
+        const op = savedCourseOp(i)
+        return op?.kind === 'pushSavedCourse' && seededIds.includes(op.courseId)
+      })
       .primaryKeys()
     await db.outbox.bulkDelete(stale)
     await db.meta.put({ key: 'coursesDeseeded', value: '1' })
