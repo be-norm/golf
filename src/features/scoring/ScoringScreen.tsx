@@ -322,17 +322,18 @@ export function ScoringScreen() {
           {round.games.map((g) => {
             const d = derivations.get(g.gameId)
             if (!d) return null
+            const label = gameLabel(g, round.games)
             return (
               <div key={g.gameId}>
                 <div className="mb-2.5 flex items-baseline justify-between">
                   <h3 className="font-display flex items-baseline gap-2 text-xs uppercase text-felt-300">
-                    {gameLabel(g, round.games)}
+                    {label}
                     {g.handicap.mode === 'net' && g.handicap.allowancePct !== 100 && (
                       <span className="text-[10px] text-stone-400">{g.handicap.allowancePct}%</span>
                     )}
                   </h3>
                   <button
-                    aria-label={`${gameLabel(g, round.games)} rules`}
+                    aria-label={`${label} rules`}
                     className="font-display text-[10px] uppercase text-felt-400"
                     onClick={() => setRulesFor(g.type)}
                   >

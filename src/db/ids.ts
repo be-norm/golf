@@ -24,7 +24,7 @@ export function newId(): string {
 }
 
 /**
- * True for ids this app minted (`newId` — always UUIDv7, invariant #7).
+ * True for ids this app minted (`newId` — always UUIDv7, invariant #8).
  * Provider ids differ: GolfCourseAPI mints `gca:9`, OpenGolfAPI ships v4
  * UUIDs. This is what lets the legacy-ownership heuristic (`ownsCourse`,
  * MAI-78) tell "authored on this device before `createdBy` existed — yours"

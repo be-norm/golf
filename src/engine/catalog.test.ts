@@ -1,11 +1,19 @@
 import { describe, expect, it } from 'vitest'
 import './games/index'
-import { deriveRound, listEngines } from './catalog'
+import {
+  deriveRound,
+  listEngines,
+  type GameCategory,
+  type GameFamily,
+  type GameShape,
+} from './catalog'
 import { EventLog, makePlayers, makeRound } from './test/harness'
 
-const FAMILIES = ['match', 'stroke', 'points', 'pot', 'award', 'wager']
-const CATEGORIES = ['main', 'side', 'either']
-const SHAPES = ['solo', 'headToHead', 'teams', 'partners']
+// `satisfies` ties each mirror to its union: a typo here is a compile error,
+// and so is adding a union member without listing it.
+const FAMILIES = ['match', 'stroke', 'points', 'pot', 'award', 'wager'] as const satisfies readonly GameFamily[]
+const CATEGORIES = ['main', 'side', 'either'] as const satisfies readonly GameCategory[]
+const SHAPES = ['solo', 'headToHead', 'teams', 'partners'] as const satisfies readonly GameShape[]
 
 describe('engine registry invariants', () => {
   it('every game ships complete player-facing rules', () => {
@@ -52,6 +60,10 @@ describe('engine registry invariants', () => {
       if (shapes.includes('teams') || shapes.includes('partners')) {
         expect(maxPlayers, `${engine.type} needs room for sides`).toBeGreaterThanOrEqual(3)
       }
+      if (shapes.includes('partners')) {
+        // two players cannot re-form into partnerships each hole
+        expect(minPlayers, `${engine.type} rotating partners needs 3+`).toBeGreaterThanOrEqual(3)
+      }
       if (shapes.includes('headToHead')) {
         expect(minPlayers, `${engine.type} head-to-head needs 2`).toBeLessThanOrEqual(2)
       }
@@ -69,35 +81,62 @@ describe('engine registry invariants', () => {
  * both answers are internally consistent and zero-sum.
  */
 describe('taxonomy never reaches the money', () => {
-  const scored = (role?: 'main' | 'side') => {
-    const round = makeRound({
-      players: makePlayers([{ name: 'A' }, { name: 'B' }, { name: 'C' }]),
-      holes: 'front9',
-      games: [
-        { type: 'skins', config: { stakeCents: 100, carryover: true } },
-        { type: 'nassau', config: { stakeCents: 500, teams: null, autoPress: true } },
-      ],
-    })
-    // stamped after construction so both rounds are otherwise byte-identical
-    const games = round.games.map((g) => ({ ...g, ...(role ? { role } : {}) }))
-    const log = new EventLog()
-    log.scoreByHole(round, {
-      A: [4, 5, 3, 4, 6, 4, 3, 5, 4],
-      B: [5, 4, 4, 4, 5, 5, 3, 4, 5],
-      C: [4, 6, 4, 3, 5, 4, 4, 6, 4],
-    })
-    return deriveRound({ ...round, games }, log.events)
+  /** Nine holes of real, varied scores — enough for every engine to move money. */
+  const CARD: Record<string, number[]> = {
+    A: [4, 5, 3, 4, 6, 4, 3, 5, 4],
+    B: [5, 4, 4, 4, 5, 5, 3, 4, 5],
+    C: [4, 6, 4, 3, 5, 4, 4, 6, 4],
+    D: [6, 4, 5, 4, 4, 3, 5, 5, 3],
   }
 
-  it('settles a round identically whether its games are main, side, or unlabelled', () => {
-    const asMain = [...scored('main').derivations.values()].map((d) => d.settlement)
-    const asSide = [...scored('side').derivations.values()].map((d) => d.settlement)
-    // absent is what every round created before MAI-43 looks like
-    const absent = [...scored().derivations.values()].map((d) => d.settlement)
+  /**
+   * EVERY registered engine, at its own minimum roster and with its own default
+   * config — not a hand-picked pair. `deriveRound` hands the whole `GameConfig`
+   * (now carrying `role`) to `engine.derive`, so any engine could branch on it;
+   * a fixture naming two games would let the other three, and every game still
+   * to be written, do exactly what invariant #7 forbids and ship green.
+   */
+  for (const engine of listEngines()) {
+    const names = ['A', 'B', 'C', 'D'].slice(0, engine.meta.minPlayers)
+    const players = makePlayers(names.map((name) => ({ name })))
 
-    expect(asSide).toEqual(asMain)
-    expect(absent).toEqual(asMain)
-    // and it actually moved money, or the assertion above is vacuous
-    expect(asMain.some((s) => s.lines.length > 0)).toBe(true)
-  })
+    const scored = (role?: 'main' | 'side') => {
+      const round = makeRound({
+        players,
+        holes: 'front9',
+        games: [{ type: engine.type, config: engine.defaultConfig(players) }],
+      })
+      // stamped after construction, so the rounds are otherwise byte-identical
+      const games = round.games.map((g) => ({ ...g, ...(role ? { role } : {}) }))
+      const log = new EventLog()
+      log.scoreByHole(
+        round,
+        Object.fromEntries(names.map((n) => [n, CARD[n]!])),
+      )
+      // games that need an in-round choice get one, or they never settle
+      for (const input of deriveRound({ ...round, games }, log.events)
+        .derivations.get('game-1')!
+        .requiredInputs()) {
+        log.append({
+          type: 'game/event',
+          gameId: 'game-1',
+          kind: input.eventKind,
+          data: { hole: input.hole, choice: input.options[0]!.value },
+        })
+      }
+      return deriveRound({ ...round, games }, log.events).derivations.get('game-1')!
+    }
+
+    it(`settles ${engine.type} identically whether it is main, side, or unlabelled`, () => {
+      const asMain = scored('main')
+      expect(scored('side').settlement).toEqual(asMain.settlement)
+      // absent is what every round created before MAI-43 looks like
+      expect(scored().settlement).toEqual(asMain.settlement)
+      // …and money actually moved, or the assertions above are vacuous
+      expect(
+        Object.values(asMain.settlement.perPlayerCents).some((c) => c !== 0),
+        `${engine.type} moved no money — the guard proves nothing`,
+      ).toBe(true)
+    })
+  }
 })

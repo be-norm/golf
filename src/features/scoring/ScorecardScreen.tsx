@@ -165,7 +165,7 @@ export function ScorecardScreen() {
           {activeDerivation && (
             <p className="mb-3 flex flex-wrap items-baseline gap-x-2">
               <span className="font-display text-[10px] uppercase text-felt-300">
-                {activeGame!.type}
+                {gameLabel(activeGame!, round.games)}
               </span>
               <GameSummary derivation={activeDerivation} />
             </p>

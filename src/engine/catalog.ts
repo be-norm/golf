@@ -160,8 +160,9 @@ export type GameCategory = 'main' | 'side' | 'either'
  *   `shapes` below, as a SET rather than a single value.
  * - "How scores are entered" (strokes / team gross / extra inputs) is what
  *   docs/games-catalog.md tags games with and it predicts build cost well, but
- *   22 of the catalog's 29 games are strokes-only — one giant bucket is not a
- *   grouping. It stays in the doc, where it belongs.
+ *   it barely divides them: against 3 team-gross formats and 9 with extra
+ *   inputs, everything else is strokes-only. One bucket holding two thirds of
+ *   the catalog is not a grouping. It stays in the doc, where it belongs.
  *
  * What is left is how the money gets decided, which is also the vocabulary
  * golfers actually use ("let's play a match" / "skins" / "Stableford").

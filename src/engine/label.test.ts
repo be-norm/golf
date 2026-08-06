@@ -41,20 +41,44 @@ describe('gameLabel', () => {
   it('separates gross skins from net skins — the case that motivated it', () => {
     const a = skins('g1', net)
     const b = skins('g2', gross)
-    expect(gameLabel(a, [a, b])).toBe('Skins · net')
-    expect(gameLabel(b, [a, b])).toBe('Skins · gross')
+    expect(gameLabel(a, [a, b])).toBe('Skins (net)')
+    expect(gameLabel(b, [a, b])).toBe('Skins (gross)')
   })
 
-  it('falls to allowance, then stake, for siblings alike in handicap mode', () => {
-    const a = skins('g1', net)
-    const b = skins('g2', { ...net, allowancePct: 90 })
-    expect(gameLabel(a, [a, b])).toBe('Skins · 100%')
-    expect(gameLabel(b, [a, b])).toBe('Skins · 90%')
-
+  it('falls to a config field when handicap mode is shared', () => {
     const cheap = skins('g1', net, 100)
     const dear = skins('g2', net, 500)
-    expect(gameLabel(cheap, [cheap, dear])).toBe('Skins · $1')
-    expect(gameLabel(dear, [cheap, dear])).toBe('Skins · $5')
+    expect(gameLabel(cheap, [cheap, dear])).toBe('Skins ($1)')
+    expect(gameLabel(dear, [cheap, dear])).toBe('Skins ($5)')
+  })
+
+  /**
+   * Config fields are walked declaratively off `configFields`, so a difference
+   * the engine already declares gets named without label.ts knowing the game.
+   * Carryover is a boolean field; before this it fell through to "#1"/"#2",
+   * which tells the player nothing about which bet is which.
+   */
+  it('names a boolean config difference rather than numbering', () => {
+    const rolls: GameConfig = { ...skins('g1', net), config: { stakeCents: 100, carryover: true } }
+    const flat: GameConfig = { ...skins('g2', net), config: { stakeCents: 100, carryover: false } }
+    expect(gameLabel(rolls, [rolls, flat])).toBe('Skins (carryovers)')
+    expect(gameLabel(flat, [rolls, flat])).toBe('Skins (no carryovers)')
+  })
+
+  /**
+   * THE bug this logic is shaped around. Handicap mode VARIES across these
+   * three, but it does not separate them — labelling each with its own mode
+   * prints "gross" twice, which is the duplicate the function exists to
+   * prevent. A candidate is only usable when every sibling gets a different
+   * answer, so this falls through to numbering.
+   */
+  it('rejects a difference that varies but does not separate every sibling', () => {
+    const a = skins('g1', net)
+    const b = skins('g2', gross)
+    const c = skins('g3', gross)
+    const labels = [a, b, c].map((g) => gameLabel(g, [a, b, c]))
+    expect(labels).toEqual(['Skins (#1)', 'Skins (#2)', 'Skins (#3)'])
+    expect(new Set(labels).size).toBe(3)
   })
 
   /**
@@ -65,8 +89,23 @@ describe('gameLabel', () => {
   it('numbers siblings that are alike in every way we can name', () => {
     const a = skins('g1', net)
     const b = skins('g2', net)
-    expect(gameLabel(a, [a, b])).toBe('Skins · #1')
-    expect(gameLabel(b, [a, b])).toBe('Skins · #2')
+    expect(gameLabel(a, [a, b])).toBe('Skins (#1)')
+    expect(gameLabel(b, [a, b])).toBe('Skins (#2)')
+  })
+
+  /**
+   * The label is painted onto the share card in the Press Start 2P display
+   * font, where every other string has stayed plain ASCII. A glyph that font
+   * lacks falls back per-glyph to the system face and renders mid-title in the
+   * wrong typeface — and jsdom has no canvas, so nothing downstream can catch
+   * it. Keep the label ASCII-only.
+   */
+  it('stays ASCII, because the share card paints it in the pixel font', () => {
+    const a = skins('g1', net)
+    const b = skins('g2', gross)
+    for (const label of [gameLabel(a, [a, b]), gameLabel(b, [a, b])]) {
+      expect(label).toMatch(/^[\x20-\x7E]+$/)
+    }
   })
 
   it('falls back to the raw type for an engine that is not registered', () => {

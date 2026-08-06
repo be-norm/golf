@@ -118,6 +118,30 @@ describe('SetupScreen — 9-hole courses', () => {
     expect((await db.courses.get('penmar'))!.holeCount).toBe(9)
   })
 
+  /**
+   * `role` is stamped at tee-off and never re-derived, so it is baked into every
+   * round archive from here on — including synced ones. Nothing reads it until
+   * the picker ships (MAI-44), which is exactly why the default is worth
+   * pinning now: a wrong default is invisible until it is already permanent.
+   */
+  it('stamps every game with the role its category defaults to', async () => {
+    await pickPenmar()
+    await cont()
+    await addPlayer('Bogey', 16.5)
+    await addPlayer('Scratch', 0)
+    await cont()
+
+    await userEvent.click(await screen.findByText('Skins'))
+    await userEvent.click(screen.getByRole('button', { name: /Tee off/ }))
+
+    await waitFor(async () => expect(await db.rounds.count()).toBe(1))
+    const round = (await db.rounds.toArray())[0]!
+    // skins is category 'either' — main until a picker offers the choice
+    expect(round.games.map((g) => ({ type: g.type, role: g.role }))).toEqual([
+      { type: 'skins', role: 'main' },
+    ])
+  })
+
   it('resets the hole range when switching from a nine to an eighteen', async () => {
     await db.courses.bulkPut([penmar, eighteen])
     await db.saved_courses.bulkPut([
