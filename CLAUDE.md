@@ -44,7 +44,9 @@ Full plan/architecture history: see `docs/` and the games catalog in `docs/games
 
 ## Layout
 
-- `src/engine/core/` — events, replay, handicap allocation, money; `src/engine/games/<game>/` —
+- `src/engine/core/` — events, replay, handicap allocation, money, plus the shared game kits
+  (`match` for match play + the one `closeMargin`, `points` for rank-points/points-money,
+  `standings`); `src/engine/games/<game>/` —
   one engine per game + golden fixtures; `src/engine/catalog.ts` — GameEngine registry
 - `src/db/` — Dexie schema + repos; `src/features/` — screens; `src/components/` — primitives
 - `data/courses/` — seed scorecards (bundled into app + used by Supabase seed)

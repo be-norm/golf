@@ -1,8 +1,9 @@
 import { z } from 'zod'
-import type { GameEngine, GameDerivation, StandingLine } from '../../catalog'
+import type { GameEngine, GameDerivation } from '../../catalog'
 import type { RoundContext } from '../../core/context'
 import type { GameScopedEvent } from '../../core/events'
 import { addLine, emptySettlement, type Settlement } from '../../core/money'
+import { standingsFromSettlement } from '../../core/standings'
 import { latestHoleSummary, summaryString } from '../../core/summary'
 import type { GameConfig, HandicapSettings, RoundPlayer, Uuid } from '../../core/types'
 
@@ -108,14 +109,10 @@ function derive(
   const deadReason = `${deadSkins} died unwon — no hole left to win them`
   const notes = carryDied > 0 ? [deadReason] : undefined
 
-  const standings: StandingLine[] = players
-    .map((p) => ({
-      id: p.playerId,
-      label: p.name,
-      detail: `${skinsByPlayer.get(p.playerId) ?? 0} skin${(skinsByPlayer.get(p.playerId) ?? 0) === 1 ? '' : 's'}`,
-      amountCents: settlement.perPlayerCents[p.playerId] ?? 0,
-    }))
-    .sort((a, b) => b.amountCents - a.amountCents)
+  const standings = standingsFromSettlement(players, settlement, (p) => {
+    const won = skinsByPlayer.get(p.playerId) ?? 0
+    return `${won} skin${won === 1 ? '' : 's'}`
+  })
 
   // Bar recaps the latest decided hole — "H4 · Rob wins 2 skins".
   const summaryParts = latestHoleSummary(

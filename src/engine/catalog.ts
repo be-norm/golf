@@ -3,16 +3,19 @@ import type { GameScopedEvent, RoundEvent } from './core/events'
 import { buildRoundContext, type RoundContext } from './core/context'
 import { effectiveEvents, gameEventsFor } from './core/replay'
 import type { Settlement } from './core/money'
-import type { GameConfig, HandicapSettings, Round, RoundPlayer, Uuid } from './core/types'
+import type {
+  GameConfig,
+  HandicapSettings,
+  Round,
+  RoundPlayer,
+  StandingLine,
+  Uuid,
+} from './core/types'
 
-export interface StandingLine {
-  /** playerId or team key */
-  id: string
-  label: string
-  /** e.g. "3 skins" / "F 2↑ · B AS" */
-  detail?: string
-  amountCents: number
-}
+// Defined in core/types.ts (core/standings.ts builds them, and core cannot
+// import upward from the catalog), re-exported here because engines reach for
+// it alongside GameDerivation.
+export type { StandingLine }
 
 /** A blocking prompt the scoring UI renders as a generic chip — no game-specific screens. */
 export interface InputRequest {

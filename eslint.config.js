@@ -18,7 +18,12 @@ export default tseslint.config(
     // Engine purity boundary: src/engine/** is pure TypeScript.
     // Only relative imports within engine plus zod are allowed.
     files: ['src/engine/**/*.ts'],
-    ignores: ['src/engine/**/*.test.ts'],
+    // src/engine/test/** is the test layer living inside the engine tree: the
+    // harness and the fast-check arbitraries. It is EXEMPT, explicitly — the
+    // arbitraries import fast-check, a devDependency, which today's denylist
+    // happens not to name. Better a stated exemption than a purity boundary
+    // that looks enforced and isn't. Nothing under src/** non-test imports it.
+    ignores: ['src/engine/**/*.test.ts', 'src/engine/test/**'],
     rules: {
       'no-restricted-imports': [
         'error',
