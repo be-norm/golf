@@ -1,8 +1,9 @@
 import { z } from 'zod'
-import type { GameEngine, GameDerivation, StandingLine } from '../../catalog'
+import type { GameEngine, GameDerivation } from '../../catalog'
 import type { RoundContext } from '../../core/context'
 import type { GameScopedEvent } from '../../core/events'
 import { addLine, emptySettlement, type Settlement } from '../../core/money'
+import { standingsFromSettlement } from '../../core/standings'
 import { firstName, joinNames, latestHoleSummary, summaryString } from '../../core/summary'
 import { teamsSchema, teamPartitionProblems } from '../../core/teams'
 import type { GameConfig, HandicapSettings, RoundPlayer, Uuid } from '../../core/types'
@@ -171,17 +172,10 @@ function derive(
 
   const teamLabel = (side: 'a' | 'b') => teams[side].map((id) => nameOf.get(id)).join(' & ')
 
-  const standings: StandingLine[] = players
-    .map((p) => {
-      const onA = teams.a.includes(p.playerId)
-      return {
-        id: p.playerId,
-        label: p.name,
-        detail: `${onA ? teamLabel('a') : teamLabel('b')}${onA ? (totalA >= 0 ? ` +${totalA}` : ` ${totalA}`) : totalA <= 0 ? ` +${-totalA}` : ` ${-totalA}`} pts`,
-        amountCents: settlement.perPlayerCents[p.playerId] ?? 0,
-      }
-    })
-    .sort((a, b) => b.amountCents - a.amountCents)
+  const standings = standingsFromSettlement(players, settlement, (p) => {
+    const onA = teams.a.includes(p.playerId)
+    return `${onA ? teamLabel('a') : teamLabel('b')}${onA ? (totalA >= 0 ? ` +${totalA}` : ` ${totalA}`) : totalA <= 0 ? ` +${-totalA}` : ` ${-totalA}`} pts`
+  })
 
   // Bar recaps the latest decided hole — "H6 · 26 v 44 ×2 → Ben & Rob +36".
   const teamShort = (side: 'a' | 'b') =>

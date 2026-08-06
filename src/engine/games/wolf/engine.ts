@@ -1,8 +1,10 @@
 import { z } from 'zod'
-import type { GameEngine, GameDerivation, InputRequest, StandingLine } from '../../catalog'
+import type { GameEngine, GameDerivation, InputRequest } from '../../catalog'
 import type { RoundContext } from '../../core/context'
 import type { GameScopedEvent } from '../../core/events'
 import { emptySettlement, type Settlement } from '../../core/money'
+import { pointsToMoney } from '../../core/points'
+import { standingsFromSettlement } from '../../core/standings'
 import { latestHoleSummary, summaryString } from '../../core/summary'
 import { isPlayerPermutation } from '../../core/teams'
 import type { GameConfig, HandicapSettings, RoundPlayer, Uuid } from '../../core/types'
@@ -138,25 +140,25 @@ function derive(
     holeResults.push({ hole, wolfId, pick, points, outcome })
   })
 
-  // Pairwise settlement: money_i = pointCents × (n·points_i − Σpoints). Zero-sum.
+  // Pairwise settlement: money_i = pointCents × (n·points_i − Σpoints). Zero-sum
+  // by construction — the shared formula in core/points.ts, which Stableford,
+  // Quota and Nines settle by too.
   const settlement: Settlement = emptySettlement(playerIds)
-  const totalPoints = [...totals.values()].reduce((a, b) => a + b, 0)
-  for (const id of playerIds) {
-    settlement.perPlayerCents[id] = pointCents * (n * totals.get(id)! - totalPoints)
-  }
+  settlement.perPlayerCents = pointsToMoney(playerIds, totals, pointCents)
+  // Itemised per PLAYER rather than per transaction, which is why a player
+  // sitting on the average still gets a $0 row — the known MAI-75 violation of
+  // "settlement.lines is money that MOVED", asserted by its own self-retiring
+  // test in replay.test.ts rather than left as a silent exception.
   settlement.lines = playerIds.map((id) => ({
     label: `${nameOf.get(id)} — ${totals.get(id)} pts`,
     perPlayerCents: { [id]: settlement.perPlayerCents[id]! },
   }))
 
-  const standings: StandingLine[] = players
-    .map((p) => ({
-      id: p.playerId,
-      label: p.name,
-      detail: `${totals.get(p.playerId)} pts`,
-      amountCents: settlement.perPlayerCents[p.playerId] ?? 0,
-    }))
-    .sort((a, b) => b.amountCents - a.amountCents)
+  const standings = standingsFromSettlement(
+    players,
+    settlement,
+    (p) => `${totals.get(p.playerId)} pts`,
+  )
 
   // Bar recaps the latest decided hole — "H4 · Ben lone +4" / "Ben & Rob +2".
   const pickTag = (r: WolfHoleResult): string =>

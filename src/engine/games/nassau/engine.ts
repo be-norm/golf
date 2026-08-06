@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import type { GameAction, GameEngine, GameDerivation, InputRequest, StandingLine } from '../../catalog'
+import type { GameAction, GameEngine, GameDerivation, InputRequest } from '../../catalog'
 import type { RoundContext } from '../../core/context'
 import type { GameScopedEvent } from '../../core/events'
 import {
@@ -19,6 +19,7 @@ import {
   type MatchState,
 } from '../../core/match'
 import { addLine, emptySettlement, formatCents, type Settlement } from '../../core/money'
+import { standingsFromSettlement } from '../../core/standings'
 import { firstName } from '../../core/summary'
 import { teamsSchema, nonEmptyPartitionProblems } from '../../core/teams'
 import type { GameConfig, HandicapSettings, RoundPlayer, Uuid } from '../../core/types'
@@ -284,14 +285,9 @@ function derive(
       })
       .join(' · ')
 
-  const standings: StandingLine[] = players
-    .map((p) => ({
-      id: p.playerId,
-      label: p.name,
-      detail: statusFor(sideA.includes(p.playerId) ? 'a' : 'b'),
-      amountCents: settlement.perPlayerCents[p.playerId] ?? 0,
-    }))
-    .sort((a, b) => b.amountCents - a.amountCents)
+  const standings = standingsFromSettlement(players, settlement, (p) =>
+    statusFor(sideA.includes(p.playerId) ? 'a' : 'b'),
+  )
 
   const betValue = (b: Bet): string => {
     // Decided is checked FIRST — a bet closed 3&2 still has two holes on the

@@ -96,6 +96,23 @@ export interface RoundPlayer {
   teeSetId?: Uuid
 }
 
+/**
+ * One row of a game's standings — a player (or a team key), what they are on,
+ * and what it is worth.
+ *
+ * Lives here rather than in catalog.ts because `core/standings.ts` builds these
+ * from a Settlement, and core is the bottom of the engine: it must not import
+ * upward from the catalog. Re-exported by catalog.ts, where engines expect it.
+ */
+export interface StandingLine {
+  /** playerId or team key */
+  id: string
+  label: string
+  /** e.g. "3 skins" / "F 2↑ · B AS" */
+  detail?: string
+  amountCents: number
+}
+
 export type HandicapMode = 'gross' | 'net'
 
 /** Core-owned per-game handicap policy; engine config never re-declares this. */

@@ -1,8 +1,10 @@
 import { z } from 'zod'
-import type { GameEngine, GameDerivation, StandingLine } from '../../catalog'
+import type { GameEngine, GameDerivation } from '../../catalog'
 import type { RoundContext } from '../../core/context'
 import type { GameScopedEvent } from '../../core/events'
 import { addLine, emptySettlement, type Settlement } from '../../core/money'
+import { rankPoints } from '../../core/points'
+import { standingsFromSettlement } from '../../core/standings'
 import { firstName, joinNames, latestHoleSummary, summaryString } from '../../core/summary'
 import type { GameConfig, HandicapSettings, RoundPlayer, Uuid } from '../../core/types'
 
@@ -35,7 +37,8 @@ export interface SixPointDerivation extends GameDerivation {
 
 /**
  * Rank slots for three players: best 4, middle 2, worst 0. Ties share the
- * average of the slots they span — the standard split-sixes tie rules fall out:
+ * average of the slots they span (`rankPoints`, core/points.ts) — the standard
+ * split-sixes tie rules fall out of that one rule:
  *   distinct        → 4 · 2 · 0
  *   two tie for low → (4+2)/2 each → 3 · 3 · 0
  *   two tie for low being alone-best inverted, i.e. two tie for worst
@@ -45,21 +48,13 @@ export interface SixPointDerivation extends GameDerivation {
  */
 const SLOTS = [4, 2, 0]
 
+/** The shared rank-points split, named by the shape it landed in. */
 function distribute(scored: { id: Uuid; score: number }[]): {
   points: Record<Uuid, number>
   split: SixPointSplit
-} {
-  const sorted = [...scored].sort((a, b) => a.score - b.score)
-  const points: Record<Uuid, number> = {}
-  let i = 0
-  while (i < sorted.length) {
-    let j = i
-    while (j < sorted.length && sorted[j]!.score === sorted[i]!.score) j++
-    const span = SLOTS.slice(i, j)
-    const avg = span.reduce((a, b) => a + b, 0) / span.length
-    for (let k = i; k < j; k++) points[sorted[k]!.id] = avg
-    i = j
-  }
+} | null {
+  const points = rankPoints(scored, SLOTS)
+  if (points === null) return null
   const split = Object.values(points)
     .sort((a, b) => b - a)
     .join('-') as SixPointSplit
@@ -109,22 +104,27 @@ function derive(
     // `points − 2` money math (2 = 6/3, the average) both encode the threesome
     // invariant, so zero-sum only holds with exactly three posted scores — any
     // other count (a missing score, or a mis-rostered game) is void: nobody's
-    // number moves and the settlement stays balanced by construction.
+    // number moves and the settlement stays balanced by construction. That
+    // count check IS `rankPoints` returning null, so the guard cannot drift
+    // away from the distribution it guards.
     const scored = players
       .map((p) => ({ id: p.playerId, score: ctx.netFor(game.gameId, p.playerId, hole) }))
       .filter((s): s is { id: Uuid; score: number } => s.score !== null)
-    if (scored.length !== SLOTS.length) {
+    const distribution = distribute(scored)
+    if (distribution === null) {
       holeResults.push({ hole, kind: 'void' })
       continue
     }
-
-    const { points, split } = distribute(scored)
+    const { points, split } = distribution
     const scores = Object.fromEntries(scored.map((s) => [s.id, s.score]))
     for (const s of scored) pointsByPlayer.set(s.id, (pointsByPlayer.get(s.id) ?? 0) + points[s.id]!)
     holeResults.push({ hole, kind: 'scored', points, scores, split })
 
     // Money is zero-sum against the 2-point average: (points − 2) × stake sums
     // to zero across the three players for every split. 2-2-2 moves nothing.
+    // This is `pointsToMoney` divided by n (n=3, Σ=6) and deliberately kept
+    // separate: our stake is per point ABOVE THE AVERAGE, Wolf's is per point
+    // of gap against EACH opponent. Folding them would triple the payouts.
     if (split !== '2-2-2') {
       // Label names who got what — the settle screen renders this line verbatim,
       // so the point distribution (which implies the split shape) must be here.
@@ -137,17 +137,10 @@ function derive(
     }
   }
 
-  const standings: StandingLine[] = players
-    .map((p) => {
-      const pts = pointsByPlayer.get(p.playerId) ?? 0
-      return {
-        id: p.playerId,
-        label: p.name,
-        detail: `${pts} pt${pts === 1 ? '' : 's'}`,
-        amountCents: settlement.perPlayerCents[p.playerId] ?? 0,
-      }
-    })
-    .sort((a, b) => b.amountCents - a.amountCents)
+  const standings = standingsFromSettlement(players, settlement, (p) => {
+    const pts = pointsByPlayer.get(p.playerId) ?? 0
+    return `${pts} pt${pts === 1 ? '' : 's'}`
+  })
 
   const orderScored = (r: Extract<SixPointHoleResult, { kind: 'scored' }>) =>
     orderByStanding(r.points, r.scores)
