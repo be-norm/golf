@@ -1,18 +1,23 @@
 import Dexie from 'dexie'
 import { db } from '../db/schema'
+import { epoch } from '../db/clock'
 import { LOCAL_USER } from '../db/ids'
-import { roundRepo, playerRepo } from '../db/repos'
-import type { Player, Round } from '../engine/core/types'
+import { courseRepo, roundRepo, playerRepo } from '../db/repos'
+import type { Course, Player, Round } from '../engine/core/types'
 import type { RoundEvent } from '../engine/core/events'
 import { supabase } from './supabase'
-import { enqueuePushCourse, enqueuePushPlayer, enqueuePushRound, flushOutbox } from './outbox'
+import { enqueuePushPlayer, enqueuePushRound, flushOutbox } from './outbox'
 
 /**
  * Owner-scoped cloud restore. Snapshot model: each completed round is a
  * self-contained {round, events} blob in round_archives; the roster mirrors to
- * a players table. Pull is additive + last-write-wins by updatedAt, and honors
- * soft-delete tombstones. Live rounds are never pushed or pulled — they finish
- * on the device that started them. All best-effort/silent, like flushOutbox.
+ * a players table; the saved course library mirrors to saved_courses, each row
+ * carrying the course's own card so it restores whether or not that course
+ * exists in the shared library (most saved courses don't — live-API imports are
+ * never published there). Pull is additive + last-write-wins by updatedAt, and
+ * honors soft-delete tombstones. Live rounds are never pushed or pulled — they
+ * finish on the device that started them. All best-effort/silent, like
+ * flushOutbox.
  */
 
 /** Flush pending pushes, then restore anything newer from the cloud. */
@@ -25,12 +30,16 @@ export async function syncNow(userId: string): Promise<void> {
 export async function pull(userId: string): Promise<void> {
   if (userId === LOCAL_USER || !navigator.onLine) return
   try {
-    const [archivesRes, playersRes] = await Promise.all([
+    const [archivesRes, playersRes, coursesRes] = await Promise.all([
       supabase
         .from('round_archives')
         .select('round_id, data, updated_at, deleted_at')
         .eq('user_id', userId),
       supabase.from('players').select('*').eq('user_id', userId),
+      supabase
+        .from('saved_courses')
+        .select('course_id, data, updated_at, deleted_at')
+        .eq('user_id', userId),
     ])
 
     for (const row of archivesRes.data ?? []) {
@@ -40,6 +49,20 @@ export async function pull(userId: string): Promise<void> {
     for (const row of playersRes.data ?? []) {
       if (row.deleted_at) await playerRepo.delete(row.id as string)
       else await applyRemotePlayer(userId, row)
+    }
+    for (const row of coursesRes.data ?? []) {
+      const deletedAt = row.deleted_at as string | null
+      // "Removed" is deleted_at >= updated_at, compared as instants: a re-push
+      // rewrites updated_at but deliberately never clears deleted_at, so a
+      // tombstone OUT-DATED by a later re-save means the course is live again.
+      // (Gating on local membership instead was the last review's forever-
+      // tombstone bug — a fresh device has no local membership to compare, so
+      // a remove-then-re-save stayed dead on every other device.)
+      if (deletedAt && epoch(deletedAt) >= epoch(row.updated_at as string)) {
+        await courseRepo.applyRemoteRemoval(userId, row.course_id as string, deletedAt)
+      } else {
+        await courseRepo.applyRemoteSave(userId, row.data as Course, row.updated_at as string)
+      }
     }
   } catch {
     // opportunistic — offline or transient failure just means no restore now
@@ -52,7 +75,7 @@ async function applyRemoteRound(
 ): Promise<void> {
   const round = { ...data.round, userId }
   const local = await roundRepo.get(round.id)
-  if (local && local.updatedAt >= round.updatedAt) return // local same-or-newer → keep
+  if (local && epoch(local.updatedAt) >= epoch(round.updatedAt)) return // local same-or-newer → keep
   await db.transaction('rw', db.rounds, db.round_events, async () => {
     await db.rounds.put(round)
     // Only replace the event log when the snapshot actually carries events —
@@ -77,7 +100,8 @@ async function applyRemotePlayer(userId: string, row: Record<string, unknown>): 
     updatedAt: row.updated_at as string,
   }
   const local = await playerRepo.get(remote.id)
-  if (local && local.updatedAt >= remote.updatedAt) return
+  // instants, not strings: the local stamp ends `Z`, the pulled one `+00:00`
+  if (local && epoch(local.updatedAt) >= epoch(remote.updatedAt)) return
   await db.players.put(remote)
 }
 
@@ -87,7 +111,9 @@ async function applyRemotePlayer(userId: string, row: Record<string, unknown>): 
  * rewrite needed), then enqueue pushes for the roster + completed rounds.
  * Returns how much was claimed so the UI can confirm it.
  */
-export async function claimLocalData(userId: string): Promise<{ rounds: number; players: number }> {
+export async function claimLocalData(
+  userId: string,
+): Promise<{ rounds: number; players: number; courses: number }> {
   const claimed = await db.transaction('rw', db.rounds, db.players, async () => {
     const rounds = await db.rounds
       .where('[userId+startedAt]')
@@ -107,17 +133,22 @@ export async function claimLocalData(userId: string): Promise<{ rounds: number; 
     if (r.status === 'completed') await enqueuePushRound(userId, { ...r, userId })
   }
 
-  // Courses aren't owner-partitioned (they're a shared library), so there's no
-  // guest sentinel to rewrite — just publish the ones this device authored so
-  // they reach the account (and every other user). Best-effort, same as above.
-  const userCourses = await db.courses.filter((c) => c.source === 'user').toArray()
-  for (const c of userCourses) await enqueuePushCourse(userId, c)
+  // The saved library claims like rounds and players do — membership is owned
+  // data (MAI-76). The repo re-keys guest rows to the account, re-stamps
+  // guest authorship, and queues every push (membership + shared-library
+  // publish) in ONE transaction — authorship first, so the frozen payloads
+  // carry the account's createdBy, never '@local'.
+  const courses = await courseRepo.claim(userId)
 
-  return { rounds: claimed.rounds.length, players: claimed.players.length }
+  return { rounds: claimed.rounds.length, players: claimed.players.length, courses }
 }
 
 /** How many guest rows exist locally — drives the claim prompt. */
-export async function countLocalGuestData(): Promise<{ rounds: number; players: number }> {
+export async function countLocalGuestData(): Promise<{
+  rounds: number
+  players: number
+  courses: number
+}> {
   const rounds = await db.rounds
     .where('[userId+startedAt]')
     .between([LOCAL_USER, Dexie.minKey], [LOCAL_USER, Dexie.maxKey])
@@ -126,5 +157,8 @@ export async function countLocalGuestData(): Promise<{ rounds: number; players: 
     .where('[userId+name]')
     .between([LOCAL_USER, Dexie.minKey], [LOCAL_USER, Dexie.maxKey])
     .count()
-  return { rounds, players }
+  // counted too, or the prompt would offer to move "local data" while silently
+  // claiming a library it never mentioned — the opposite of opt-in
+  const courses = await courseRepo.countMemberships(LOCAL_USER)
+  return { rounds, players, courses }
 }

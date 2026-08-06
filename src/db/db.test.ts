@@ -7,7 +7,7 @@ import { makePlayers, makeRound } from '../engine/test/harness'
 import type { Course, Round, RoundStatus } from '../engine/core/types'
 import { EventStore } from './eventStore'
 import { LOCAL_USER, newId, resetDeviceIdCache } from './ids'
-import { CourseRepo, PlayerRepo, RoundRepo } from './repos'
+import { CourseRepo, ownsCourse, PlayerRepo, RoundRepo } from './repos'
 import { GolfDB } from './schema'
 import { pruneSeededCourses } from './seed'
 
@@ -240,6 +240,37 @@ describe('v1 → v2 migration', () => {
   })
 })
 
+describe('→ v3 migration (saved library becomes owned, MAI-76)', () => {
+  function v1Db(name: string): Dexie {
+    const v1 = new Dexie(name)
+    v1.version(1).stores({
+      courses: 'id, name, updatedAt',
+      players: 'id, name',
+      rounds: 'id, status, startedAt',
+      round_events: '[roundId+seq], id, roundId',
+      outbox: 'id, createdAt',
+      meta: 'key',
+    })
+    return v1
+  }
+
+  it('backfills membership for existing cards to the guest sentinel', async () => {
+    const name = `golf-mig-${++testDbCounter}`
+    const v1 = v1Db(name)
+    await v1.open()
+    await v1.table('courses').put(makeCourse('c-pre', 'remote'))
+    v1.close()
+
+    const db = new GolfDB(name)
+    await db.open()
+    // the device can't know WHO saved it, so it lands guest and rides the
+    // claim prompt (which counts courses) — deliberately no silent adoption
+    expect(await db.saved_courses.get([LOCAL_USER, 'c-pre'])).toBeDefined()
+    expect(await new CourseRepo(db).list(LOCAL_USER)).toHaveLength(1)
+    db.close()
+  })
+})
+
 function makeCourse(id: string, source: Course['source']): Course {
   return {
     id,
@@ -254,16 +285,287 @@ function makeCourse(id: string, source: Course['source']): Course {
 }
 
 describe('CourseRepo', () => {
-  it('saves, reads, and deletes a course from the library', async () => {
-    const repo = new CourseRepo(freshDb())
-    await repo.put(makeCourse('c1', 'user'))
-    await repo.put(makeCourse('c2', 'remote'))
-    expect(await repo.get('c1')).toBeDefined()
-    expect(await repo.list()).toHaveLength(2)
+  const A = 'user-a'
+  const B = 'user-b'
 
-    await repo.delete('c1')
+  /**
+   * The consent property (MAI-76). Course data is shared, but "these are MY
+   * courses" is owned — a friend signing in on your phone must not see, or
+   * later upload, your library.
+   */
+  it('scopes the library per user on a shared device', async () => {
+    const repo = new CourseRepo(freshDb())
+    await repo.save(A, makeCourse('mine', 'user'))
+    await repo.save(B, makeCourse('theirs', 'user'))
+
+    expect((await repo.list(A)).map((c) => c.id)).toEqual(['mine'])
+    expect((await repo.list(B)).map((c) => c.id)).toEqual(['theirs'])
+    // reads-by-id stay unscoped — the id is the capability
+    expect(await repo.get('theirs')).toBeDefined()
+  })
+
+  it('two users keep the same course; one removing it leaves the other, and the card', async () => {
+    const db = freshDb()
+    const repo = new CourseRepo(db)
+    await repo.save(A, makeCourse('shared', 'remote'))
+    await repo.save(B, makeCourse('shared', 'remote'))
+
+    await repo.remove(A, 'shared')
+    expect(await repo.list(A)).toHaveLength(0)
+    expect((await repo.list(B)).map((c) => c.id)).toEqual(['shared'])
+    expect(await repo.get('shared')).toBeDefined()
+  })
+
+  it('GCs the cached card when the LAST membership on the device goes', async () => {
+    const repo = new CourseRepo(freshDb())
+    await repo.save(A, makeCourse('c1', 'remote'))
+    await repo.remove(A, 'c1')
+    // no library references it any more — an unbounded courses cache is what
+    // eventually triggers the iOS quota eviction that takes live rounds along
     expect(await repo.get('c1')).toBeUndefined()
-    expect((await repo.list()).map((c) => c.id)).toEqual(['c2'])
+  })
+
+  /**
+   * THE regression from attempt two: membership wrote fine, and the push was
+   * left to call sites that forgot. Now the outbox op is written in the same
+   * transaction as the membership row, so it cannot be forgotten.
+   */
+  it('save enqueues the membership push atomically, carrying the MEMBERSHIP clock', async () => {
+    const db = freshDb()
+    const repo = new CourseRepo(db)
+    await repo.save(A, makeCourse('c1', 'remote'))
+
+    const ops = await db.outbox.toArray()
+    expect(ops.map((o) => o.kind)).toEqual(['pushSavedCourse'])
+    const payload = ops[0]!.payload as { userId: string; course: Course; savedAt: string }
+    expect(payload.userId).toBe(A)
+    expect(payload.course.id).toBe('c1')
+    // savedAt is when THIS USER saved it — pushing the card's own stamp
+    // instead was the wrong-clock finding from the last review
+    const membership = await db.saved_courses.get([A, 'c1'])
+    expect(payload.savedAt).toBe(membership!.updatedAt)
+  })
+
+  it('remove purges queued saves and queues the tombstone in one transaction', async () => {
+    const db = freshDb()
+    const repo = new CourseRepo(db)
+    await repo.save(A, makeCourse('c1', 'remote'))
+    await repo.remove(A, 'c1')
+
+    // the queued push is gone (it could flush after the tombstone and
+    // resurrect the row) and only the tombstone remains
+    const ops = await db.outbox.toArray()
+    expect(ops.map((o) => o.kind)).toEqual(['deleteSavedCourse'])
+  })
+
+  it('guests enqueue nothing — their library stays local until claimed', async () => {
+    const db = freshDb()
+    const repo = new CourseRepo(db)
+    await repo.save(LOCAL_USER, makeCourse('c1', 'user'))
+    await repo.remove(LOCAL_USER, 'c1')
+    expect(await db.outbox.count()).toBe(0)
+  })
+
+  it('applyRemote* never enqueue — they ARE the sync', async () => {
+    const db = freshDb()
+    const repo = new CourseRepo(db)
+    await repo.applyRemoteSave(A, makeCourse('c1', 'remote'), '2026-08-01T00:00:00.000Z')
+    expect(await db.saved_courses.get([A, 'c1'])).toBeDefined()
+    await repo.applyRemoteRemoval(A, 'c1', '2026-08-02T00:00:00.000Z')
+    expect(await db.saved_courses.get([A, 'c1'])).toBeUndefined()
+    expect(await db.outbox.count()).toBe(0)
+  })
+
+  it('a tombstone loses to a membership saved after it (LWW)', async () => {
+    const db = freshDb()
+    const repo = new CourseRepo(db)
+    await repo.applyRemoteSave(A, makeCourse('c1', 'remote'), '2026-08-03T00:00:00.000Z')
+    await repo.applyRemoteRemoval(A, 'c1', '2026-08-02T00:00:00.000Z')
+    expect(await db.saved_courses.get([A, 'c1'])).toBeDefined()
+  })
+
+  /**
+   * Timestamps cross two encodings: local stamps end `Z`, Postgres returns
+   * `+00:00`. The SAME instant must compare equal — a string comparison calls
+   * `…Z` newer than `…+00:00` and would keep a membership a simultaneous
+   * removal should take (a review finding on the last attempt).
+   */
+  it('compares timestamps as instants across encodings', async () => {
+    const db = freshDb()
+    const repo = new CourseRepo(db)
+    await repo.applyRemoteSave(A, makeCourse('c1', 'remote'), '2026-08-01T12:00:01.500Z')
+    await repo.applyRemoteRemoval(A, 'c1', '2026-08-01T12:00:01.500000+00:00')
+    expect(await db.saved_courses.get([A, 'c1'])).toBeUndefined()
+  })
+
+  it('applyRemoteSave defers to a pending local tombstone (pull racing a removal)', async () => {
+    const db = freshDb()
+    const repo = new CourseRepo(db)
+    await repo.save(A, makeCourse('c1', 'remote'))
+    await repo.remove(A, 'c1')
+    // the tombstone hasn't flushed; the server still has the old live row
+    await repo.applyRemoteSave(A, makeCourse('c1', 'remote'), '2026-08-01T00:00:00.000Z')
+    expect(await db.saved_courses.get([A, 'c1'])).toBeUndefined()
+  })
+
+  it('applyRemoteSave keeps a newer local card over an older remote copy', async () => {
+    const db = freshDb()
+    const repo = new CourseRepo(db)
+    const local = await repo.save(A, { ...makeCourse('c1', 'user'), name: 'Fixed SIs' })
+    await repo.applyRemoteSave(
+      A,
+      { ...makeCourse('c1', 'user'), name: 'Stale', updatedAt: '2020-01-01T00:00:00.000Z' },
+      '2020-01-01T00:00:00.000Z',
+    )
+    expect((await repo.get('c1'))?.name).toBe(local.name)
+  })
+
+  it('claim re-keys the guest library to the account and queues its pushes', async () => {
+    const db = freshDb()
+    const repo = new CourseRepo(db)
+    await repo.save(LOCAL_USER, makeCourse('c1', 'remote'))
+    expect(await repo.claim(A)).toBe(1)
+
+    expect(await db.saved_courses.get([LOCAL_USER, 'c1'])).toBeUndefined()
+    expect(await db.saved_courses.get([A, 'c1'])).toBeDefined()
+    const ops = await db.outbox.toArray()
+    expect(ops.map((o) => o.kind)).toEqual(['pushSavedCourse'])
+    expect((ops[0]!.payload as { userId: string }).userId).toBe(A)
+  })
+
+  it('claim leaves provider-id legacy cards unstamped and unpublished', async () => {
+    const db = freshDb()
+    const repo = new CourseRepo(db)
+    // an API import the pre-createdBy editor re-stamped to source:'user' —
+    // NOT authored here, despite what a bare undefined-means-mine check reads
+    await repo.save(LOCAL_USER, { ...makeCourse('gca:9', 'user'), createdBy: undefined })
+    await repo.claim(A)
+
+    // membership claims (the user keeps the course)…
+    expect(await db.saved_courses.get([A, 'gca:9'])).toBeDefined()
+    // …but authorship must not: stamping createdBy here would flip ownsCourse
+    // to true forever, sending every future edit onto a shared row RLS
+    // refuses instead of forking — and the publish would leak an ODbL card
+    expect((await db.courses.get('gca:9'))?.createdBy).toBeUndefined()
+    expect((await db.outbox.toArray()).map((o) => o.kind)).toEqual(['pushSavedCourse'])
+  })
+
+  it('saveAuthored queues the shared-library publish atomically with the save', async () => {
+    const db = freshDb()
+    const repo = new CourseRepo(db)
+    await repo.saveAuthored(A, { ...makeCourse('c1', 'user'), createdBy: A })
+
+    // one transaction: a crash can't save the correction locally while
+    // silently losing its republish (the guarantee fork() already made)
+    const kinds = (await db.outbox.toArray())
+      .map((o) => o.kind)
+      .sort()
+    expect(kinds).toEqual(['pushCourse', 'pushSavedCourse'])
+
+    // guests queue nothing — they publish at claim time
+    await db.outbox.clear()
+    await repo.saveAuthored(LOCAL_USER, { ...makeCourse('c2', 'user'), createdBy: LOCAL_USER })
+    expect(await db.outbox.count()).toBe(0)
+  })
+
+  it('claim re-stamps guest authorship BEFORE freezing push payloads', async () => {
+    const db = freshDb()
+    const repo = new CourseRepo(db)
+    await repo.save(LOCAL_USER, { ...makeCourse('c1', 'user'), createdBy: LOCAL_USER })
+    await repo.claim(A)
+
+    // one transaction, authorship first: a payload frozen with '@local' made
+    // the user's OTHER devices fork their own course on edit (review finding)
+    const ops = await db.outbox.toArray()
+    const membership = ops.find((o) => o.kind === 'pushSavedCourse')!
+    expect((membership.payload as { course: Course }).course.createdBy).toBe(A)
+    const publish = ops.find((o) => o.kind === 'pushCourse')!
+    expect((publish.payload as { course: Course }).course.createdBy).toBe(A)
+    expect((await db.courses.get('c1'))?.createdBy).toBe(A)
+  })
+
+  it('fork lands the new card and retires the original in ONE transaction', async () => {
+    const db = freshDb()
+    const repo = new CourseRepo(db)
+    await repo.save(A, { ...makeCourse('orig', 'remote') })
+    await db.outbox.clear()
+
+    const fork = await repo.fork(A, 'orig', {
+      ...makeCourse('fork-1', 'user'),
+      createdBy: A,
+      sourceId: 'orig',
+    })
+
+    expect(fork.id).toBe('fork-1')
+    expect((await repo.list(A)).map((c) => c.id)).toEqual(['fork-1'])
+    // the original's card is GC'd (nothing references it), and its tombstone
+    // is queued together with the fork's membership push AND its shared-
+    // library publish — a crash can't leave the library holding both rows,
+    // or a saved fork that never publishes
+    expect(await repo.get('orig')).toBeUndefined()
+    const kinds = (await db.outbox.toArray()).map((o) => o.kind).sort()
+    expect(kinds).toEqual(['deleteSavedCourse', 'pushCourse', 'pushSavedCourse'])
+  })
+
+  it('a fresh save supersedes a removal still queued on this device', async () => {
+    const db = freshDb()
+    const repo = new CourseRepo(db)
+    await repo.save(A, makeCourse('c1', 'remote'))
+    await repo.remove(A, 'c1')
+    await repo.save(A, makeCourse('c1', 'remote'))
+
+    // the tombstone is purged rather than racing the new push to the server —
+    // the newest local intent is the only thing left to flush
+    const ops = await db.outbox.toArray()
+    expect(ops.map((o) => o.kind)).toEqual(['pushSavedCourse'])
+  })
+
+  it('a retry-capped tombstone no longer vetoes the course coming back', async () => {
+    const db = freshDb()
+    const repo = new CourseRepo(db)
+    await db.outbox.put({
+      id: 'dead-op',
+      kind: 'deleteSavedCourse',
+      payload: { userId: A, courseId: 'c1', removedAt: '2026-08-01T00:00:00.000Z' },
+      createdAt: '2026-08-01T00:00:00.000Z',
+      attempts: 10, // permanently failed — will never flush
+    })
+    await repo.applyRemoteSave(A, makeCourse('c1', 'remote'), '2026-08-02T00:00:00.000Z')
+    // an op that can never flush must not suppress this course forever
+    expect(await db.saved_courses.get([A, 'c1'])).toBeDefined()
+  })
+})
+
+describe('ownsCourse (the MAI-78 fork-vs-update decision)', () => {
+  const base = makeCourse('11111111-2222-7333-8444-555555555555', 'user')
+
+  it('keys on createdBy when present', () => {
+    expect(ownsCourse({ ...base, createdBy: 'me' }, 'me')).toBe(true)
+    expect(ownsCourse({ ...base, createdBy: 'someone-else' }, 'me')).toBe(false)
+    // the guest sentinel is an identity like any other — signing in does not
+    // make unclaimed guest cards yours
+    expect(ownsCourse({ ...base, createdBy: LOCAL_USER }, 'me')).toBe(false)
+    expect(ownsCourse({ ...base, createdBy: LOCAL_USER }, LOCAL_USER)).toBe(true)
+  })
+
+  it('an orphaned author (account deleted) is never yours', () => {
+    expect(ownsCourse({ ...base, createdBy: '@orphaned' }, 'me')).toBe(false)
+  })
+
+  it('legacy source:user cards are yours only with a locally-minted (v7) id', () => {
+    // authored here pre-createdBy: newId() has only ever minted UUIDv7
+    expect(ownsCourse(base, 'me')).toBe(true)
+    // main's editor rewrote EDITED API imports to source:'user' too — their
+    // provider ids give them away, and treating them as yours pushes onto a
+    // shared row RLS refuses (the exact MAI-78 failure, review finding)
+    expect(ownsCourse({ ...base, id: 'gca:9' }, 'me')).toBe(false)
+    expect(ownsCourse({ ...base, id: '11111111-2222-4333-8444-555555555555' }, 'me')).toBe(false)
+  })
+
+  it('non-user sources are never yours without createdBy', () => {
+    expect(ownsCourse(makeCourse('11111111-2222-7333-8444-555555555555', 'remote'), 'me')).toBe(
+      false,
+    )
   })
 })
 
@@ -277,9 +579,23 @@ describe('pruneSeededCourses', () => {
       makeCourse('mine', 'user'), // hand-created (or an edited seed)
     ])
 
+    // boot order isn't guaranteed: adoption may already have claimed a seed's
+    // membership and queued its push — prune must take those with the card, or
+    // the flushed push re-adds the seed to the account's library on next pull
+    await db.saved_courses.put({ userId: 'user-a', courseId: 'seed-1', updatedAt: 't' })
+    await db.outbox.put({
+      id: newId(),
+      kind: 'pushSavedCourse',
+      payload: { userId: 'user-a', course: makeCourse('seed-1', 'seed'), savedAt: 't' },
+      createdAt: 't',
+      attempts: 0,
+    })
+
     await pruneSeededCourses(db)
     const after = await db.courses.toArray()
     expect(after.map((c) => c.id).sort()).toEqual(['mine', 'picked'])
+    expect(await db.saved_courses.where('courseId').equals('seed-1').count()).toBe(0)
+    expect(await db.outbox.count()).toBe(0)
 
     // gated by a meta flag: a later stray seed row isn't re-pruned
     await db.courses.put(makeCourse('seed-late', 'seed'))

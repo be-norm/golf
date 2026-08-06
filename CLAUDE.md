@@ -92,23 +92,58 @@ change, use a 6-digit code (`{{ .Token }}` + `verifyOtp`) rather than a link.
   the sentinel `LOCAL_USER = '@local'` (`src/db/ids.ts`) — a real string, since IndexedDB
   omits `undefined`-keyed rows from compound indexes. Repos scope **lists** by userId
   (`[userId+startedAt]` / `[userId+name]`); **reads-by-id stay unscoped** (an owned id is
-  the capability). Courses stay global/shared. Dexie v2 `.upgrade()` backfilled existing
-  rows to `LOCAL_USER`.
+  the capability). Course DATA stays global/shared, but which courses you SAVED is owned —
+  see `saved_courses` below. Dexie v2 `.upgrade()` backfilled existing rows to `LOCAL_USER`.
 - **Claim-on-login.** Signing in offers (opt-in) to rewrite this device's guest rows to the
   auth uid in one transaction, then push them — this is how pre-auth data moves into an
   account (`claimLocalData`, `src/remote/sync.ts`).
-- **Sync is snapshot + outbox, best-effort.** Only signed-in, **completed** rounds and the
-  roster sync; live rounds stay on their device. Push/delete go through the Dexie `outbox`
-  (`src/remote/outbox.ts`); `pull` (`sync.ts`) is additive + last-write-wins by `updatedAt`
-  with soft-delete tombstones. round_archives is keyed by `(user_id, round_id)`; a re-push
-  never clears a tombstone (`deleted_at` omitted from the upsert).
+- **Sync is snapshot + outbox, best-effort.** Only signed-in, **completed** rounds, the
+  roster and the **saved course library** sync; live rounds stay on their device. Push/delete
+  go through the Dexie `outbox` (`src/remote/outbox.ts`); `pull` (`sync.ts`) is additive +
+  last-write-wins by `updatedAt` with soft-delete tombstones. round_archives is keyed by
+  `(user_id, round_id)`; a re-push never clears a tombstone (`deleted_at` omitted from the
+  upsert), so "removed" is `deleted_at >= updated_at` — and timestamps are compared as
+  instants (`Date.parse`), never strings: local stamps end `Z`, Postgres returns `+00:00`.
+- **`saved_courses` is the user's library: DATA IS SHARED, MEMBERSHIP IS OWNED.** `courses`
+  caches scorecards — the same card serves everyone who plays there, so it has no owner and
+  is never scoped. Which courses are YOURS is a different, owned fact: it follows you between
+  devices and must not leak to whoever signs in on your phone next. Locally the split is
+  `courses` (shared cards) + `saved_courses` (`[userId+courseId]`, `LOCAL_USER` sentinel +
+  claim-on-login, like rounds and players); remotely `saved_courses(user_id, course_id, data)`.
+  The remote row **copies the card** rather than foreign-keying `courses` (that table is the
+  shared *discovery* library, not a superset of what people save — live-API imports are never
+  upserted there), and `course_id` is **text**, not uuid (GolfCourseAPI mints `gca:9` ids; a
+  uuid column rejected them and silently killed the first attempt's entire push).
+  **Membership writes live in `CourseRepo` and nowhere else** — each mutator writes the
+  `saved_courses` row and its outbox op in the SAME transaction (the `EventStore.append`
+  rule), with the guest gate inside, so membership and its push cannot drift; ESLint blocks
+  `db.saved_courses` outside the sanctioned db files. The pull-side `applyRemote*` pair is
+  the sanctioned non-enqueueing exception. `saved_courses.updated_at` is the MEMBERSHIP
+  clock (when this user saved it), never the card's own stamp — and every server write is
+  staleness-gated (`lte` on `updated_at`; the push is insert-if-absent + gated update, the
+  tombstone carries the REMOVAL instant), so an op flushing late can never rewind a newer
+  write from another device. `flushOutbox` no-ops signed-out: owner-scoped ops can't succeed
+  as anon, and a 0-row tombstone UPDATE would read as success and destroy the removal.
+  Removing the last membership on a device also GCs the cached card (unbounded `db.courses`
+  growth is what triggers iOS quota eviction, which takes live round logs with it). There is
+  deliberately NO silent adoption of the pre-v3 library — an automatic claim stamps fresh
+  clocks over the account's tombstones and resurrects courses removed elsewhere; the claim
+  prompt (which counts courses) is the consented migration path.
+- **Editing a course you don't own FORKS it (MAI-78).** Ownership is `Course.createdBy`, not
+  `source` — an imported copy of another golfer's course is `source:'user'` but still theirs,
+  and RLS refuses updates to rows you didn't create. Your own card updates in place and
+  republishes; anyone else's silently becomes a new user-owned course (fresh UUID, revision
+  0), membership moves to the fork, and the list screen states the consequence after the
+  fact. Never a modal: it would offer an "overwrite" the server rejects.
 - **RLS is `auth.uid() = user_id`** on `round_archives` + `players`; `courses` SELECT is
   granted to `anon, authenticated` so signed-in users keep library access. Deleting a whole
   round/player is outside the append-only event invariant (#2 governs edits *within* a round).
 - **Account deletion is a hard delete with a 30-day data archive** (`/account` →
   `delete-account` Edge Function). Required by App Store guideline 5.1.1(v). Full design +
-  admin reinstatement runbook: `docs/account-deletion.md`. Two invariants that are easy to
-  break by accident:
+  admin reinstatement runbook: `docs/account-deletion.md`. A new user-owned table must be
+  handled in FOUR places or deletion silently rots: cascade from `auth.users`, archived by
+  `delete-account`, a restore step in the runbook, and dropped by `wipeUserData`
+  (`src/db/wipe.ts`). Two invariants that are easy to break by accident:
   - **`deleted_account_archives` is service-role only** — RLS on, *no* policies, privileges
     revoked from `anon`/`authenticated`. It holds the data of people who asked to be
     forgotten. Never add a policy to make it client-readable.

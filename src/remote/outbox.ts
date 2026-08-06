@@ -1,8 +1,14 @@
 import { db } from '../db/schema'
-import type { OutboxItem } from '../db/schema'
+import type {
+  DeleteSavedCoursePayload,
+  OutboxItem,
+  PushCoursePayload,
+  PushSavedCoursePayload,
+} from '../db/schema'
+import { setOutboxNotifier } from '../db/outboxSignal'
 import { getDeviceId, newId } from '../db/ids'
 import { eventStore } from '../db/eventStore'
-import type { Course, Player, Round } from '../engine/core/types'
+import type { Player, Round } from '../engine/core/types'
 import type { RoundEvent } from '../engine/core/events'
 import { supabase } from './supabase'
 
@@ -31,11 +37,6 @@ interface DeletePlayerPayload {
   userId: string
   playerId: string
 }
-interface PushCoursePayload {
-  userId: string
-  course: Course
-}
-
 export async function enqueuePushRound(userId: string, round: Round): Promise<void> {
   const events = await eventStore.list(round.id)
   await put('pushRound', { userId, round, events })
@@ -45,14 +46,9 @@ export async function enqueuePushPlayer(userId: string, player: Player): Promise
   await put('pushPlayer', { userId, player })
 }
 
-/**
- * Publish a user-authored course to the shared library so every user can find
- * it. Only ever called for source:'user' courses owned by a signed-in user;
- * RLS pins the row's created_by to the caller.
- */
-export async function enqueuePushCourse(userId: string, course: Course): Promise<void> {
-  await put('pushCourse', { userId, course })
-}
+// pushCourse ops (shared-library publish) are enqueued by CourseRepo itself —
+// saveAuthored/fork/claim write them in the same transaction as the membership
+// they ride with, so there is deliberately no enqueue helper for them here.
 
 export async function enqueueDeleteRound(userId: string, roundId: string): Promise<void> {
   await purgePendingFor(roundId)
@@ -92,25 +88,65 @@ async function purgePendingFor(entityId: string): Promise<void> {
   await db.outbox.bulkDelete(stale.map((s) => s.id))
 }
 
-let flushing = false
+let inFlight: Promise<void> | null = null
+let rerun = false
 
-export async function flushOutbox(): Promise<void> {
-  if (flushing || !navigator.onLine) return
-  flushing = true
+/**
+ * Re-entrant calls join the in-flight run and flag a follow-up pass, so an op
+ * enqueued mid-flush is picked up instead of silently missed until the next
+ * external trigger — and `await flushOutbox()` genuinely waits, which is what
+ * makes syncNow's flush-before-pull an ordering rather than a hope (a pull
+ * overlapping an un-awaited flush could fetch pre-tombstone rows and
+ * transiently resurrect a course the user just removed).
+ */
+export function flushOutbox(): Promise<void> {
+  if (inFlight) {
+    rerun = true
+    return inFlight
+  }
+  inFlight = drainQueue().finally(() => {
+    inFlight = null
+    // A join can land between drainQueue's final `while (rerun)` check and
+    // this cleanup — its flag would be set on a run that will never re-read
+    // it, and the op it announced would sit until the next external trigger.
+    // Relaunch instead; the new run resets `rerun` first thing, so this can't
+    // spin (an offline relaunch no-ops and stops).
+    if (rerun) void flushOutbox()
+  })
+  return inFlight
+}
+
+async function drainQueue(): Promise<void> {
   try {
-    const items = await db.outbox.orderBy('createdAt').toArray()
-    const deviceId = await getDeviceId(db)
-    for (const item of items) {
-      // give up quietly after repeated permanent failures — sync is best-effort
-      if (item.attempts >= 10) continue
-      const ok = await send(item, deviceId)
-      if (ok) await db.outbox.delete(item.id)
-      else await db.outbox.update(item.id, { attempts: item.attempts + 1 })
-    }
+    do {
+      rerun = false
+      if (!navigator.onLine) return
+      // Every op is owner-scoped, so flushing signed-out can't succeed — and
+      // it's worse than useless: RLS filters every row for anon, a tombstone
+      // UPDATE then matches nothing, reads as success, and the removal is
+      // destroyed. Wait for a session instead of burning the ops.
+      const { data } = await supabase.auth.getSession()
+      const uid = data.session?.user?.id
+      if (!uid) return
+      const items = await db.outbox.orderBy('createdAt').toArray()
+      const deviceId = await getDeviceId(db)
+      for (const item of items) {
+        // give up quietly after repeated permanent failures — sync is best-effort
+        if (item.attempts >= 10) continue
+        // Only the owner's session may flush an op: under anyone else's, RLS
+        // filters their rows and a tombstone UPDATE "succeeds" against
+        // nothing — the signed-out trap one account deeper. A foreign op
+        // waits (no attempt burned) for its owner to sign back in;
+        // wipeUserData drops it if that account is deleted on this device.
+        const owner = (item.payload as { userId?: string })?.userId
+        if (owner !== undefined && owner !== uid) continue
+        const ok = await send(item, deviceId)
+        if (ok) await db.outbox.delete(item.id)
+        else await db.outbox.update(item.id, { attempts: item.attempts + 1 })
+      }
+    } while (rerun)
   } catch {
     // fully silent: sync is opportunistic
-  } finally {
-    flushing = false
   }
 }
 
@@ -167,10 +203,71 @@ async function send(item: OutboxItem, deviceId: string): Promise<boolean> {
         .eq('id', playerId)
       return !error
     }
+    case 'pushSavedCourse': {
+      const { userId, course, savedAt } = item.payload as PushSavedCoursePayload
+      // updated_at is the MEMBERSHIP clock — when this user saved it — never
+      // the card's own updatedAt (the card travels inside `data` with its own
+      // stamp; conflating the two was a review finding on the last attempt).
+      // deleted_at is deliberately omitted, exactly as round_archives does it:
+      // a re-push never clears a tombstone; a re-save with a newer updated_at
+      // simply out-dates it and pull treats the row as live again.
+      //
+      // Two steps because the write must be staleness-gated like the delete
+      // below, and a plain upsert can't be: a stale queued push flushing late
+      // (device offline for days) would rewind updated_at/data below a newer
+      // save from another device — and a rewound updated_at under a standing
+      // deleted_at reads as REMOVED, splitting the brain across devices.
+      // Step 1 creates the row iff absent; step 2 applies the write iff not
+      // older than what's there. A newer concurrent write between the two
+      // simply wins step 2, which is the correct outcome.
+      //
+      // ACCEPTED tradeoff: the gate rides the membership clock alone, so a
+      // legitimately-fresh membership (a claim) carrying an old card copy can
+      // regress the server's `data` to that copy. Gating `data` on the card's
+      // own clock would take a second conditional update (or an RPC) per
+      // push; active devices are protected by pull's card-clock LWW either
+      // way, so only a fresh-device restore sees the older card — which is
+      // the copy the claiming user actually had. Revisit as an RPC if a
+      // multi-user reality ever makes this bite.
+      const inserted = await supabase.from('saved_courses').upsert(
+        { user_id: userId, course_id: course.id, data: course, updated_at: savedAt },
+        { onConflict: 'user_id,course_id', ignoreDuplicates: true },
+      )
+      if (inserted.error) return false
+      const updated = await supabase
+        .from('saved_courses')
+        .update({ data: course, updated_at: savedAt })
+        .eq('user_id', userId)
+        .eq('course_id', course.id)
+        .lte('updated_at', savedAt)
+      return !updated.error
+    }
+    case 'deleteSavedCourse': {
+      const { userId, courseId, removedAt } = item.payload as DeleteSavedCoursePayload
+      // Tombstone rather than delete, so a device that was offline learns the
+      // course was removed instead of pushing it back on its next sync.
+      // Stamped with when the USER removed it, not when this flush runs, and
+      // gated on lte: if the server row's updated_at is already newer, another
+      // device re-saved the course AFTER this removal — the removal is stale
+      // news and must leave the row alone. (For rounds/players a flush-time
+      // stamp is harmless because their tombstones are forever; here the
+      // deleted_at/updated_at ordering decides liveness, so the clock is
+      // load-bearing.)
+      const { error } = await supabase
+        .from('saved_courses')
+        .update({ deleted_at: removedAt, updated_at: removedAt })
+        .eq('user_id', userId)
+        .eq('course_id', courseId)
+        .lte('updated_at', removedAt)
+      return !error
+    }
     case 'pushCourse': {
       const { userId, course } = item.payload as PushCoursePayload
       // Shared, publicly-readable library row. created_by = the owner (RLS
       // pins it); source/status forced to what the insert policy allows.
+      // source_id carries the fork's origin (MAI-78): a correction of an
+      // ODbL-derived card must publish with its provenance chain intact, not
+      // as an unattributed original.
       const { error } = await supabase.from('courses').upsert(
         {
           id: course.id,
@@ -180,7 +277,7 @@ async function send(item: OutboxItem, deviceId: string): Promise<boolean> {
           data: course,
           status: 'published',
           source: 'user',
-          source_id: null,
+          source_id: course.sourceId ?? null,
           created_by: userId,
           revision: course.revision,
           updated_at: course.updatedAt,
@@ -197,6 +294,10 @@ async function send(item: OutboxItem, deviceId: string): Promise<boolean> {
 }
 
 export function registerOutboxFlush(): void {
+  // CourseRepo writes outbox rows inside its own transactions (atomic with the
+  // membership they describe) and signals here for the flush, so the db layer
+  // never imports the network stack.
+  setOutboxNotifier(() => void flushOutbox())
   window.addEventListener('online', () => void flushOutbox())
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') void flushOutbox()

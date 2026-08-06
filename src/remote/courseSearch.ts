@@ -1,5 +1,6 @@
 import type { Course } from '../engine/core/types'
 import { courseRepo } from '../db/repos'
+import { ORPHANED_AUTHOR } from '../db/ids'
 import { supabase } from './supabase'
 import { buildRemoteCourse, normalizeTeeRatings, usableHoleRows, type RawTee } from './transform'
 
@@ -90,12 +91,25 @@ export function golfApiName(club?: string, course?: string): string {
 
 async function librarySearch(q: string): Promise<CourseSearchHit[]> {
   try {
-    // match name OR city/state — "broadmoor", "westfield", "carmel in" all work
-    const pattern = `%${q.replace(/[%_]/g, '')}%`
+    // match name OR city/state — "broadmoor", "westfield", "carmel in" all work.
+    // PostgREST parses the .or() argument as a logic tree, so a bare comma or
+    // parenthesis in the query corrupts it — typing "Carmel, IN" (the app's
+    // own City, ST display format) silently emptied the library results.
+    // Double-quoting the value (PostgREST's string escape, backslash for
+    // embedded quotes/backslashes) keeps any punctuation inert.
+    const raw = q.replace(/[%_]/g, '').replace(/[\\"]/g, '\\$&')
+    const pattern = `"%${raw}%"`
+    // Ordered, with id as the tie-break: without an ORDER BY, which of two
+    // same-name rows (an API card and a golfer's fork of it, MAI-78) comes
+    // back first — and therefore which one survives mergeCourseHits' first-
+    // wins dedupe — changed between searches. Collapsing the pair into one
+    // result is MAI-79; this only makes the pick deterministic.
     const { data } = await supabase
       .from('courses')
       .select('id, name, location, source')
       .or(`name.ilike.${pattern},location.ilike.${pattern}`)
+      .order('name')
+      .order('id')
       .limit(12)
     return (data ?? []).map((c) => ({
       id: c.id as string,
@@ -163,28 +177,56 @@ async function golfCourseApiSearch(q: string): Promise<CourseSearchHit[]> {
 
 // --- import a chosen hit into the local library -----------------------------
 
-/** Pull a search hit's full scorecard and cache it in the local library. */
-export async function importCourseHit(hit: CourseSearchHit): Promise<Course> {
-  if (hit.origin === 'library') return importFromLibrary(hit)
-  if (hit.origin === 'golfcourseapi') return importFromGolfCourseApi(hit)
-  return importFromOpenGolf(hit)
+/**
+ * Pull a search hit's full scorecard and save it to `userId`'s library.
+ *
+ * Takes the owner explicitly: saving is an owned act (MAI-76), and the caller
+ * is the only one who knows who is signed in. Guests pass LOCAL_USER, like
+ * every other owned write. All three paths end in `courseRepo.save`, which
+ * records membership and queues its push atomically — these imports are the
+ * main way courses enter the library, and they were exactly the paths the
+ * previous attempt left out of sync.
+ */
+export async function importCourseHit(userId: string, hit: CourseSearchHit): Promise<Course> {
+  if (hit.origin === 'library') return importFromLibrary(userId, hit)
+  if (hit.origin === 'golfcourseapi') return importFromGolfCourseApi(userId, hit)
+  return importFromOpenGolf(userId, hit)
 }
 
-async function importFromLibrary(hit: CourseSearchHit): Promise<Course> {
-  const { data, error } = await supabase.from('courses').select('data').eq('id', hit.id).single()
+async function importFromLibrary(userId: string, hit: CourseSearchHit): Promise<Course> {
+  const { data, error } = await supabase
+    .from('courses')
+    .select('data, created_by')
+    .eq('id', hit.id)
+    .single()
   if (error || !data) throw new Error('course fetch failed')
   // The library is the one import path that skips buildRemoteCourse — a doc
   // published before the 9-hole rating guard existed would otherwise keep an
   // 18-hole rating forever, on every device that imports it.
   // Return the NORMALIZED course (not the raw library doc), matching what we
-  // cached — bar courseRepo.put's own revision bump / updatedAt stamp, same as
-  // the other import paths below.
-  const course = { ...normalizeTeeRatings(data.data as Course), source: 'remote' as const, revision: 0 }
-  await courseRepo.put(course)
-  return course
+  // cached — bar courseRepo.save's own revision bump / updatedAt stamp, same
+  // as the other import paths below.
+  const published = data.data as Course
+  const authored = published.source === 'user'
+  const course: Course = {
+    ...normalizeTeeRatings(published),
+    // A golfer-contributed course must still read as one after import (MAI-77)
+    // — but ownership travels in created_by, NOT source: the editor's fork
+    // decision keys on who authored it, and keying it on source was how the
+    // last attempt tried to push edits onto rows RLS refuses (MAI-78).
+    source: authored ? ('user' as const) : ('remote' as const),
+    // A golfer-authored row whose created_by is NULL lost its author (account
+    // deleted → set null). Mark it explicitly rather than importing
+    // `undefined`, which must keep meaning "legacy card authored on THIS
+    // device" — otherwise editing an orphan masquerades as editing your own
+    // and pushes updates RLS refuses for everyone.
+    createdBy: authored ? ((data.created_by as string | null) ?? ORPHANED_AUTHOR) : undefined,
+    revision: 0,
+  }
+  return courseRepo.save(userId, course)
 }
 
-async function importFromOpenGolf(hit: CourseSearchHit): Promise<Course> {
+async function importFromOpenGolf(userId: string, hit: CourseSearchHit): Promise<Course> {
   const res = await fetch(`${OPENGOLF_BASE}/api/v1/courses/${hit.id}`, {
     signal: AbortSignal.timeout(10000),
   })
@@ -226,8 +268,7 @@ async function importFromOpenGolf(hit: CourseSearchHit): Promise<Course> {
       slope: t.slope,
     })),
   })
-  await courseRepo.put({ ...course, revision: 0 })
-  return course
+  return courseRepo.save(userId, { ...course, revision: 0 })
 }
 
 interface GolfApiTee {
@@ -237,7 +278,7 @@ interface GolfApiTee {
   holes?: { par?: number; yardage?: number | null; handicap?: number | null }[]
 }
 
-async function importFromGolfCourseApi(hit: CourseSearchHit): Promise<Course> {
+async function importFromGolfCourseApi(userId: string, hit: CourseSearchHit): Promise<Course> {
   const id = hit.id.startsWith('gca:') ? hit.id.slice(4) : hit.id
   const res = await fetch(`${GOLFCOURSEAPI_BASE}/v1/courses/${id}`, {
     headers: GOLFCOURSEAPI_KEY ? { Authorization: `Key ${GOLFCOURSEAPI_KEY}` } : undefined,
@@ -287,6 +328,5 @@ async function importFromGolfCourseApi(hit: CourseSearchHit): Promise<Course> {
     holes,
     tees: rawTees,
   })
-  await courseRepo.put({ ...built, revision: 0 })
-  return built
+  return courseRepo.save(userId, { ...built, revision: 0 })
 }

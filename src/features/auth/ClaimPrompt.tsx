@@ -12,7 +12,11 @@ import { claimLocalData, countLocalGuestData } from '../../remote/sync'
 export function ClaimPrompt() {
   const { activeUserId, isGuest } = useAuth()
   const [handledFor, setHandledFor] = useState<string | null>(null)
-  const [counts, setCounts] = useState<{ rounds: number; players: number } | null>(null)
+  const [counts, setCounts] = useState<{
+    rounds: number
+    players: number
+    courses: number
+  } | null>(null)
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
@@ -32,7 +36,7 @@ export function ClaimPrompt() {
     !isGuest &&
     activeUserId !== handledFor &&
     counts !== null &&
-    counts.rounds + counts.players > 0
+    counts.rounds + counts.players + counts.courses > 0
 
   const dismiss = () => {
     setHandledFor(activeUserId)
@@ -51,13 +55,23 @@ export function ClaimPrompt() {
 
   const r = counts?.rounds ?? 0
   const p = counts?.players ?? 0
+  const c = counts?.courses ?? 0
+  // The saved library moves with the claim, so the prompt must name it — a
+  // sheet reading "2 rounds and 3 players" while silently absorbing a course
+  // list would be the opposite of the opt-in it promises (MAI-76).
+  const parts = [
+    `${r} round${r === 1 ? '' : 's'}`,
+    `${p} player${p === 1 ? '' : 's'}`,
+    `${c} course${c === 1 ? '' : 's'}`,
+  ]
+  const summary = `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`
 
   return (
     <Sheet open={open} onClose={dismiss}>
       <h2 className="font-display text-sm uppercase text-felt-300">Add local data?</h2>
       <p className="mt-2 text-lg text-stone-200">
-        You have {r} round{r === 1 ? '' : 's'} and {p} player{p === 1 ? '' : 's'} saved on this
-        device. Add them to your account so they sync everywhere?
+        You have {summary} saved on this device. Add them to your account so they sync
+        everywhere?
       </p>
       <div className="mt-5 space-y-2">
         <BigButton className="w-full" disabled={busy} onClick={() => void claim()}>

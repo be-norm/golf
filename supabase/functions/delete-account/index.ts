@@ -95,17 +95,35 @@ async function archive(
   }
 
   try {
-    const [rounds, players] = await Promise.all([
-      // `deleted_at=is.null` — tombstoned rounds are ones the user deliberately
+    const [rounds, players, savedCourseRows] = await Promise.all([
+      // `deleted_at=is.null` — tombstoned rows are ones the user deliberately
       // deleted before closing the account. Archiving them would resurrect them
       // on reinstatement.
       read(`round_archives?user_id=eq.${uid}&deleted_at=is.null&select=round_id,data`),
       read(`players?user_id=eq.${uid}&deleted_at=is.null&select=*`),
+      // The saved library is owned data too, and cascades away with the user —
+      // reinstatement without it would hand someone back their rounds and an
+      // empty course list (MAI-76). No is.null filter here: a saved-course
+      // tombstone is OUT-DATED by a later re-save (updated_at > deleted_at
+      // means live — the same rule the app's pull applies), and PostgREST
+      // can't compare two columns, so liveness is decided below.
+      read(`saved_courses?user_id=eq.${uid}&select=course_id,data,updated_at,deleted_at`),
     ])
+
+    const savedCourses = (
+      savedCourseRows as {
+        course_id: string
+        data: unknown
+        updated_at: string
+        deleted_at: string | null
+      }[]
+    )
+      .filter((r) => !r.deleted_at || Date.parse(r.updated_at) > Date.parse(r.deleted_at))
+      .map((r) => ({ course_id: r.course_id, data: r.data }))
 
     // Nothing worth keeping — skip the row rather than bank an empty archive
     // that still holds the email for 30 days.
-    if (!rounds.length && !players.length) {
+    if (!rounds.length && !players.length && !savedCourses.length) {
       console.info(`[delete-account] nothing to archive for ${uid}`)
       return
     }
@@ -118,7 +136,7 @@ async function archive(
       body: JSON.stringify({
         original_user_id: uid,
         email,
-        payload: { rounds, players },
+        payload: { rounds, players, savedCourses },
       }),
     })
 
