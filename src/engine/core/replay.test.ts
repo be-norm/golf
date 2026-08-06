@@ -3,105 +3,10 @@ import fc from 'fast-check'
 import '../games/index'
 import { deriveRound, listEngines } from '../catalog'
 import { EventLog, makePlayers, makeRound } from '../test/harness'
+import { arbitraryRoundAndEvents, GAME_FUZZ } from '../test/arbitraries'
 import { assertZeroSum, minimalTransfers } from './money'
 import type { RoundEvent } from './events'
 import { effectiveEvents } from './replay'
-
-const playerNames = ['A', 'B', 'C', 'D'] as const
-
-function arbitraryRoundAndEvents() {
-  return fc
-    .record({
-      playerCount: fc.integer({ min: 2, max: 4 }),
-      handicaps: fc.array(fc.integer({ min: -3, max: 24 }), { minLength: 4, maxLength: 4 }),
-      net: fc.boolean(),
-      carryover: fc.boolean(),
-      autoPress: fc.boolean(),
-      // per hole per player: gross score or null (unscored)
-      scores: fc.array(
-        fc.array(fc.option(fc.integer({ min: 1, max: 12 }), { nil: null }), {
-          minLength: 4,
-          maxLength: 4,
-        }),
-        { minLength: 1, maxLength: 18 },
-      ),
-      // wolf pick seed per hole: 0-2 partner index, 3 lone, 4 blind, 5 no pick yet
-      pickSeeds: fc.array(fc.integer({ min: 0, max: 5 }), { minLength: 18, maxLength: 18 }),
-    })
-    .map(({ playerCount, handicaps, net, carryover, autoPress, scores, pickSeeds }) => {
-      const players = makePlayers(
-        playerNames.slice(0, playerCount).map((name, i) => ({ name, ch: handicaps[i]! })),
-      )
-      const ids = players.map((p) => p.playerId)
-      const handicap = net
-        ? ({ mode: 'net', allowancePct: 100, reference: 'offLow' } as const)
-        : ({ mode: 'gross', allowancePct: 100, reference: 'absolute' } as const)
-
-      const games: Parameters<typeof makeRound>[0]['games'] = [
-        { type: 'skins', config: { stakeCents: 100, carryover }, handicap },
-      ]
-      {
-        // 2 → singles, 3 → 2v1 (uneven split), 4 → 2v2 — exercises the
-        // lone-plays-each-opponent settlement so zero-sum holds when sizes differ
-        const nassauTeams =
-          playerCount === 4
-            ? { a: [ids[0]!, ids[1]!], b: [ids[2]!, ids[3]!] }
-            : playerCount === 3
-              ? { a: [ids[0]!, ids[1]!], b: [ids[2]!] }
-              : null
-        games.push({
-          type: 'nassau',
-          config: { stakeCents: 500, teams: nassauTeams, autoPress },
-          handicap,
-        })
-      }
-      if (playerCount === 3) {
-        // Six Point is threesome-only; join the fuzz for zero-sum / determinism
-        // / retraction coverage like the other money games.
-        games.push({ type: 'sixPoint', config: { pointCents: 25 }, handicap })
-      }
-      if (playerCount === 4) {
-        games.push({
-          type: 'vegas',
-          config: {
-            pointCents: 10,
-            teams: { a: [ids[0]!, ids[2]!], b: [ids[1]!, ids[3]!] },
-            birdieFlip: true,
-            eagleDouble: true,
-          },
-          handicap,
-        })
-        games.push({ type: 'wolf', config: { pointCents: 100, rotation: [...ids] }, handicap })
-      }
-
-      const round = makeRound({ players, holes: 'full18', games })
-      const wolfGameId = round.games.find((g) => g.type === 'wolf')?.gameId
-      const log = new EventLog()
-      scores.forEach((byPlayer, holeIdx) => {
-        players.forEach((p, pi) => {
-          const gross = byPlayer[pi]
-          if (gross !== null && gross !== undefined) {
-            log.append({ type: 'score/set', playerId: p.playerId, hole: holeIdx + 1, gross })
-          }
-        })
-        if (wolfGameId) {
-          const seed = pickSeeds[holeIdx]!
-          if (seed < 5) {
-            const wolfId = ids[holeIdx % 4]!
-            const others = ids.filter((id) => id !== wolfId)
-            const choice = seed < 3 ? others[seed]! : seed === 3 ? 'lone' : 'blind'
-            log.append({
-              type: 'game/event',
-              gameId: wolfGameId,
-              kind: 'wolf/pick',
-              data: { hole: holeIdx + 1, choice },
-            })
-          }
-        }
-      })
-      return { round, log }
-    })
-}
 
 describe('replay invariants (fast-check)', () => {
   it('settlements are always zero-sum', () => {
@@ -142,12 +47,25 @@ describe('replay invariants (fast-check)', () => {
   })
 
   /**
-   * The fuzz builds its games by hand, so a newly registered engine would be
-   * invisible to every property above while CLAUDE.md tells its author a test
-   * enforces them. This fails the moment an engine is registered without being
-   * added to `arbitraryRoundAndEvents`.
+   * A newly registered engine would otherwise be invisible to every property
+   * above while CLAUDE.md tells its author a test enforces them. These two
+   * catch that, and they catch different halves of it — keep both.
+   *
+   * This one names the omission outright: register an engine, forget its entry
+   * in `GAME_FUZZ` (src/engine/test/arbitraries.ts), and the failure says so.
    */
-  it('the fuzz covers every registered engine', () => {
+  it('every registered engine contributes an arbitrary', () => {
+    expect(new Set(GAME_FUZZ.map((g) => g.type))).toEqual(
+      new Set(listEngines().map((e) => e.type)),
+    )
+  })
+
+  /**
+   * And this one proves the entries actually admit their game into rounds — an
+   * `eligible` that never returns true would satisfy the test above while
+   * covering nothing.
+   */
+  it('the fuzz actually deals every registered engine', () => {
     // Across samples, not within one round: Six Point is threesome-only while
     // Wolf and Vegas need a foursome, so no single round can hold all five.
     const seen = new Set(
