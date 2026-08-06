@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router'
 import { useLiveQuery } from 'dexie-react-hooks'
 import '../../engine/games'
-import { getEngine, listEngines } from '../../engine/catalog'
+import { defaultRole, getEngine, listEngines } from '../../engine/catalog'
 import { courseHandicapForTee } from '../../engine/core/handicap'
 import { applyTee, doubleNine } from '../../engine/core/tees'
 import type { Course, GameConfig, RoundHoles, TeeSet } from '../../engine/core/types'
@@ -192,10 +192,10 @@ export function SetupScreen() {
     const gameConfigs: GameConfig[] = games.map((g) => ({
       gameId: newId(),
       type: g.type,
-      // The per-round truth, defaulted from the engine's eligibility. 'either'
-      // games (Skins) start as the main event; the picker will let that be
-      // overridden per round once there is a side-bet section to move them to.
-      role: getEngine(g.type)?.meta.category === 'side' ? 'side' : 'main',
+      // The per-round truth, defaulted from the engine's eligibility through
+      // the shared rule — the picker (MAI-44) will override it per round rather
+      // than re-deciding what the default was.
+      role: defaultRole(getEngine(g.type)?.meta.category ?? 'main'),
       handicap: g.handicap,
       config: resolveDraftPlayers(g.config, draftToReal),
     }))

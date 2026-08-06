@@ -149,6 +149,26 @@ export type ConfigFieldSpec =
 export type GameCategory = 'main' | 'side' | 'either'
 
 /**
+ * The role a game takes when nothing has said otherwise — 'either' games start
+ * as the main event, because that is what they were before side bets existed.
+ */
+export function defaultRole(category: GameCategory): 'main' | 'side' {
+  return category === 'side' ? 'side' : 'main'
+}
+
+/**
+ * THE role of a game in a round. Both callers that need it — setup, which
+ * stamps it, and every display rule that reads it — go through here, so the
+ * "absent means main" default cannot be implemented once and forgotten
+ * elsewhere. Every round created before MAI-43 has no `role`, and the first
+ * consumer writing `g.role === 'side'` would silently read all of them as
+ * not-main, which is the opposite of what the doc promises.
+ */
+export function roleOf(game: GameConfig): 'main' | 'side' {
+  return game.role ?? defaultRole(getEngine(game.type)?.meta.category ?? 'main')
+}
+
+/**
  * HOW THE BET IS DECIDED — the picker sheet's default grouping.
  *
  * One axis, chosen deliberately over the two alternatives (MAI-43):

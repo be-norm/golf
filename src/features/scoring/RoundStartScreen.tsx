@@ -179,8 +179,8 @@ export function RoundStartScreen() {
       <section className="flex flex-col gap-4">
         {round.games.map((game: GameConfig) => {
           const engine = getEngine(game.type)
-          const label = gameLabel(game, round.games)
           if (!engine) return null
+          const label = gameLabel(game, round.games)
           const config = (game.config ?? {}) as Record<string, unknown>
           const chips = configChips(engine, config)
           const isNet = game.handicap.mode === 'net'

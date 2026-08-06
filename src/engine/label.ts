@@ -66,7 +66,11 @@ function discriminator(
 
   for (const field of engine?.configFields ?? []) {
     const valueOf = (g: GameConfig) => (g.config as Record<string, unknown>)[field.key]
-    if (!separates(valueOf)) continue
+    // Distinctness is checked on the RENDERED phrase, not the raw value: two
+    // select options can carry the same display label, and separating on the
+    // values behind them would commit to a field that shows both games the same
+    // word — the duplicate this whole function exists to prevent.
+    if (!separates((g) => renderFieldValue(field, valueOf(g)))) continue
     const rendered = renderFieldValue(field, valueOf(game))
     if (rendered !== undefined) return rendered
   }
@@ -78,8 +82,29 @@ function discriminator(
   return index === -1 ? undefined : `#${index + 1}`
 }
 
-/** A config value as a chip-sized phrase, or undefined if it has no short form. */
+/**
+ * A config value as a chip-sized phrase, or undefined if it has no short form
+ * OR cannot safely be painted.
+ *
+ * THE ASCII RULE IS ENFORCED HERE, not asked for. Boolean and select phrases
+ * are engine-authored free text, and this repo already writes "·" into exactly
+ * that kind of string — `nassau`'s teams field is literally
+ * `'Teams (best ball · 2v2 or 2v1)'`, kept off the share card today only by the
+ * accident that `teams` has no short form. A convention would have caught that
+ * the day someone added a boolean labelled the same way; a choke point catches
+ * it always. A rejected label simply falls through to the next candidate, so
+ * the worst case is "Skins (#1)" rather than a glyph rendered in the system
+ * face halfway through a painted title (see gameLabel's note).
+ */
 function renderFieldValue(field: ConfigFieldSpec, value: unknown): string | undefined {
+  const phrase = fieldPhrase(field, value)
+  return phrase !== undefined && isPaintable(phrase) ? phrase : undefined
+}
+
+/** Printable ASCII only — the range Press Start 2P is known to cover. */
+const isPaintable = (s: string) => /^[\x20-\x7E]+$/.test(s)
+
+function fieldPhrase(field: ConfigFieldSpec, value: unknown): string | undefined {
   switch (field.kind) {
     case 'money':
       return typeof value === 'number' ? formatCents(value) : undefined

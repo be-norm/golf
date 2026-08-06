@@ -45,9 +45,12 @@ Full plan/architecture history: see `docs/` and the games catalog in `docs/games
    bet the next, and only the round knows); `meta.family` groups the picker by how the bet is
    decided, with `meta.shapes` as the set of social shapes a game supports — a SET because
    Nassau is 1v1 or 2v2 by config, which is exactly why that can't be `family`'s axis.
-   **`deriveRound` reads none of them**, and `catalog.test.ts` proves it: the same card must
-   settle identically whether its games are labelled main, side, or nothing at all. Missing
-   `role` means 'main' — rounds predate it.
+   **`deriveRound` reads none of them.** For `role` that is PROVEN — `catalog.test.ts` derives
+   every registered engine three ways and the same card must settle identically whether its
+   games are labelled main, side, or nothing at all. For the three `meta` fields it is a rule,
+   not a proof: they live on the engine singleton, so no fixture can vary them, and only review
+   keeps them out of `derive`. Missing `role` means 'main' (`roleOf`, catalog.ts) — rounds
+   predate it.
    **The one-way rule:** an engine is a pure function of `(config, its own events,
    RoundContext)` and engines NEVER read each other. That purity is why the app layer has zero
    per-game branching, and why a game can be added without touching a screen. The escape hatch

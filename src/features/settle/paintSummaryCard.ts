@@ -107,11 +107,17 @@ function panel(g: Ctx, y: number, h: number, border: string, fill: string): void
   g.strokeRect(PAD + 1, y + 1, INNER - 2, h - 2)
 }
 
-function ellipsize(g: Ctx, s: string, max: number, o: TextOpts): string {
+/**
+ * `marker` defaults to the ellipsis character, which every caller here draws in
+ * the BODY font. The display font (Press Start 2P) has only ever been given
+ * plain ASCII, so a display-font caller passes '...' rather than risk a glyph
+ * the pixel face lacks falling back to the system one mid-string.
+ */
+function ellipsize(g: Ctx, s: string, max: number, o: TextOpts, marker = '…'): string {
   if (width(g, s, o) <= max) return s
   let cut = s
-  while (cut.length > 1 && width(g, `${cut}…`, o) > max) cut = cut.slice(0, -1)
-  return `${cut}…`
+  while (cut.length > 1 && width(g, `${cut}${marker}`, o) > max) cut = cut.slice(0, -1)
+  return `${cut}${marker}`
 }
 
 /**
@@ -296,9 +302,16 @@ function gameBlock(g: Ctx, game: SummaryCard['games'][number]): Block {
     draw(g, y) {
       panel(g, y, height, C.borderStone, C.panelStone)
       const titleOpts: TextOpts = { size: 12, display: true, color: C.green }
-      text(g, game.name.toUpperCase(), PAD + 14, y + 24, titleOpts)
+      // BOUNDED, like every other string this painter draws. The title used to
+      // be a curated `meta.name`; it is now assembled (gameLabel appends a
+      // discriminator built from engine-authored config labels), so its length
+      // is no longer ours to assume. Room reserved on the right for the
+      // allowance chip, which is positioned off the title's measured width —
+      // an unbounded title pushed that chip off the panel entirely.
+      const title = ellipsize(g, game.name.toUpperCase(), INNER - 28 - 56, titleOpts, '...')
+      text(g, title, PAD + 14, y + 24, titleOpts)
       if (game.allowance) {
-        text(g, game.allowance, PAD + 22 + width(g, game.name.toUpperCase(), titleOpts), y + 24, {
+        text(g, game.allowance, PAD + 22 + width(g, title, titleOpts), y + 24, {
           size: 11,
           display: true,
           color: C.faint,

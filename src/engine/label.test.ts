@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import './games/index'
+import { registerEngine } from './catalog'
+import { skinsEngine } from './games/skins/engine'
 import { gameLabel } from './label'
 import type { GameConfig, HandicapSettings } from './core/types'
 
@@ -106,6 +108,38 @@ describe('gameLabel', () => {
     for (const label of [gameLabel(a, [a, b]), gameLabel(b, [a, b])]) {
       expect(label).toMatch(/^[\x20-\x7E]+$/)
     }
+  })
+
+  /**
+   * The ASCII rule has to hold for text this file never sees. Boolean and select
+   * phrases come from engine-authored `configFields` labels, and this repo
+   * already writes "·" into exactly that kind of string — nassau's teams field
+   * is `'Teams (best ball · 2v2 or 2v1)'`, off the card today only because
+   * `teams` has no short form. So the guard lives in `renderFieldValue`: an
+   * unpaintable phrase is skipped rather than shown, and the label degrades to
+   * numbering instead of painting a glyph in the wrong typeface.
+   */
+  it('refuses an engine-authored label the pixel font cannot paint', () => {
+    registerEngine({
+      ...skinsEngine,
+      type: 'fancy',
+      configFields: [
+        { key: 'stakeCents', kind: 'money', label: 'Stake' },
+        // the shape of label this codebase actually writes
+        { key: 'carryover', kind: 'boolean', label: 'Carryovers · rollover' },
+      ],
+    })
+    const a: GameConfig = {
+      gameId: 'g1',
+      type: 'fancy',
+      handicap: net,
+      config: { stakeCents: 100, carryover: true },
+    }
+    const b: GameConfig = { ...a, gameId: 'g2', config: { stakeCents: 100, carryover: false } }
+    const labels = [gameLabel(a, [a, b]), gameLabel(b, [a, b])]
+    // fell through to numbering rather than emitting the middle dot
+    expect(labels).toEqual(['Skins (#1)', 'Skins (#2)'])
+    for (const label of labels) expect(label).toMatch(/^[\x20-\x7E]+$/)
   })
 
   it('falls back to the raw type for an engine that is not registered', () => {

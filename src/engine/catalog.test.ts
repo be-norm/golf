@@ -9,13 +9,44 @@ import {
 } from './catalog'
 import { EventLog, makePlayers, makeRound } from './test/harness'
 
-// `satisfies` ties each mirror to its union: a typo here is a compile error,
-// and so is adding a union member without listing it.
+// `satisfies` alone only checks each element is a MEMBER — it does not check
+// the list is complete, which an earlier comment here claimed and tsc quietly
+// disproves. `Covers` is the missing half: it fails to compile when a union
+// gains a value the mirror lacks, which would otherwise go unnoticed until some
+// engine used it and the failure blamed the engine instead of this list.
+type Covers<Union, Listed extends readonly Union[]> = [Exclude<Union, Listed[number]>] extends [
+  never,
+]
+  ? Listed
+  : ['missing from the list:', Exclude<Union, Listed[number]>]
+
 const FAMILIES = ['match', 'stroke', 'points', 'pot', 'award', 'wager'] as const satisfies readonly GameFamily[]
 const CATEGORIES = ['main', 'side', 'either'] as const satisfies readonly GameCategory[]
 const SHAPES = ['solo', 'headToHead', 'teams', 'partners'] as const satisfies readonly GameShape[]
 
+type _FamiliesCovered = Covers<GameFamily, typeof FAMILIES>
+type _CategoriesCovered = Covers<GameCategory, typeof CATEGORIES>
+type _ShapesCovered = Covers<GameShape, typeof SHAPES>
+const _exhaustive: [_FamiliesCovered, _CategoriesCovered, _ShapesCovered] = [
+  FAMILIES,
+  CATEGORIES,
+  SHAPES,
+]
+void _exhaustive
+
 describe('engine registry invariants', () => {
+  /**
+   * Every guard below iterates the registry, and registration happens only as a
+   * side effect of the bare `import './games/index'` at the top of this file.
+   * Drop or reorder that import and each loop runs zero times while the suite
+   * reports success — including the generated `it`s further down, which would
+   * not even be registered. CLAUDE.md says this file proves invariant #7; the
+   * proof has to fail loudly rather than evaporate.
+   */
+  it('has engines to check at all', () => {
+    expect(listEngines().length).toBeGreaterThanOrEqual(5)
+  })
+
   it('every game ships complete player-facing rules', () => {
     const engines = listEngines()
     expect(engines.length).toBeGreaterThanOrEqual(4)
@@ -57,12 +88,21 @@ describe('engine registry invariants', () => {
   it('declares no shape its player limits cannot seat', () => {
     for (const engine of listEngines()) {
       const { shapes, minPlayers, maxPlayers } = engine.meta
-      if (shapes.includes('teams') || shapes.includes('partners')) {
-        expect(maxPlayers, `${engine.type} needs room for sides`).toBeGreaterThanOrEqual(3)
+      const needsThree = (s: GameShape) => s === 'teams' || s === 'partners'
+      // Two claims, and the difference matters. Nassau declares both
+      // `headToHead` and `teams` at minPlayers 2 — correctly, because 2 is
+      // seatable by head-to-head even though teams need 3. So:
+      // (1) every declared shape must be seatable SOMEWHERE in the range, and
+      if (shapes.some(needsThree)) {
+        expect(maxPlayers, `${engine.type} declares sides it can never seat`).toBeGreaterThanOrEqual(3)
       }
-      if (shapes.includes('partners')) {
-        // two players cannot re-form into partnerships each hole
-        expect(minPlayers, `${engine.type} rotating partners needs 3+`).toBeGreaterThanOrEqual(3)
+      // (2) the game's OWN MINIMUM must be seatable by some declared shape,
+      //     or it accepts a roster that can play none of the ways it offers.
+      if (minPlayers < 3) {
+        expect(
+          shapes.some((s) => !needsThree(s)),
+          `${engine.type} accepts ${minPlayers} players but every shape it declares needs 3+`,
+        ).toBe(true)
       }
       if (shapes.includes('headToHead')) {
         expect(minPlayers, `${engine.type} head-to-head needs 2`).toBeLessThanOrEqual(2)
@@ -98,13 +138,30 @@ describe('taxonomy never reaches the money', () => {
    */
   for (const engine of listEngines()) {
     const names = ['A', 'B', 'C', 'D'].slice(0, engine.meta.minPlayers)
-    const players = makePlayers(names.map((name) => ({ name })))
+    // `slice` clamps rather than erroring, so an engine wanting 5+ would get a
+    // short roster and fail later with a message blaming the invariant instead
+    // of this fixture.
+    if (names.length < engine.meta.minPlayers) {
+      throw new Error(`${engine.type} needs ${engine.meta.minPlayers} players; add scorecards`)
+    }
+    // NON-ZERO, VARIED handicaps: the harness defaults everyone to 0 and every
+    // game to gross, which would run each engine through only half its derive.
+    // An engine reading `role` inside its net/stroke-allocation branch would
+    // ship green against a fixture where no stroke is ever allocated.
+    const players = makePlayers(names.map((name, i) => ({ name, ch: i * 4 })))
 
     const scored = (role?: 'main' | 'side') => {
       const round = makeRound({
         players,
         holes: 'front9',
-        games: [{ type: engine.type, config: engine.defaultConfig(players) }],
+        games: [
+          {
+            type: engine.type,
+            config: engine.defaultConfig(players),
+            // the engine's OWN handicap policy — net for four of the five
+            handicap: engine.defaultHandicap(),
+          },
+        ],
       })
       // stamped after construction, so the rounds are otherwise byte-identical
       const games = round.games.map((g) => ({ ...g, ...(role ? { role } : {}) }))

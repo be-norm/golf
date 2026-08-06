@@ -168,7 +168,7 @@ export function buildSummaryCard(
   // setup enforces at least one), so this stays optional throughout.
   const strokeGame = round.games.find((g) => g.handicap.mode === 'net')
   const strokeNote = strokeGame
-    ? `underline = handicap stroke (${gameLabel(strokeGame, round.games)})`
+    ? `underline = handicap stroke: ${gameLabel(strokeGame, round.games)}`
     : undefined
 
   const half = (holes: number[]): ScorecardHalf | null => {
