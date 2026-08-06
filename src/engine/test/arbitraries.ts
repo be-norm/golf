@@ -158,9 +158,9 @@ const PLAYER_NAMES = ['A', 'B', 'C', 'D'] as const
  * scores interleaved with each game's own events.
  *
  * Every random field lives in ONE flat `fc.record` — including the player
- * count — so fast-check can shrink them jointly. Games are generated for all
- * entries and the ineligible ones dropped afterwards, which costs a few unused
- * draws and buys minimal counterexamples. See `GameFuzz.arbitrary`.
+ * count — so fast-check can shrink them jointly. Seeds are therefore DRAWN for
+ * every registered game and the ineligible ones simply go unused: a few wasted
+ * draws, in exchange for minimal counterexamples. See `GameFuzz.arbitrary`.
  *
  * `extra` appends fuzz entries for engines registered by the calling test —
  * used by `replay.guard.test.ts` to prove the suite actually fails on a broken
@@ -198,9 +198,16 @@ export function arbitraryRoundAndEvents(extra: readonly GameFuzz[] = []) {
         ? { mode: 'net', allowancePct: 100, reference: 'offLow' }
         : { mode: 'gross', allowancePct: 100, reference: 'absolute' }
 
+      // Eligibility is decided BEFORE the builder runs, not after. A builder
+      // handed a roster its game can't seat indexes past the end — Vegas at two
+      // players would compose `teams` out of two ids and two `undefined`s, hidden
+      // behind a non-null assertion. Harmless while the result is dropped on the
+      // next line, and a live bug the moment anyone validates or logs the games
+      // this generator produces.
       const entries = registry
-        .map((g, i) => ({ type: g.type, game: games[i]!(ids), eligible: g.eligible(playerCount) }))
-        .filter((e) => e.eligible)
+        .map((g, i) => ({ g, build: games[i]! }))
+        .filter(({ g }) => g.eligible(playerCount))
+        .map(({ g, build }) => ({ type: g.type, game: build(ids) }))
 
       const round = makeRound({
         players,
