@@ -433,6 +433,41 @@ describe('CourseRepo', () => {
     expect((ops[0]!.payload as { userId: string }).userId).toBe(A)
   })
 
+  it('claim leaves provider-id legacy cards unstamped and unpublished', async () => {
+    const db = freshDb()
+    const repo = new CourseRepo(db)
+    // an API import the pre-createdBy editor re-stamped to source:'user' —
+    // NOT authored here, despite what a bare undefined-means-mine check reads
+    await repo.save(LOCAL_USER, { ...makeCourse('gca:9', 'user'), createdBy: undefined })
+    await repo.claim(A)
+
+    // membership claims (the user keeps the course)…
+    expect(await db.saved_courses.get([A, 'gca:9'])).toBeDefined()
+    // …but authorship must not: stamping createdBy here would flip ownsCourse
+    // to true forever, sending every future edit onto a shared row RLS
+    // refuses instead of forking — and the publish would leak an ODbL card
+    expect((await db.courses.get('gca:9'))?.createdBy).toBeUndefined()
+    expect((await db.outbox.toArray()).map((o) => o.kind)).toEqual(['pushSavedCourse'])
+  })
+
+  it('saveAuthored queues the shared-library publish atomically with the save', async () => {
+    const db = freshDb()
+    const repo = new CourseRepo(db)
+    await repo.saveAuthored(A, { ...makeCourse('c1', 'user'), createdBy: A })
+
+    // one transaction: a crash can't save the correction locally while
+    // silently losing its republish (the guarantee fork() already made)
+    const kinds = (await db.outbox.toArray())
+      .map((o) => o.kind)
+      .sort()
+    expect(kinds).toEqual(['pushCourse', 'pushSavedCourse'])
+
+    // guests queue nothing — they publish at claim time
+    await db.outbox.clear()
+    await repo.saveAuthored(LOCAL_USER, { ...makeCourse('c2', 'user'), createdBy: LOCAL_USER })
+    expect(await db.outbox.count()).toBe(0)
+  })
+
   it('claim re-stamps guest authorship BEFORE freezing push payloads', async () => {
     const db = freshDb()
     const repo = new CourseRepo(db)

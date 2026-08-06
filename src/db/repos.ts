@@ -115,11 +115,39 @@ export class CourseRepo {
   }
 
   /**
+   * Save a card this user AUTHORS — brand-new, or their own updated in place —
+   * and queue its shared-library publish in the same transaction. The plain
+   * save() exists for importers, which must never republish someone else's
+   * course; this split is what lets the publish ride inside the transaction
+   * here, so a crash between "saved locally" and "queued the publish" can't
+   * leave the user's correction on their phone with the shared row silently
+   * stale forever (the same guarantee fork() makes).
+   */
+  async saveAuthored(userId: string, course: Course): Promise<Course> {
+    let stored!: Course
+    await this.db.transaction(
+      'rw',
+      this.db.courses,
+      this.db.saved_courses,
+      this.db.outbox,
+      async () => {
+        stored = await this.writeSave(userId, course)
+        await this.enqueue(userId, 'pushCourse', { userId, course: stored })
+      },
+    )
+    notifyOutboxWrite()
+    return stored
+  }
+
+  /**
    * Replace a card the user doesn't own with their corrected version (MAI-78):
    * save the fork and retire the original's membership in ONE transaction, so
    * a crash can never leave both rows in the library with the fork already
    * queued — nobody wants two entries for the same place in their own list.
    * The original's card is GC'd if nothing else on the device references it.
+   * A fork of a fork carries `sourceId` = its immediate parent, not the chain
+   * root — deliberate: every published fork carries its own source_id, so the
+   * provenance chain stays walkable link by link.
    */
   async fork(userId: string, originalId: string, course: Course): Promise<Course> {
     let stored!: Course
@@ -223,12 +251,15 @@ export class CourseRepo {
         // createdBy at all) become the account's, and publish to the shared
         // library — RLS pins created_by to the caller, so this is also what
         // makes the insert pass. Cards another signed-in user authored on
-        // this device are not ours to publish and keep their stamp.
+        // this device are not ours to publish and keep their stamp. The
+        // ownership test is ownsCourse-as-guest, NOT a bare createdBy check:
+        // a raw undefined-means-mine filter re-admits exactly the population
+        // ownsCourse exists to exclude (API imports the pre-createdBy editor
+        // re-stamped to source:'user'), stamps them createdBy here, and from
+        // then on every edit takes the in-place path and pushes onto a shared
+        // row RLS refuses — the permanent silent failure, minted at claim.
         const authored = await this.db.courses
-          .filter(
-            (c) =>
-              c.source === 'user' && (c.createdBy === undefined || c.createdBy === LOCAL_USER),
-          )
+          .filter((c) => c.source === 'user' && ownsCourse(c, LOCAL_USER))
           .toArray()
         for (const c of authored) {
           const restamped: Course = { ...c, createdBy: userId }

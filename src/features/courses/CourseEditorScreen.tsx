@@ -4,7 +4,6 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import type { Course, TeeSet } from '../../engine/core/types'
 import { courseRepo, ownsCourse } from '../../db/repos'
 import { newId } from '../../db/ids'
-import { enqueuePushCourse } from '../../remote/outbox'
 import { isStrokeIndexPermutation, looksLikeEighteenHoleRating } from '../../engine/core/tees'
 import { useAuth } from '../../auth/AuthProvider'
 import { BigButton } from '../../components/BigButton'
@@ -39,7 +38,7 @@ export function CourseEditorScreen() {
   const isNew = courseId === undefined
   const navigate = useNavigate()
   const location = useLocation()
-  const { isGuest, activeUserId } = useAuth()
+  const { activeUserId } = useAuth()
   // Resolves a missing card to null so it's distinguishable from undefined
   // (still loading) — with the same sentinel for both, "Course not found" was
   // unreachable and a GC'd card (fork + Back, or a removal pulled from
@@ -147,10 +146,10 @@ export function CourseEditorScreen() {
           sourceId: course.id,
           revision: 0,
         })
-      : await courseRepo.save(activeUserId, base)
-    // An in-place update of our own row republishes here; guests publish at
-    // claim time instead (the LOCAL_USER gate inside the repo/outbox holds).
-    if (!forking && !isGuest) await enqueuePushCourse(activeUserId, saved)
+      : // saveAuthored, not save: the republish of our own row rides inside
+        // the repo transaction, same crash guarantee as the fork. Guests
+        // publish at claim time (the LOCAL_USER gate inside the repo holds).
+        await courseRepo.saveAuthored(activeUserId, base)
     navigate(
       '/courses',
       forking

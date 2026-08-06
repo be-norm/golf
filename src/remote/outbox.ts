@@ -219,6 +219,15 @@ async function send(item: OutboxItem, deviceId: string): Promise<boolean> {
       // Step 1 creates the row iff absent; step 2 applies the write iff not
       // older than what's there. A newer concurrent write between the two
       // simply wins step 2, which is the correct outcome.
+      //
+      // ACCEPTED tradeoff: the gate rides the membership clock alone, so a
+      // legitimately-fresh membership (a claim) carrying an old card copy can
+      // regress the server's `data` to that copy. Gating `data` on the card's
+      // own clock would take a second conditional update (or an RPC) per
+      // push; active devices are protected by pull's card-clock LWW either
+      // way, so only a fresh-device restore sees the older card — which is
+      // the copy the claiming user actually had. Revisit as an RPC if a
+      // multi-user reality ever makes this bite.
       const inserted = await supabase.from('saved_courses').upsert(
         { user_id: userId, course_id: course.id, data: course, updated_at: savedAt },
         { onConflict: 'user_id,course_id', ignoreDuplicates: true },

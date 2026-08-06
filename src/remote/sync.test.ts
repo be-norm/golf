@@ -510,7 +510,11 @@ describe('saved courses', () => {
   })
 
   it('claim publishes guest-authored cards under the account, not other users’ cards', async () => {
-    await courseRepo.save(LOCAL_USER, course('mine', 'Scanned Muni', 'user'))
+    // guest-authored cards carry the sentinel (the editor stamps activeUserId)
+    await courseRepo.save(
+      LOCAL_USER,
+      course('mine', 'Scanned Muni', 'user', { createdBy: LOCAL_USER }),
+    )
     await db.courses.put(course('theirs', 'Their Fork', 'user', { createdBy: 'someone-else' }))
 
     await claimLocalData(U)
