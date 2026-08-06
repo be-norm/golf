@@ -1,7 +1,7 @@
 import 'fake-indexeddb/auto'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Course, Round } from '../engine/core/types'
-import { ADOPT_LIBRARY_KEY, db } from '../db/schema'
+import { db } from '../db/schema'
 import { LOCAL_USER, newId } from '../db/ids'
 import { courseRepo, roundRepo } from '../db/repos'
 
@@ -24,11 +24,16 @@ const fake = vi.hoisted(() => {
           ? tables.saved_courses
           : tables.round_archives
     return {
-      upsert(values: Record<string, unknown>, opts?: { onConflict?: string }) {
+      upsert(
+        values: Record<string, unknown>,
+        opts?: { onConflict?: string; ignoreDuplicates?: boolean },
+      ) {
         const cols = (opts?.onConflict ?? 'id').split(',')
         const i = rows.findIndex((r) => cols.every((c) => r[c] === values[c]))
-        if (i >= 0) rows[i] = { ...rows[i], ...values } // merge keeps unset cols (e.g. deleted_at)
-        else rows.push({ ...values })
+        if (i >= 0) {
+          // resolution=ignore-duplicates leaves the existing row untouched
+          if (!opts?.ignoreDuplicates) rows[i] = { ...rows[i], ...values } // merge keeps unset cols (e.g. deleted_at)
+        } else rows.push({ ...values })
         return Promise.resolve({ error: null })
       },
       update(patch: Record<string, unknown>) {
@@ -77,23 +82,34 @@ const fake = vi.hoisted(() => {
   return {
     tables,
     from,
+    signedIn: true,
     reset() {
       tables.round_archives = []
       tables.players = []
       tables.saved_courses = []
+      this.signedIn = true
     },
   }
 })
 
-vi.mock('./supabase', () => ({ supabase: { from: fake.from } }))
+// flushOutbox refuses to run signed-out (owner-scoped ops can't succeed as
+// anon, and a 0-row tombstone UPDATE would read as success) — the fake is
+// permanently signed in unless a test overrides it.
+vi.mock('./supabase', () => ({
+  supabase: {
+    from: fake.from,
+    auth: {
+      getSession: () => Promise.resolve({ data: { session: fake.signedIn ? {} : null } }),
+    },
+  },
+}))
 
 const {
   enqueuePushRound,
   enqueueDeleteRound,
   flushOutbox,
 } = await import('./outbox')
-const { pull, syncNow, adoptDeviceLibrary, claimLocalData, countLocalGuestData } =
-  await import('./sync')
+const { pull, syncNow, claimLocalData, countLocalGuestData } = await import('./sync')
 
 const U = 'user-1'
 function setOnline(v: boolean) {
@@ -468,58 +484,61 @@ describe('saved courses', () => {
     await db.courses.put(course('theirs', 'Their Fork', 'user', { createdBy: 'someone-else' }))
 
     await claimLocalData(U)
+    await drain()
 
     expect((await db.courses.get('mine'))?.createdBy).toBe(U)
     expect((await db.courses.get('theirs'))?.createdBy).toBe('someone-else')
-  })
-})
-
-/**
- * One-shot adoption of the pre-MAI-76 library (the Dexie v3 upgrade arms the
- * flag; db.test.ts covers the upgrade itself).
- */
-describe('adoptDeviceLibrary', () => {
-  const seedPreUpgradeLibrary = async () => {
-    await db.courses.put({
-      id: 'c-old',
-      name: 'Pre-upgrade CC',
-      holeCount: 18,
-      holes: [],
-      teeSets: [],
-      source: 'remote',
-      updatedAt: '2026-08-01T00:00:00.000Z',
-      revision: 1,
-    })
-    await db.saved_courses.put({
-      userId: LOCAL_USER,
-      courseId: 'c-old',
-      updatedAt: '2026-08-01T00:00:00.000Z',
-    })
-    await db.meta.put({ key: ADOPT_LIBRARY_KEY, value: '1' })
-  }
-
-  it('signed in: adopts the device library into the account, once', async () => {
-    await seedPreUpgradeLibrary()
-    await adoptDeviceLibrary(U)
-    await drain()
-
-    expect(await db.saved_courses.get([U, 'c-old'])).toBeDefined()
-    expect(await db.saved_courses.get([LOCAL_USER, 'c-old'])).toBeUndefined()
-    expect(fake.tables.saved_courses.map((r) => r.course_id)).toEqual(['c-old'])
-    // one-shot: a later launch (or a different account) adopts nothing
-    expect(await db.meta.get(ADOPT_LIBRARY_KEY)).toBeUndefined()
+    // the authorship travels INSIDE the pushed card too: re-stamping after
+    // the payload snapshot shipped '@local' to the server, and the user's
+    // other devices then forked their own course on edit (review finding)
+    const pushed = fake.tables.saved_courses.find((r) => r.course_id === 'mine')!
+    expect((pushed.data as Course).createdBy).toBe(U)
   })
 
-  it('guest: consumes the flag and leaves the library to the claim prompt', async () => {
-    await seedPreUpgradeLibrary()
-    await adoptDeviceLibrary(LOCAL_USER)
+  it('a stale queued push flushing late cannot rewind a newer save or revive a tombstone flip', async () => {
+    // the course was removed, then deliberately re-saved — row is LIVE
+    await saveAndPush(U, course('c1', 'Broadmoor'))
+    await courseRepo.remove(U, 'c1')
+    await drain()
+    await new Promise((r) => setTimeout(r, 5))
+    const fresh = await saveAndPush(U, course('c1', 'Broadmoor'))
+
+    // another device's push from BEFORE all of that finally flushes
+    await db.outbox.put({
+      id: newId(),
+      kind: 'pushSavedCourse',
+      payload: {
+        userId: U,
+        course: { ...course('c1', 'Stale Name'), updatedAt: '2020-01-01T00:00:00.000Z' },
+        savedAt: '2020-01-01T00:00:00.000Z',
+      },
+      createdAt: '2020-01-01T00:00:00.000Z',
+      attempts: 0,
+    })
     await drain()
 
-    expect(await db.saved_courses.get([LOCAL_USER, 'c-old'])).toBeDefined()
-    expect(fake.tables.saved_courses).toHaveLength(0)
-    // the flag must die here — armed until some future sign-in, it would
-    // silently absorb a DIFFERENT person's library
-    expect(await db.meta.get(ADOPT_LIBRARY_KEY)).toBeUndefined()
-    expect((await countLocalGuestData()).courses).toBe(1)
+    // ungated, this rewound updated_at below the standing deleted_at — the
+    // row read as REMOVED again and the data regressed to the stale card
+    const row = fake.tables.saved_courses[0]!
+    expect(row.updated_at).toBe(fresh.updatedAt)
+    expect((row.data as Course).name).toBe('Broadmoor')
+    expect(Date.parse(row.deleted_at as string)).toBeLessThan(Date.parse(row.updated_at as string))
+  })
+
+  it('does not flush while signed out — a tombstone must wait, not be destroyed', async () => {
+    await saveAndPush(U, course('c1', 'Broadmoor'))
+    await courseRepo.remove(U, 'c1')
+
+    // signed out: RLS would filter every row, the UPDATE would match nothing,
+    // and "success" would destroy the removal — so the flush must not run
+    fake.signedIn = false
+    await flushOutbox()
+    expect(await db.outbox.count()).toBe(1)
+    expect(fake.tables.saved_courses[0]!.deleted_at).toBeFalsy()
+
+    fake.signedIn = true
+    await drain()
+    expect(await db.outbox.count()).toBe(0)
+    expect(fake.tables.saved_courses[0]!.deleted_at).toBeTruthy()
   })
 })

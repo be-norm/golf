@@ -3,15 +3,18 @@ import { describe, expect, it, vi } from 'vitest'
 import type { Course } from '../engine/core/types'
 
 // Importing the module pulls in ./supabase (createClient at load) — stub it so
-// the test doesn't need real env. `from()` supports exactly the
-// select().eq().single() chain importFromLibrary uses; the row is set per test.
+// the test doesn't need real env. `from()` supports the two chains this module
+// uses: select().eq().single() (importFromLibrary, row set per test) and
+// select().or().order().order().limit() (librarySearch, recording the .or()
+// argument so the quoting test can inspect it).
 const remote = vi.hoisted(() => ({
   courseRow: null as { data: unknown; created_by: string | null } | null,
+  lastOr: null as string | null,
 }))
 vi.mock('./supabase', () => ({
   supabase: {
-    from: () => ({
-      select: () => ({
+    from: () => {
+      const chain = {
         eq: () => ({
           single: () =>
             Promise.resolve(
@@ -20,8 +23,15 @@ vi.mock('./supabase', () => ({
                 : { data: null, error: { message: 'not found' } },
             ),
         }),
-      }),
-    }),
+        or: (arg: string) => {
+          remote.lastOr = arg
+          return chain
+        },
+        order: () => chain,
+        limit: () => Promise.resolve({ data: [], error: null }),
+      }
+      return { select: () => chain }
+    },
   },
 }))
 
@@ -30,6 +40,7 @@ import {
   importCourseHit,
   isDoubledNine,
   mergeCourseHits,
+  searchCourses,
   type CourseSearchHit,
 } from './courseSearch'
 import { db } from '../db/schema'
@@ -203,5 +214,26 @@ describe('importCourseHit (library origin)', () => {
       }),
     ).rejects.toThrow()
     expect(await db.outbox.count()).toBe(0)
+  })
+})
+
+describe('librarySearch query quoting', () => {
+  it('quotes the pattern so City, ST punctuation cannot corrupt the .or() filter', async () => {
+    // PostgREST parses .or() as a logic tree: an unquoted comma splits the
+    // pattern into a bogus extra condition and the library results silently
+    // vanish (reproduced live with 'Carmel, IN' — the app's own display
+    // format). Both live APIs are stubbed offline so only librarySearch runs.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        throw new Error('offline')
+      }),
+    )
+    try {
+      await searchCourses('Carmel, IN')
+      expect(remote.lastOr).toBe('name.ilike."%Carmel, IN%",location.ilike."%Carmel, IN%"')
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 })

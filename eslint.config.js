@@ -56,7 +56,15 @@ export default tseslint.config(
     // reaching for db.saved_courses directly is exactly how the feature
     // silently stopped syncing twice. Tests may seed state directly.
     files: ['src/**/*.{ts,tsx}'],
-    ignores: ['src/db/**', 'src/**/*.test.{ts,tsx}'],
+    // schema declares the table; repos is the write path; wipe/seed are the
+    // account-wipe and legacy-cleanup exceptions documented in each file
+    ignores: [
+      'src/db/schema.ts',
+      'src/db/repos.ts',
+      'src/db/wipe.ts',
+      'src/db/seed.ts',
+      'src/**/*.test.{ts,tsx}',
+    ],
     rules: {
       'no-restricted-syntax': [
         'error',

@@ -36,6 +36,35 @@ export interface DeleteSavedCoursePayload {
    *  flush-time stamp would let Monday's removal kill Tuesday's save. */
   removedAt: string
 }
+/** Publish a user-authored card to the shared `courses` library. Declared here
+ *  because CourseRepo enqueues these too (fork/claim publish in the same
+ *  transaction as the membership they ride with); outbox.ts sends them. */
+export interface PushCoursePayload {
+  userId: string
+  course: Course
+}
+
+/**
+ * What a queued saved-course op is about, or undefined for other kinds.
+ * The ONE place that knows these payload shapes: every purge and pending-op
+ * check filters through it (CourseRepo.purgeQueuedOps, applyRemoteSave's
+ * tombstone veto), so a payload change cannot silently blind one of them — a
+ * purge that stops matching is exactly how a stale push survives to
+ * resurrect a removed course.
+ */
+export function savedCourseOp(
+  item: OutboxItem,
+): { kind: 'pushSavedCourse' | 'deleteSavedCourse'; userId: string; courseId: string } | undefined {
+  if (item.kind === 'pushSavedCourse') {
+    const p = item.payload as PushSavedCoursePayload
+    return { kind: item.kind, userId: p.userId, courseId: p.course.id }
+  }
+  if (item.kind === 'deleteSavedCourse') {
+    const p = item.payload as DeleteSavedCoursePayload
+    return { kind: item.kind, userId: p.userId, courseId: p.courseId }
+  }
+  return undefined
+}
 
 export interface MetaEntry {
   key: string
@@ -58,10 +87,6 @@ export interface SavedCourse {
   /** when this user saved it — the LWW clock for membership, not for the card */
   updatedAt: string
 }
-
-/** Meta flag set by the v3 upgrade when a pre-MAI-76 library existed; the first
- *  post-upgrade launch consumes it (adoptDeviceLibrary, src/remote/sync.ts). */
-export const ADOPT_LIBRARY_KEY = 'libraryAdoptPending'
 
 export class GolfDB extends Dexie {
   courses!: Table<Course, string>
@@ -108,11 +133,13 @@ export class GolfDB extends Dexie {
     // v3: the saved library becomes owned (MAI-76). Membership moves out of
     // "the card is in `courses`" and into its own table so it can be scoped to
     // a user and synced. Existing cards backfill to the guest sentinel — this
-    // device cannot know WHO saved them. Unlike the v2 backfill they usually
-    // DO have an owner (whoever is signed in here saved them before membership
-    // existed), so the flag arms a one-shot adoption on the next launch; on a
-    // guest device the flag is consumed without effect and the rows ride the
-    // claim prompt like any other guest data.
+    // device cannot know WHO saved them — and ride the claim prompt (which
+    // counts courses) into whichever account explicitly accepts them. There
+    // is deliberately NO silent adoption of the pre-upgrade library: an
+    // automatic claim stamps fresh membership clocks over the account's
+    // tombstones and resurrects courses removed on other devices, with no
+    // consent shown. Ben pre-approved dropping it ("I can easily just add
+    // back my courses") and the prompt covers the same migration, opted-in.
     this.version(3)
       .stores({ saved_courses: '[userId+courseId], userId, courseId' })
       .upgrade(async (tx) => {
@@ -121,9 +148,6 @@ export class GolfDB extends Dexie {
         await tx
           .table<SavedCourse>('saved_courses')
           .bulkPut(ids.map((id) => ({ userId: LOCAL_USER, courseId: id, updatedAt: now })))
-        if (ids.length > 0) {
-          await tx.table<MetaEntry>('meta').put({ key: ADOPT_LIBRARY_KEY, value: '1' })
-        }
       })
   }
 }

@@ -7,8 +7,8 @@ import { makePlayers, makeRound } from '../engine/test/harness'
 import type { Course, Round, RoundStatus } from '../engine/core/types'
 import { EventStore } from './eventStore'
 import { LOCAL_USER, newId, resetDeviceIdCache } from './ids'
-import { CourseRepo, PlayerRepo, RoundRepo } from './repos'
-import { ADOPT_LIBRARY_KEY, GolfDB } from './schema'
+import { CourseRepo, ownsCourse, PlayerRepo, RoundRepo } from './repos'
+import { GolfDB } from './schema'
 import { pruneSeededCourses } from './seed'
 
 let testDbCounter = 0
@@ -254,7 +254,7 @@ describe('→ v3 migration (saved library becomes owned, MAI-76)', () => {
     return v1
   }
 
-  it('backfills membership for existing cards to the guest sentinel and arms adoption', async () => {
+  it('backfills membership for existing cards to the guest sentinel', async () => {
     const name = `golf-mig-${++testDbCounter}`
     const v1 = v1Db(name)
     await v1.open()
@@ -263,24 +263,10 @@ describe('→ v3 migration (saved library becomes owned, MAI-76)', () => {
 
     const db = new GolfDB(name)
     await db.open()
-    // the device can't know WHO saved it, so it lands guest…
+    // the device can't know WHO saved it, so it lands guest and rides the
+    // claim prompt (which counts courses) — deliberately no silent adoption
     expect(await db.saved_courses.get([LOCAL_USER, 'c-pre'])).toBeDefined()
     expect(await new CourseRepo(db).list(LOCAL_USER)).toHaveLength(1)
-    // …and the flag lets the first post-upgrade launch hand it to whoever is
-    // signed in (adoptDeviceLibrary, tested in sync.test.ts)
-    expect(await db.meta.get(ADOPT_LIBRARY_KEY)).toBeDefined()
-    db.close()
-  })
-
-  it('arms no adoption on a device with no courses', async () => {
-    const name = `golf-mig-${++testDbCounter}`
-    const v1 = v1Db(name)
-    await v1.open()
-    v1.close()
-
-    const db = new GolfDB(name)
-    await db.open()
-    expect(await db.meta.get(ADOPT_LIBRARY_KEY)).toBeUndefined()
     db.close()
   })
 })
@@ -445,6 +431,106 @@ describe('CourseRepo', () => {
     const ops = await db.outbox.toArray()
     expect(ops.map((o) => o.kind)).toEqual(['pushSavedCourse'])
     expect((ops[0]!.payload as { userId: string }).userId).toBe(A)
+  })
+
+  it('claim re-stamps guest authorship BEFORE freezing push payloads', async () => {
+    const db = freshDb()
+    const repo = new CourseRepo(db)
+    await repo.save(LOCAL_USER, { ...makeCourse('c1', 'user'), createdBy: LOCAL_USER })
+    await repo.claim(A)
+
+    // one transaction, authorship first: a payload frozen with '@local' made
+    // the user's OTHER devices fork their own course on edit (review finding)
+    const ops = await db.outbox.toArray()
+    const membership = ops.find((o) => o.kind === 'pushSavedCourse')!
+    expect((membership.payload as { course: Course }).course.createdBy).toBe(A)
+    const publish = ops.find((o) => o.kind === 'pushCourse')!
+    expect((publish.payload as { course: Course }).course.createdBy).toBe(A)
+    expect((await db.courses.get('c1'))?.createdBy).toBe(A)
+  })
+
+  it('fork lands the new card and retires the original in ONE transaction', async () => {
+    const db = freshDb()
+    const repo = new CourseRepo(db)
+    await repo.save(A, { ...makeCourse('orig', 'remote') })
+    await db.outbox.clear()
+
+    const fork = await repo.fork(A, 'orig', {
+      ...makeCourse('fork-1', 'user'),
+      createdBy: A,
+      sourceId: 'orig',
+    })
+
+    expect(fork.id).toBe('fork-1')
+    expect((await repo.list(A)).map((c) => c.id)).toEqual(['fork-1'])
+    // the original's card is GC'd (nothing references it), and its tombstone
+    // is queued together with the fork's membership push AND its shared-
+    // library publish — a crash can't leave the library holding both rows,
+    // or a saved fork that never publishes
+    expect(await repo.get('orig')).toBeUndefined()
+    const kinds = (await db.outbox.toArray()).map((o) => o.kind).sort()
+    expect(kinds).toEqual(['deleteSavedCourse', 'pushCourse', 'pushSavedCourse'])
+  })
+
+  it('a fresh save supersedes a removal still queued on this device', async () => {
+    const db = freshDb()
+    const repo = new CourseRepo(db)
+    await repo.save(A, makeCourse('c1', 'remote'))
+    await repo.remove(A, 'c1')
+    await repo.save(A, makeCourse('c1', 'remote'))
+
+    // the tombstone is purged rather than racing the new push to the server —
+    // the newest local intent is the only thing left to flush
+    const ops = await db.outbox.toArray()
+    expect(ops.map((o) => o.kind)).toEqual(['pushSavedCourse'])
+  })
+
+  it('a retry-capped tombstone no longer vetoes the course coming back', async () => {
+    const db = freshDb()
+    const repo = new CourseRepo(db)
+    await db.outbox.put({
+      id: 'dead-op',
+      kind: 'deleteSavedCourse',
+      payload: { userId: A, courseId: 'c1', removedAt: '2026-08-01T00:00:00.000Z' },
+      createdAt: '2026-08-01T00:00:00.000Z',
+      attempts: 10, // permanently failed — will never flush
+    })
+    await repo.applyRemoteSave(A, makeCourse('c1', 'remote'), '2026-08-02T00:00:00.000Z')
+    // an op that can never flush must not suppress this course forever
+    expect(await db.saved_courses.get([A, 'c1'])).toBeDefined()
+  })
+})
+
+describe('ownsCourse (the MAI-78 fork-vs-update decision)', () => {
+  const base = makeCourse('11111111-2222-7333-8444-555555555555', 'user')
+
+  it('keys on createdBy when present', () => {
+    expect(ownsCourse({ ...base, createdBy: 'me' }, 'me')).toBe(true)
+    expect(ownsCourse({ ...base, createdBy: 'someone-else' }, 'me')).toBe(false)
+    // the guest sentinel is an identity like any other — signing in does not
+    // make unclaimed guest cards yours
+    expect(ownsCourse({ ...base, createdBy: LOCAL_USER }, 'me')).toBe(false)
+    expect(ownsCourse({ ...base, createdBy: LOCAL_USER }, LOCAL_USER)).toBe(true)
+  })
+
+  it('an orphaned author (account deleted) is never yours', () => {
+    expect(ownsCourse({ ...base, createdBy: '@orphaned' }, 'me')).toBe(false)
+  })
+
+  it('legacy source:user cards are yours only with a locally-minted (v7) id', () => {
+    // authored here pre-createdBy: newId() has only ever minted UUIDv7
+    expect(ownsCourse(base, 'me')).toBe(true)
+    // main's editor rewrote EDITED API imports to source:'user' too — their
+    // provider ids give them away, and treating them as yours pushes onto a
+    // shared row RLS refuses (the exact MAI-78 failure, review finding)
+    expect(ownsCourse({ ...base, id: 'gca:9' }, 'me')).toBe(false)
+    expect(ownsCourse({ ...base, id: '11111111-2222-4333-8444-555555555555' }, 'me')).toBe(false)
+  })
+
+  it('non-user sources are never yours without createdBy', () => {
+    expect(ownsCourse(makeCourse('11111111-2222-7333-8444-555555555555', 'remote'), 'me')).toBe(
+      false,
+    )
   })
 })
 

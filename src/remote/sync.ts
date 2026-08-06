@@ -1,11 +1,12 @@
 import Dexie from 'dexie'
-import { ADOPT_LIBRARY_KEY, db } from '../db/schema'
+import { db } from '../db/schema'
+import { epoch } from '../db/clock'
 import { LOCAL_USER } from '../db/ids'
 import { courseRepo, roundRepo, playerRepo } from '../db/repos'
 import type { Course, Player, Round } from '../engine/core/types'
 import type { RoundEvent } from '../engine/core/events'
 import { supabase } from './supabase'
-import { enqueuePushCourse, enqueuePushPlayer, enqueuePushRound, flushOutbox } from './outbox'
+import { enqueuePushPlayer, enqueuePushRound, flushOutbox } from './outbox'
 
 /**
  * Owner-scoped cloud restore. Snapshot model: each completed round is a
@@ -57,7 +58,7 @@ export async function pull(userId: string): Promise<void> {
       // (Gating on local membership instead was the last review's forever-
       // tombstone bug — a fresh device has no local membership to compare, so
       // a remove-then-re-save stayed dead on every other device.)
-      if (deletedAt && Date.parse(deletedAt) >= Date.parse(row.updated_at as string)) {
+      if (deletedAt && epoch(deletedAt) >= epoch(row.updated_at as string)) {
         await courseRepo.applyRemoteRemoval(userId, row.course_id as string, deletedAt)
       } else {
         await courseRepo.applyRemoteSave(userId, row.data as Course, row.updated_at as string)
@@ -132,24 +133,11 @@ export async function claimLocalData(
   }
 
   // The saved library claims like rounds and players do — membership is owned
-  // data (MAI-76). The repo re-keys guest rows to the account and queues each
-  // course's push in one transaction.
+  // data (MAI-76). The repo re-keys guest rows to the account, re-stamps
+  // guest authorship, and queues every push (membership + shared-library
+  // publish) in ONE transaction — authorship first, so the frozen payloads
+  // carry the account's createdBy, never '@local'.
   const courses = await courseRepo.claim(userId)
-
-  // Authorship follows too. Guest-authored cards carry the sentinel (legacy
-  // ones carry nothing); re-stamp them to the account and publish, so a course
-  // scanned while signed out finally reaches the shared library — and the
-  // insert passes RLS, which pins created_by to the caller. Cards another
-  // signed-in user authored on this device are NOT ours to publish.
-  const authored = await db.courses
-    .filter(
-      (c) => c.source === 'user' && (c.createdBy === undefined || c.createdBy === LOCAL_USER),
-    )
-    .toArray()
-  for (const c of authored) {
-    await db.courses.update(c.id, { createdBy: userId })
-    await enqueuePushCourse(userId, { ...c, createdBy: userId })
-  }
 
   return { rounds: claimed.rounds.length, players: claimed.players.length, courses }
 }
@@ -160,7 +148,6 @@ export async function countLocalGuestData(): Promise<{
   players: number
   courses: number
 }> {
-  await adoptionSettled
   const rounds = await db.rounds
     .where('[userId+startedAt]')
     .between([LOCAL_USER, Dexie.minKey], [LOCAL_USER, Dexie.maxKey])
@@ -173,29 +160,4 @@ export async function countLocalGuestData(): Promise<{
   // claiming a library it never mentioned — the opposite of opt-in
   const courses = await courseRepo.countMemberships(LOCAL_USER)
   return { rounds, players, courses }
-}
-
-/**
- * One-shot adoption of the pre-MAI-76 library. The Dexie v3 upgrade backfills
- * existing cards to the guest sentinel and arms a meta flag; whoever the FIRST
- * post-upgrade launch resolves as consumes it. Signed in → those courses were
- * demonstrably saved by this account (they predate the feature, not the
- * login), so they're claimed and pushed. Guest → they stay guest and ride the
- * claim prompt's explicit opt-in like any other guest data. Either way the
- * flag dies here: left armed, some future sign-in would silently absorb a
- * DIFFERENT person's library, which is the consent bug this feature fixes.
- */
-/** Lets countLocalGuestData order itself after a concurrent adoption: the
- *  claim prompt must not offer courses that adoption is about to take anyway
- *  ("Not now" could then decline a library the sheet had already named). */
-let adoptionSettled: Promise<void> = Promise.resolve()
-
-export function adoptDeviceLibrary(userId: string): Promise<void> {
-  adoptionSettled = (async () => {
-    const pending = await db.meta.get(ADOPT_LIBRARY_KEY)
-    if (!pending) return
-    await db.meta.delete(ADOPT_LIBRARY_KEY)
-    if (userId !== LOCAL_USER) await courseRepo.claim(userId)
-  })()
-  return adoptionSettled
 }

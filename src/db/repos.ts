@@ -2,16 +2,36 @@ import Dexie from 'dexie'
 import type { Course, Player, Round } from '../engine/core/types'
 import {
   db as defaultDb,
+  savedCourseOp,
   type DeleteSavedCoursePayload,
   type GolfDB,
+  type PushCoursePayload,
   type PushSavedCoursePayload,
 } from './schema'
-import { LOCAL_USER, newId } from './ids'
+import { LOCAL_USER, isLocallyMintedId, newId } from './ids'
+import { epoch } from './clock'
 import { notifyOutboxWrite } from './outboxSignal'
 
-/** Local stamps end in `Z`; Postgres returns `+00:00`. Compare instants,
- *  never strings — string order across the two encodings is meaningless. */
-const epoch = (iso: string) => Date.parse(iso)
+/**
+ * Does this user own this card — i.e. does an edit update it in place, or fork
+ * it (MAI-78)? Ownership is `createdBy`, never `source`: an imported copy of
+ * another golfer's course is `source:'user'` but still theirs, and the server
+ * refuses updates to rows you didn't create.
+ *
+ * Legacy cards predate `createdBy`. `source:'user'` USUALLY meant "authored on
+ * this device" — except that main's editor rewrote every edited card to
+ * 'user', including API imports. A card genuinely authored here got its id
+ * from `newId()` (UUIDv7, invariant #7), so a provider id (`gca:9`, a v4
+ * uuid) cannot be ours and forks instead of pushing onto a shared row RLS
+ * refuses. Residual: a pre-branch EDIT of another golfer's library course
+ * keeps their v7 uuid and still misreads as yours — that push dies quietly in
+ * the outbox exactly as it does on main, and self-heals the first time the
+ * card round-trips through the library (imports stamp `createdBy`).
+ */
+export function ownsCourse(course: Course, userId: string): boolean {
+  if (course.createdBy !== undefined) return course.createdBy === userId
+  return course.source === 'user' && isLocallyMintedId(course.id)
+}
 
 /**
  * Course DATA is shared; MEMBERSHIP is owned (MAI-76).
@@ -60,17 +80,14 @@ export class CourseRepo {
    * stored card so callers publish exactly what landed.
    */
   async save(userId: string, course: Course): Promise<Course> {
-    const now = new Date().toISOString()
-    const stored: Course = { ...course, updatedAt: now, revision: course.revision + 1 }
+    let stored!: Course
     await this.db.transaction(
       'rw',
       this.db.courses,
       this.db.saved_courses,
       this.db.outbox,
       async () => {
-        await this.db.courses.put(stored)
-        await this.db.saved_courses.put({ userId, courseId: stored.id, updatedAt: now })
-        await this.enqueue(userId, 'pushSavedCourse', { userId, course: stored, savedAt: now })
+        stored = await this.writeSave(userId, course)
       },
     )
     notifyOutboxWrite()
@@ -85,19 +102,43 @@ export class CourseRepo {
    * ordering discipline as outbox.purgePendingFor).
    */
   async remove(userId: string, courseId: string): Promise<void> {
-    const removedAt = new Date().toISOString()
     await this.db.transaction(
       'rw',
       this.db.courses,
       this.db.saved_courses,
       this.db.outbox,
       async () => {
-        await this.purgeQueuedSaves(userId, courseId)
-        await this.enqueue(userId, 'deleteSavedCourse', { userId, courseId, removedAt })
-        await this.dropMembership(userId, courseId)
+        await this.writeRemoval(userId, courseId)
       },
     )
     notifyOutboxWrite()
+  }
+
+  /**
+   * Replace a card the user doesn't own with their corrected version (MAI-78):
+   * save the fork and retire the original's membership in ONE transaction, so
+   * a crash can never leave both rows in the library with the fork already
+   * queued — nobody wants two entries for the same place in their own list.
+   * The original's card is GC'd if nothing else on the device references it.
+   */
+  async fork(userId: string, originalId: string, course: Course): Promise<Course> {
+    let stored!: Course
+    await this.db.transaction(
+      'rw',
+      this.db.courses,
+      this.db.saved_courses,
+      this.db.outbox,
+      async () => {
+        stored = await this.writeSave(userId, course)
+        // the fork is always publishable (source:'user', authored by this
+        // user), and publishing inside the transaction means a crash can't
+        // land the fork locally while losing its shared-library publish
+        await this.enqueue(userId, 'pushCourse', { userId, course: stored })
+        await this.writeRemoval(userId, originalId)
+      },
+    )
+    notifyOutboxWrite()
+    return stored
   }
 
   /**
@@ -116,13 +157,18 @@ export class CourseRepo {
         // An un-flushed local removal outranks this (older) remote row: without
         // the check, a pull racing the flush re-adds the course the user just
         // removed, and the flush then deletes it remotely — split brain.
+        // Ops at the retry cap don't count: they will never flush, and a dead
+        // tombstone must not veto this course's restoration forever.
         const pending = await this.db.outbox
-          .filter(
-            (i) =>
-              i.kind === 'deleteSavedCourse' &&
-              (i.payload as DeleteSavedCoursePayload).userId === userId &&
-              (i.payload as DeleteSavedCoursePayload).courseId === course.id,
-          )
+          .filter((i) => {
+            const op = savedCourseOp(i)
+            return (
+              op?.kind === 'deleteSavedCourse' &&
+              i.attempts < 10 &&
+              op.userId === userId &&
+              op.courseId === course.id
+            )
+          })
           .count()
         if (pending > 0) return
 
@@ -152,9 +198,18 @@ export class CourseRepo {
 
   /**
    * Claim-on-login: re-key the guest library to the account and queue each
-   * course's push. Claiming is the user acting now ("Add to account"), so the
-   * membership clock is stamped fresh — it must out-date any tombstone the
-   * account carries from another device. Returns how many were claimed.
+   * course's push, re-stamping guest authorship first. Claiming is the user
+   * acting now ("Add to account"), so the membership clock is stamped fresh —
+   * it must out-date any tombstone the account carries from another device.
+   * Returns how many memberships were claimed.
+   *
+   * One transaction, authorship BEFORE membership: the membership push
+   * snapshots the card into its payload, so the card must already carry the
+   * account's `createdBy` when it's frozen. Re-stamping afterwards (the
+   * previous shape) pushed '@local' authorship to the server, and the user's
+   * other devices then treated their own course as someone else's and forked
+   * it on edit — and a crash between the two steps zeroed the claim counts,
+   * so the prompt never re-offered.
    */
   async claim(userId: string): Promise<number> {
     let count = 0
@@ -164,6 +219,23 @@ export class CourseRepo {
       this.db.saved_courses,
       this.db.outbox,
       async () => {
+        // Cards this device authored while signed out (legacy ones carry no
+        // createdBy at all) become the account's, and publish to the shared
+        // library — RLS pins created_by to the caller, so this is also what
+        // makes the insert pass. Cards another signed-in user authored on
+        // this device are not ours to publish and keep their stamp.
+        const authored = await this.db.courses
+          .filter(
+            (c) =>
+              c.source === 'user' && (c.createdBy === undefined || c.createdBy === LOCAL_USER),
+          )
+          .toArray()
+        for (const c of authored) {
+          const restamped: Course = { ...c, createdBy: userId }
+          await this.db.courses.put(restamped)
+          await this.enqueue(userId, 'pushCourse', { userId, course: restamped })
+        }
+
         const guest = await this.db.saved_courses.where('userId').equals(LOCAL_USER).toArray()
         const now = new Date().toISOString()
         for (const s of guest) {
@@ -181,12 +253,34 @@ export class CourseRepo {
     return count
   }
 
+  /** In-transaction write behind save() and fork(). */
+  private async writeSave(userId: string, course: Course): Promise<Course> {
+    const now = new Date().toISOString()
+    const stored: Course = { ...course, updatedAt: now, revision: course.revision + 1 }
+    // a fresh save supersedes a removal still queued on this device — purging
+    // it here also clears a dead (retry-capped) tombstone that would
+    // otherwise veto this course's pulls forever
+    await this.purgeQueuedOps('deleteSavedCourse', userId, stored.id)
+    await this.db.courses.put(stored)
+    await this.db.saved_courses.put({ userId, courseId: stored.id, updatedAt: now })
+    await this.enqueue(userId, 'pushSavedCourse', { userId, course: stored, savedAt: now })
+    return stored
+  }
+
+  /** In-transaction write behind remove() and fork(). */
+  private async writeRemoval(userId: string, courseId: string): Promise<void> {
+    const removedAt = new Date().toISOString()
+    await this.purgeQueuedOps('pushSavedCourse', userId, courseId)
+    await this.enqueue(userId, 'deleteSavedCourse', { userId, courseId, removedAt })
+    await this.dropMembership(userId, courseId)
+  }
+
   /** In-transaction enqueue. Guests sync nothing, so their ops never queue —
    *  the gate lives HERE so no call site can forget it. */
   private async enqueue(
     userId: string,
-    kind: 'pushSavedCourse' | 'deleteSavedCourse',
-    payload: PushSavedCoursePayload | DeleteSavedCoursePayload,
+    kind: 'pushSavedCourse' | 'deleteSavedCourse' | 'pushCourse',
+    payload: PushSavedCoursePayload | DeleteSavedCoursePayload | PushCoursePayload,
   ): Promise<void> {
     if (userId === LOCAL_USER) return
     await this.db.outbox.put({
@@ -212,14 +306,16 @@ export class CourseRepo {
     if (remaining === 0) await this.db.courses.delete(courseId)
   }
 
-  private async purgeQueuedSaves(userId: string, courseId: string): Promise<void> {
+  private async purgeQueuedOps(
+    kind: 'pushSavedCourse' | 'deleteSavedCourse',
+    userId: string,
+    courseId: string,
+  ): Promise<void> {
     const stale = await this.db.outbox
-      .filter(
-        (i) =>
-          i.kind === 'pushSavedCourse' &&
-          (i.payload as PushSavedCoursePayload).userId === userId &&
-          (i.payload as PushSavedCoursePayload).course.id === courseId,
-      )
+      .filter((i) => {
+        const op = savedCourseOp(i)
+        return op?.kind === kind && op.userId === userId && op.courseId === courseId
+      })
       .primaryKeys()
     await this.db.outbox.bulkDelete(stale)
   }

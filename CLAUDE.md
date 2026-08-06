@@ -117,11 +117,18 @@ change, use a 6-digit code (`{{ .Token }}` + `verifyOtp`) rather than a link.
   **Membership writes live in `CourseRepo` and nowhere else** — each mutator writes the
   `saved_courses` row and its outbox op in the SAME transaction (the `EventStore.append`
   rule), with the guest gate inside, so membership and its push cannot drift; ESLint blocks
-  `db.saved_courses` outside `src/db`. The pull-side `applyRemote*` pair is the sanctioned
-  non-enqueueing exception. `saved_courses.updated_at` is the MEMBERSHIP clock (when this
-  user saved it), never the card's own stamp. Removing the last membership on a device also
-  GCs the cached card (unbounded `db.courses` growth is what triggers iOS quota eviction,
-  which takes live round logs with it).
+  `db.saved_courses` outside the sanctioned db files. The pull-side `applyRemote*` pair is
+  the sanctioned non-enqueueing exception. `saved_courses.updated_at` is the MEMBERSHIP
+  clock (when this user saved it), never the card's own stamp — and every server write is
+  staleness-gated (`lte` on `updated_at`; the push is insert-if-absent + gated update, the
+  tombstone carries the REMOVAL instant), so an op flushing late can never rewind a newer
+  write from another device. `flushOutbox` no-ops signed-out: owner-scoped ops can't succeed
+  as anon, and a 0-row tombstone UPDATE would read as success and destroy the removal.
+  Removing the last membership on a device also GCs the cached card (unbounded `db.courses`
+  growth is what triggers iOS quota eviction, which takes live round logs with it). There is
+  deliberately NO silent adoption of the pre-v3 library — an automatic claim stamps fresh
+  clocks over the account's tombstones and resurrects courses removed elsewhere; the claim
+  prompt (which counts courses) is the consented migration path.
 - **Editing a course you don't own FORKS it (MAI-78).** Ownership is `Course.createdBy`, not
   `source` — an imported copy of another golfer's course is `source:'user'` but still theirs,
   and RLS refuses updates to rows you didn't create. Your own card updates in place and

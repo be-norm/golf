@@ -23,6 +23,20 @@ export function newId(): string {
   return uuidv7()
 }
 
+/**
+ * True for ids this app minted (`newId` — always UUIDv7, invariant #7).
+ * Provider ids differ: GolfCourseAPI mints `gca:9`, OpenGolfAPI ships v4
+ * UUIDs. This is what lets the legacy-ownership heuristic (`ownsCourse`,
+ * MAI-78) tell "authored on this device before `createdBy` existed — yours"
+ * from "an API import the pre-createdBy editor re-stamped to source:'user'" —
+ * both carry `createdBy: undefined`, but only the former may update in place;
+ * treating the latter as yours pushes edits onto shared rows RLS refuses,
+ * silently, forever.
+ */
+export function isLocallyMintedId(id: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)
+}
+
 let cachedDeviceId: string | undefined
 
 /** Stable per-install device id, minted on first use. */

@@ -49,6 +49,13 @@ export interface Course {
    * theirs, and the server refuses updates to rows you didn't create (MAI-78).
    */
   createdBy?: string
+  /**
+   * The card this one was forked from (MAI-78): the original's id — for an
+   * API import that is the provider's id, whose ODbL attribution must survive
+   * into the shared library's `source_id` column when the fork publishes.
+   * Absent on cards that aren't derived.
+   */
+  sourceId?: string
   updatedAt: string
   revision: number
 }

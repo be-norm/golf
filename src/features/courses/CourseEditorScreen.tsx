@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router'
 import { useLiveQuery } from 'dexie-react-hooks'
 import type { Course, TeeSet } from '../../engine/core/types'
-import { courseRepo } from '../../db/repos'
+import { courseRepo, ownsCourse } from '../../db/repos'
 import { newId } from '../../db/ids'
 import { enqueuePushCourse } from '../../remote/outbox'
 import { isStrokeIndexPermutation, looksLikeEighteenHoleRating } from '../../engine/core/tees'
@@ -40,8 +40,12 @@ export function CourseEditorScreen() {
   const navigate = useNavigate()
   const location = useLocation()
   const { isGuest, activeUserId } = useAuth()
+  // Resolves a missing card to null so it's distinguishable from undefined
+  // (still loading) — with the same sentinel for both, "Course not found" was
+  // unreachable and a GC'd card (fork + Back, or a removal pulled from
+  // another device) rendered a permanent blank page.
   const existing = useLiveQuery(
-    () => (isNew ? Promise.resolve(null) : courseRepo.get(courseId)),
+    () => (isNew ? Promise.resolve(null) : courseRepo.get(courseId).then((c) => c ?? null)),
     [courseId],
   )
   // A scorecard scan navigates here with a pre-filled draft to review.
@@ -51,12 +55,17 @@ export function CourseEditorScreen() {
   const [teeTab, setTeeTab] = useState<'default' | string>('default')
   const [confirmDelete, setConfirmDelete] = useState(false)
 
-  if (!isNew && existing === undefined) return null
+  // The draft comes first: a removal pulled mid-edit must not blank the
+  // screen under unsaved changes — saving simply re-creates the card.
   const course = draft ?? (isNew ? blankCourse(18) : (existing ?? undefined))
+  if (!isNew && existing === undefined && !draft) return null // still loading
   if (!course) {
     return (
-      <main className="flex min-h-dvh items-center justify-center">
+      <main className="flex min-h-dvh flex-col items-center justify-center gap-4">
         <p className="text-stone-400">Course not found.</p>
+        <Link to="/courses" className="text-felt-400">
+          ← Courses
+        </Link>
       </main>
     )
   }
@@ -112,38 +121,36 @@ export function CourseEditorScreen() {
     // fix to themselves forever. It has to be a fork rather than an edit of
     // the shared row: RLS only lets a user update rows they created (rightly —
     // the alternative is anyone rewriting any course), and the original's ODbL
-    // provenance has to survive. OWNERSHIP decides, not `source`: an imported
-    // copy of another golfer's course is source:'user' but still theirs, and
-    // pushing an edit onto their row dies silently against RLS. Legacy cards
-    // authored here before `createdBy` existed count as ours. No modal in any
-    // case (decided on MAI-78): when overwrite is possible it's obviously what
-    // you want, and when it isn't, a prompt would offer something the server
+    // provenance has to survive. `ownsCourse` decides — ownership, never
+    // `source` (see its doc for the legacy population). No modal in any case
+    // (decided on MAI-78): when overwrite is possible it's obviously what you
+    // want, and when it isn't, a prompt would offer something the server
     // refuses — so your own updates in place silently, anyone else's forks
     // silently and the list screen states the consequence after the fact.
-    const ownedByMe =
-      existing == null ||
-      existing.createdBy === activeUserId ||
-      (existing.createdBy === undefined && existing.source === 'user')
-    const forking = !isNew && !ownedByMe
-    const saved = await courseRepo.save(activeUserId, {
+    const forking = !isNew && existing != null && !ownsCourse(existing, activeUserId)
+    const base: Course = {
       ...course,
-      id: forking ? newId() : course.id,
       name: course.name.trim(),
       source: 'user',
       createdBy: activeUserId,
-      // a fork is a new course, not revision N+1 of somebody else's
-      revision: forking ? 0 : course.revision,
-    })
-    if (forking) {
-      // The corrected card replaces the original in THIS library — nobody
-      // wants both rows for the same place in their own list. The repo drops
-      // membership, queues the tombstone and GCs the orphaned card atomically.
-      await courseRepo.remove(activeUserId, course.id)
     }
-    // After the save this is our own user-authored card either way — an
-    // in-place update of our row, or a fresh fork RLS accepts. Guests publish
-    // at claim time instead.
-    if (!isGuest) await enqueuePushCourse(activeUserId, saved)
+    const saved = forking
+      ? // one repo transaction: the fork lands, publishes, and the original's
+        // membership retires together, so a crash can't leave both rows in
+        // the library or a saved fork that never reaches the shared library.
+        // sourceId keeps the ODbL provenance chain on the published row;
+        // revision 0 because a fork is a new course, not revision N+1 of
+        // somebody else's.
+        await courseRepo.fork(activeUserId, course.id, {
+          ...base,
+          id: newId(),
+          sourceId: course.id,
+          revision: 0,
+        })
+      : await courseRepo.save(activeUserId, base)
+    // An in-place update of our own row republishes here; guests publish at
+    // claim time instead (the LOCAL_USER gate inside the repo/outbox holds).
+    if (!forking && !isGuest) await enqueuePushCourse(activeUserId, saved)
     navigate(
       '/courses',
       forking

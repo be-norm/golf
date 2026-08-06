@@ -2,6 +2,7 @@ import { db } from '../db/schema'
 import type {
   DeleteSavedCoursePayload,
   OutboxItem,
+  PushCoursePayload,
   PushSavedCoursePayload,
 } from '../db/schema'
 import { setOutboxNotifier } from '../db/outboxSignal'
@@ -36,11 +37,6 @@ interface DeletePlayerPayload {
   userId: string
   playerId: string
 }
-interface PushCoursePayload {
-  userId: string
-  course: Course
-}
-
 export async function enqueuePushRound(userId: string, round: Round): Promise<void> {
   const events = await eventStore.list(round.id)
   await put('pushRound', { userId, round, events })
@@ -97,25 +93,51 @@ async function purgePendingFor(entityId: string): Promise<void> {
   await db.outbox.bulkDelete(stale.map((s) => s.id))
 }
 
-let flushing = false
+let inFlight: Promise<void> | null = null
+let rerun = false
 
-export async function flushOutbox(): Promise<void> {
-  if (flushing || !navigator.onLine) return
-  flushing = true
+/**
+ * Re-entrant calls join the in-flight run and flag a follow-up pass, so an op
+ * enqueued mid-flush is picked up instead of silently missed until the next
+ * external trigger — and `await flushOutbox()` genuinely waits, which is what
+ * makes syncNow's flush-before-pull an ordering rather than a hope (a pull
+ * overlapping an un-awaited flush could fetch pre-tombstone rows and
+ * transiently resurrect a course the user just removed).
+ */
+export function flushOutbox(): Promise<void> {
+  if (inFlight) {
+    rerun = true
+    return inFlight
+  }
+  inFlight = drainQueue().finally(() => {
+    inFlight = null
+  })
+  return inFlight
+}
+
+async function drainQueue(): Promise<void> {
   try {
-    const items = await db.outbox.orderBy('createdAt').toArray()
-    const deviceId = await getDeviceId(db)
-    for (const item of items) {
-      // give up quietly after repeated permanent failures — sync is best-effort
-      if (item.attempts >= 10) continue
-      const ok = await send(item, deviceId)
-      if (ok) await db.outbox.delete(item.id)
-      else await db.outbox.update(item.id, { attempts: item.attempts + 1 })
-    }
+    do {
+      rerun = false
+      if (!navigator.onLine) return
+      // Every op is owner-scoped, so flushing signed-out can't succeed — and
+      // it's worse than useless: RLS filters every row for anon, a tombstone
+      // UPDATE then matches nothing, reads as success, and the removal is
+      // destroyed. Wait for a session instead of burning the ops.
+      const { data } = await supabase.auth.getSession()
+      if (!data.session) return
+      const items = await db.outbox.orderBy('createdAt').toArray()
+      const deviceId = await getDeviceId(db)
+      for (const item of items) {
+        // give up quietly after repeated permanent failures — sync is best-effort
+        if (item.attempts >= 10) continue
+        const ok = await send(item, deviceId)
+        if (ok) await db.outbox.delete(item.id)
+        else await db.outbox.update(item.id, { attempts: item.attempts + 1 })
+      }
+    } while (rerun)
   } catch {
     // fully silent: sync is opportunistic
-  } finally {
-    flushing = false
   }
 }
 
@@ -178,14 +200,29 @@ async function send(item: OutboxItem, deviceId: string): Promise<boolean> {
       // the card's own updatedAt (the card travels inside `data` with its own
       // stamp; conflating the two was a review finding on the last attempt).
       // deleted_at is deliberately omitted, exactly as round_archives does it:
-      // a re-push never clears a tombstone. A genuine re-save goes through this
-      // same path with a newer updated_at, and pull treats a row whose
-      // updated_at out-dates its deleted_at as live again.
-      const { error } = await supabase.from('saved_courses').upsert(
+      // a re-push never clears a tombstone; a re-save with a newer updated_at
+      // simply out-dates it and pull treats the row as live again.
+      //
+      // Two steps because the write must be staleness-gated like the delete
+      // below, and a plain upsert can't be: a stale queued push flushing late
+      // (device offline for days) would rewind updated_at/data below a newer
+      // save from another device — and a rewound updated_at under a standing
+      // deleted_at reads as REMOVED, splitting the brain across devices.
+      // Step 1 creates the row iff absent; step 2 applies the write iff not
+      // older than what's there. A newer concurrent write between the two
+      // simply wins step 2, which is the correct outcome.
+      const inserted = await supabase.from('saved_courses').upsert(
         { user_id: userId, course_id: course.id, data: course, updated_at: savedAt },
-        { onConflict: 'user_id,course_id' },
+        { onConflict: 'user_id,course_id', ignoreDuplicates: true },
       )
-      return !error
+      if (inserted.error) return false
+      const updated = await supabase
+        .from('saved_courses')
+        .update({ data: course, updated_at: savedAt })
+        .eq('user_id', userId)
+        .eq('course_id', course.id)
+        .lte('updated_at', savedAt)
+      return !updated.error
     }
     case 'deleteSavedCourse': {
       const { userId, courseId, removedAt } = item.payload as DeleteSavedCoursePayload
@@ -210,6 +247,9 @@ async function send(item: OutboxItem, deviceId: string): Promise<boolean> {
       const { userId, course } = item.payload as PushCoursePayload
       // Shared, publicly-readable library row. created_by = the owner (RLS
       // pins it); source/status forced to what the insert policy allows.
+      // source_id carries the fork's origin (MAI-78): a correction of an
+      // ODbL-derived card must publish with its provenance chain intact, not
+      // as an unattributed original.
       const { error } = await supabase.from('courses').upsert(
         {
           id: course.id,
@@ -219,7 +259,7 @@ async function send(item: OutboxItem, deviceId: string): Promise<boolean> {
           data: course,
           status: 'published',
           source: 'user',
-          source_id: null,
+          source_id: course.sourceId ?? null,
           created_by: userId,
           revision: course.revision,
           updated_at: course.updatedAt,

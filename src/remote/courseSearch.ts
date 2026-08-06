@@ -91,8 +91,14 @@ export function golfApiName(club?: string, course?: string): string {
 
 async function librarySearch(q: string): Promise<CourseSearchHit[]> {
   try {
-    // match name OR city/state — "broadmoor", "westfield", "carmel in" all work
-    const pattern = `%${q.replace(/[%_]/g, '')}%`
+    // match name OR city/state — "broadmoor", "westfield", "carmel in" all work.
+    // PostgREST parses the .or() argument as a logic tree, so a bare comma or
+    // parenthesis in the query corrupts it — typing "Carmel, IN" (the app's
+    // own City, ST display format) silently emptied the library results.
+    // Double-quoting the value (PostgREST's string escape, backslash for
+    // embedded quotes/backslashes) keeps any punctuation inert.
+    const raw = q.replace(/[%_]/g, '').replace(/[\\"]/g, '\\$&')
+    const pattern = `"%${raw}%"`
     // Ordered, with id as the tie-break: without an ORDER BY, which of two
     // same-name rows (an API card and a golfer's fork of it, MAI-78) comes
     // back first — and therefore which one survives mergeCourseHits' first-
