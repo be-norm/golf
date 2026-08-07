@@ -279,10 +279,23 @@ describe('taxonomy never reaches the money', () => {
     }
 
     it(`settles ${engine.type} identically whether it is main, side, or unlabelled`, () => {
+      // Everything a role could plausibly steer, not just the settlement:
+      // `standings` carries `amountCents` and IS the money the standings sheet
+      // shows, and the narration channels are money's explanation. Function
+      // properties are dropped because they never compare equal.
+      const money = (d: ReturnType<typeof scored>) => ({
+        settlement: d.settlement,
+        standings: d.standings,
+        summary: d.summary,
+        summaryParts: d.summaryParts,
+        detailLines: d.detailLines,
+        notes: d.notes,
+        holeSummaries: [1, 2, 3, 4, 5, 6, 7, 8, 9].map((h) => d.holeSummary(h)),
+      })
       const asMain = scored('main')
-      expect(scored('side').settlement).toEqual(asMain.settlement)
+      expect(money(scored('side'))).toEqual(money(asMain))
       // absent is what every round created before MAI-43 looks like
-      expect(scored().settlement).toEqual(asMain.settlement)
+      expect(money(scored())).toEqual(money(asMain))
       // …and money actually moved, or the assertions above are vacuous
       expect(
         Object.values(asMain.settlement.perPlayerCents).some((c) => c !== 0),

@@ -147,6 +147,38 @@ describe('gameLabel', () => {
     for (const label of labels) expect(isPaintable(label)).toBe(true)
   })
 
+  /**
+   * `importSchema` repairs `handicap` and `config` now, but this function is
+   * called on whatever is in Dexie — including rows written before that repair
+   * existed. Every deref here is optional for that reason; an unguarded one
+   * white-screens the scoring card on a restored round rather than degrading
+   * to a duller label.
+   */
+  it('survives a game with no handicap or config at all', () => {
+    const bare = { gameId: 'g1', type: 'skins' } as unknown as GameConfig
+    const bare2 = { gameId: 'g2', type: 'skins' } as unknown as GameConfig
+    expect(() => gameLabel(bare, [bare, bare2])).not.toThrow()
+    expect(gameLabel(bare, [bare, bare2])).toBe('Skins (#1)')
+    expect(gameLabel(bare2, [bare, bare2])).toBe('Skins (#2)')
+
+    // and a config missing the key the discriminator would have reached for
+    const noConfig = { ...skins('g1', net), config: undefined } as unknown as GameConfig
+    expect(() => gameLabel(noConfig, [noConfig, skins('g2', net)])).not.toThrow()
+  })
+
+  /**
+   * Two unregistered types both sanitise to the placeholder, so grouping
+   * siblings by `type` would call each an only child and paint two rows
+   * reading exactly "Game".
+   */
+  it('tells apart two unregistered games that sanitise to the same name', () => {
+    const a: GameConfig = { gameId: 'g1', type: 'スキンズ', handicap: net, config: {} }
+    const b: GameConfig = { gameId: 'g2', type: 'ウルフ', handicap: net, config: {} }
+    const labels = [gameLabel(a, [a, b]), gameLabel(b, [a, b])]
+    expect(new Set(labels).size).toBe(2)
+    expect(labels).toEqual(['Game (#1)', 'Game (#2)'])
+  })
+
   it('falls back to the raw type for an engine that is not registered', () => {
     const orphan: GameConfig = { gameId: 'g1', type: 'notAGame', handicap: net, config: {} }
     // an imported round naming a game this build doesn't ship

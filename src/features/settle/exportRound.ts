@@ -59,6 +59,20 @@ const importSchema = z.object({
           // far more than it protects. An unusable value degrades to absent,
           // and `roleOf` derives it.
           role: z.enum(['main', 'side']).optional().catch(undefined),
+          // REPAIRED, not merely tolerated. Everything else on a game stays
+          // loose, but these two are dereferenced on every render (gameLabel,
+          // and the engine's own derive), so a file missing them parses
+          // cleanly, is written to Dexie, and then white-screens the scoring
+          // card. Same "degrade, don't refuse" policy as `role`: a restore is
+          // worth more than the fields it is missing.
+          handicap: z
+            .looseObject({
+              mode: z.enum(['gross', 'net']).catch('gross'),
+              allowancePct: z.number().catch(100),
+              reference: z.enum(['absolute', 'offLow']).catch('absolute'),
+            })
+            .catch({ mode: 'gross', allowancePct: 100, reference: 'absolute' }),
+          config: z.unknown().transform((v) => (typeof v === 'object' && v !== null ? v : {})),
         }),
       )
       // gameId is the key `deriveRound` files derivations under, so a duplicate

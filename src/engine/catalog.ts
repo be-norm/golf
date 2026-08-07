@@ -173,7 +173,12 @@ export function roleOf(game: GameConfig, allGames: readonly GameConfig[]): 'main
   // treat it as a main event.
   if (game.role === 'main' || game.role === 'side') return game.role
 
-  const category = getEngine(game.type)?.meta.category ?? 'main'
+  // ONE default for an unknown type, used for this game AND for its siblings
+  // below. Reading it as 'main' here but as "claims nothing" there made an
+  // imported round holding a game this build doesn't ship report two main
+  // events — the mirror of the bug the explicit-role branch above fixes.
+  const categoryOf = (g: GameConfig) => getEngine(g.type)?.meta.category ?? 'main'
+  const category = categoryOf(game)
   if (category !== 'either') return category
   // An "either" game is the side bet when something else claims the main event,
   // and the main event when nothing does. "Claims" reads a sibling's EXPLICIT
@@ -185,7 +190,7 @@ export function roleOf(game: GameConfig, allGames: readonly GameConfig[]): 'main
   const claimsMain = (g: GameConfig) =>
     g.role === 'main' || g.role === 'side'
       ? g.role === 'main'
-      : getEngine(g.type)?.meta.category === 'main'
+      : categoryOf(g) === 'main'
   const hasMainGame = allGames.some((g) => g.gameId !== game.gameId && claimsMain(g))
   return hasMainGame ? 'side' : 'main'
 }

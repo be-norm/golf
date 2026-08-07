@@ -25,13 +25,13 @@ import type { GameConfig } from './core/types'
  */
 export function gameLabel(game: GameConfig, allGames: readonly GameConfig[]): string {
   const engine = getEngine(game.type)
-  // A REGISTERED engine's name is guaranteed paintable by catalog.test.ts. The
-  // fallback is not: an imported round validates `type` as any string
-  // (exportRound.ts), so a card naming a game this build doesn't ship could put
-  // arbitrary text — 'スキンズ' — straight into the painted title. Sanitised, so
-  // the one path around the choke point below is closed too.
-  const name = engine?.meta.name ?? paintableOrPlaceholder(game.type)
-  const siblings = allGames.filter((g) => g.type === game.type)
+  const name = displayName(game)
+  // Grouped by the name SHOWN, not by `type`. For registered engines the two
+  // agree (catalog.test.ts proves names are unique), but two unregistered types
+  // can sanitise to the same placeholder — 'スキンズ' and 'ウルフ' both strip to
+  // 'Game' — and grouping by type would call each of them an only child and
+  // paint two identical rows, which is the failure this function exists to end.
+  const siblings = allGames.filter((g) => displayName(g) === name)
   if (siblings.length < 2) return name
   const tag = discriminator(game, siblings, engine)
   return tag === undefined ? name : `${name} (${tag})`
@@ -80,7 +80,8 @@ function discriminator(
   if (separates(modeOf)) return modeOf(game)
 
   for (const field of engine?.configFields ?? []) {
-    const valueOf = (g: GameConfig) => (g.config as Record<string, unknown>)[field.key]
+    const valueOf = (g: GameConfig) =>
+      (g.config as Record<string, unknown> | undefined)?.[field.key]
     // Rendered ONCE per sibling and reused for both checks and the answer.
     // Distinctness is judged on the RENDERED phrase, not the raw value: two
     // select options can carry the same display label, and separating on the
@@ -105,7 +106,10 @@ function discriminator(
   // allowance at all, so refusing it outright leaves two net games at 100% and
   // 90% as "#1" and "#2": meaningless everywhere, rather than redundant in two
   // places and useful in two.
-  if (separates((g) => g.handicap.allowancePct)) return `${game.handicap.allowancePct}%`
+  const allowanceOf = (g: GameConfig) => g.handicap?.allowancePct
+  if (allowanceOf(game) !== undefined && separates(allowanceOf)) {
+    return `${allowanceOf(game)}%`
+  }
 
   // Alike in every way we can name. Still label them, because two rows reading
   // exactly "Skins" is worse than "Skins (#1)" and "Skins (#2)" — the player at
@@ -153,7 +157,17 @@ function renderFieldValue(field: ConfigFieldSpec, value: unknown): string | unde
  */
 export const isPaintable = (s: string) => /^[\x20-\x7E]+$/.test(s)
 
-/** Strip what the pixel font cannot draw; 'Game' if nothing survives. */
+/**
+ * A REGISTERED engine's name is guaranteed paintable by catalog.test.ts. The
+ * fallback is not: an imported round validates `type` as any string
+ * (exportRound.ts), so a card naming a game this build doesn't ship could put
+ * arbitrary text straight into the painted title.
+ */
+function displayName(game: GameConfig): string {
+  return getEngine(game.type)?.meta.name ?? paintableOrPlaceholder(game.type)
+}
+
+/** Strip what the label rule disallows; 'Game' if nothing survives. */
 function paintableOrPlaceholder(raw: string): string {
   if (isPaintable(raw)) return raw
   // collapse the gaps the strip leaves: 'Skins — net' → 'Skins net', not

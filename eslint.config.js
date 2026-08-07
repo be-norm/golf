@@ -85,7 +85,10 @@ export default tseslint.config(
               // by PATTERN, not a single '../../catalog' literal: an engine one
               // directory deeper would spell it '../../../catalog' and escape
               group: ['**/catalog'],
-              importNames: ['getEngine', 'listEngines'],
+              // every export that hands an engine another engine's meta or
+              // derivation: `roleOf` reads meta.category itself, and
+              // `deriveRound` re-derives every other game in the round
+              importNames: ['getEngine', 'listEngines', 'roleOf', 'deriveRound'],
               message:
                 'an engine must not read the registry — taxonomy (meta.category/family/shapes) is presentation and must never reach a settlement (CLAUDE.md invariant #7)',
             },
@@ -94,7 +97,27 @@ export default tseslint.config(
               // engine's singleton directly reads its meta just as well, and
               // gets cross-derivation besides — so "engines NEVER read each
               // other" needs its own ban, or the claim is only about one route.
-              group: ['../*/engine', '../index', '../../games', '../../games/*', '../../games/*/*'],
+              // Matched on the SPECIFIER, so these are relative shapes rather
+              // than '**/games/...' — an engine writes '../nassau/engine',
+              // which contains no 'games' segment at all.
+              //
+              // '../*/*' is any sibling game directory; the '../../*/*' pair
+              // catches a game nested one level deeper, with core and the
+              // catalog negated back in because those ARE the legal imports at
+              // that shape. Any module in another game's folder counts, not
+              // just one literally named `engine`.
+              // REGEX, not globs: these match the SPECIFIER, and glob negation
+              // ('!../../core/*') does not un-match here — it left every real
+              // engine's `../../core/money` import failing. Two shapes:
+              //
+              //   ../<game>/...      a sibling game, from games/<game>/*.ts
+              //   ../../<game>/...   the same, from one directory deeper,
+              //                      with core/ and catalog negated back in
+              //                      because those ARE legal at that shape
+              //
+              // Any module inside another game's folder counts, not just one
+              // literally named `engine`.
+              regex: '^\\.\\./(?!\\.\\./)([^/]+/|index$)|^\\.\\./\\.\\./(?!core/|catalog$)([^/]+/|index$)',
               message:
                 'engines never read each other — a game is a pure function of (config, its own events, RoundContext); overlays contribute to RoundContext instead (CLAUDE.md invariant #7)',
             },

@@ -116,8 +116,13 @@ function panel(g: Ctx, y: number, h: number, border: string, fill: string): void
 function ellipsize(g: Ctx, s: string, max: number, o: TextOpts, marker = '…'): string {
   if (width(g, s, o) <= max) return s
   let cut = s
-  while (cut.length > 1 && width(g, `${cut}${marker}`, o) > max) cut = cut.slice(0, -1)
-  return `${cut}${marker}`
+  // `> 0`, not `> 1`: stopping at one glyph returned "X..." however wide that
+  // was, so the result could exceed the `max` it had just been measured
+  // against — and the panel title's width is what positions the allowance
+  // chip, so an over-budget title drew the chip outside the panel. The display
+  // font's marker is three glyphs, which made the overshoot easy to reach.
+  while (cut.length > 0 && width(g, `${cut}${marker}`, o) > max) cut = cut.slice(0, -1)
+  return cut.length > 0 ? `${cut}${marker}` : ''
 }
 
 /**
