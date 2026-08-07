@@ -52,7 +52,12 @@ const importSchema = z.object({
       z.looseObject({
         gameId: z.string(),
         type: z.string(),
-        role: z.enum(['main', 'side']).optional(),
+        // `.catch`, not a hard failure: this is the sanctioned restore path for
+        // an entire event log (invariant #2), and refusing the round over a
+        // cosmetic tag a later build might spell differently would destroy far
+        // more than it protects. An unusable value degrades to absent, and
+        // `roleOf` derives it.
+        role: z.enum(['main', 'side']).optional().catch(undefined),
       }),
     ),
     courseSnapshot: z.looseObject({ holes: z.array(z.unknown()).min(1) }),

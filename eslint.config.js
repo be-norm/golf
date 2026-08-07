@@ -3,6 +3,32 @@ import tseslint from 'typescript-eslint'
 import reactHooks from 'eslint-plugin-react-hooks'
 import prettier from 'eslint-config-prettier'
 
+/**
+ * Invariant #1's denylist, hoisted because TWO config blocks need it.
+ *
+ * ESLint flat config REPLACES a rule's options when a later block redefines it
+ * — it does not merge them. A second block setting `no-restricted-imports` for
+ * a subset of these files therefore switches this list OFF for that subset,
+ * silently, with a green lint. That is exactly what happened when the registry
+ * ban below was first added as its own block: engine purity stopped being
+ * enforced for every game engine, and only a review caught it. Both blocks now
+ * spread this array.
+ */
+const ENGINE_PURITY_PATTERNS = [
+  {
+    group: ['react', 'react-*', 'motion', 'motion/*'],
+    message: 'engine must stay React/UI-free',
+  },
+  {
+    group: ['dexie', 'dexie-*', '@supabase/*'],
+    message: 'engine must stay persistence/network-free',
+  },
+  {
+    group: ['**/db/*', '**/features/*', '**/components/*', '**/pwa/*', '**/remote/*', '**/app/*'],
+    message: 'engine cannot import from app layers',
+  },
+]
+
 export default tseslint.config(
   // supabase/functions/** is Deno (its own runtime + globals), linted by the
   // Supabase/Deno toolchain, not by the Vite app's TS/React ESLint config.
@@ -25,25 +51,7 @@ export default tseslint.config(
     // that looks enforced and isn't. Nothing under src/** non-test imports it.
     ignores: ['src/engine/**/*.test.ts', 'src/engine/test/**'],
     rules: {
-      'no-restricted-imports': [
-        'error',
-        {
-          patterns: [
-            {
-              group: ['react', 'react-*', 'motion', 'motion/*'],
-              message: 'engine must stay React/UI-free',
-            },
-            {
-              group: ['dexie', 'dexie-*', '@supabase/*'],
-              message: 'engine must stay persistence/network-free',
-            },
-            {
-              group: ['**/db/*', '**/features/*', '**/components/*', '**/pwa/*', '**/remote/*', '**/app/*'],
-              message: 'engine cannot import from app layers',
-            },
-          ],
-        },
-      ],
+      'no-restricted-imports': ['error', { patterns: ENGINE_PURITY_PATTERNS }],
       'no-restricted-globals': [
         'error',
         { name: 'window', message: 'engine must stay DOM-free' },
@@ -65,12 +73,17 @@ export default tseslint.config(
     files: ['src/engine/games/**/*.ts'],
     ignores: ['src/engine/games/**/*.test.ts'],
     rules: {
+      // NOTE the spread: this block replaces invariant #1's options for these
+      // files, so it has to carry them.
       'no-restricted-imports': [
         'error',
         {
-          paths: [
+          patterns: [
+            ...ENGINE_PURITY_PATTERNS,
             {
-              name: '../../catalog',
+              // by PATTERN, not a single '../../catalog' literal: an engine one
+              // directory deeper would spell it '../../../catalog' and escape
+              group: ['**/catalog'],
               importNames: ['getEngine', 'listEngines'],
               message:
                 'an engine must not read the registry — taxonomy (meta.category/family/shapes) is presentation and must never reach a settlement (CLAUDE.md invariant #7)',

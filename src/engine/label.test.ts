@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest'
 import './games/index'
 import { registerEngine } from './catalog'
 import { skinsEngine } from './games/skins/engine'
-import { gameLabel } from './label'
+import { LABEL_PROBE_ENGINE_TYPE } from './test/harness'
+import { gameLabel, isPaintable } from './label'
 import type { GameConfig, HandicapSettings } from './core/types'
 
 const net: HandicapSettings = { mode: 'net', allowancePct: 100, reference: 'offLow' }
@@ -106,7 +107,7 @@ describe('gameLabel', () => {
     const a = skins('g1', net)
     const b = skins('g2', gross)
     for (const label of [gameLabel(a, [a, b]), gameLabel(b, [a, b])]) {
-      expect(label).toMatch(/^[\x20-\x7E]+$/)
+      expect(isPaintable(label)).toBe(true)
     }
   })
 
@@ -122,9 +123,9 @@ describe('gameLabel', () => {
   it('refuses an engine-authored label the pixel font cannot paint', () => {
     registerEngine({
       ...skinsEngine,
-      // named in TEST_ONLY_ENGINE_TYPES so catalog.test.ts's registry guards
-      // skip it by name rather than relying on vitest's per-file isolation
-      type: 'fancy',
+      // named in TEST_ONLY_ENGINE_TYPES so registry guards skip it by name
+      // rather than relying on vitest's per-file isolation
+      type: LABEL_PROBE_ENGINE_TYPE,
       configFields: [
         { key: 'stakeCents', kind: 'money', label: 'Stake' },
         // the shape of label this codebase actually writes (nassau ships one)
@@ -133,9 +134,9 @@ describe('gameLabel', () => {
     })
     const a: GameConfig = {
       gameId: 'g1',
-      // named in TEST_ONLY_ENGINE_TYPES so catalog.test.ts's registry guards
-      // skip it by name rather than relying on vitest's per-file isolation
-      type: 'fancy',
+      // named in TEST_ONLY_ENGINE_TYPES so registry guards skip it by name
+      // rather than relying on vitest's per-file isolation
+      type: LABEL_PROBE_ENGINE_TYPE,
       handicap: net,
       config: { stakeCents: 100, carryover: true },
     }
@@ -143,12 +144,39 @@ describe('gameLabel', () => {
     const labels = [gameLabel(a, [a, b]), gameLabel(b, [a, b])]
     // fell through to numbering rather than emitting the middle dot
     expect(labels).toEqual(['Skins (#1)', 'Skins (#2)'])
-    for (const label of labels) expect(label).toMatch(/^[\x20-\x7E]+$/)
+    for (const label of labels) expect(isPaintable(label)).toBe(true)
   })
 
   it('falls back to the raw type for an engine that is not registered', () => {
     const orphan: GameConfig = { gameId: 'g1', type: 'notAGame', handicap: net, config: {} }
     // an imported round naming a game this build doesn't ship
     expect(gameLabel(orphan, [orphan])).toBe('notAGame')
+  })
+
+  /**
+   * The unregistered-type fallback is the one path around the paintability
+   * choke point: `exportRound` validates `type` as any string, so an imported
+   * card can put arbitrary text straight into the painted title.
+   */
+  it('sanitises an unregistered type the pixel font cannot paint', () => {
+    const jp: GameConfig = { gameId: 'g1', type: 'スキンズ', handicap: net, config: {} }
+    expect(gameLabel(jp, [jp])).toBe('Game')
+
+    const mixed: GameConfig = { gameId: 'g1', type: 'Skins — net', handicap: net, config: {} }
+    const label = gameLabel(mixed, [mixed])
+    expect(isPaintable(label)).toBe(true)
+    expect(label).toBe('Skins  net')
+  })
+
+  /**
+   * Allowance is the LAST named tier rather than never: two of the four
+   * surfaces that render a label show no allowance beside it, so refusing it
+   * outright left those games as a meaningless "#1"/"#2".
+   */
+  it('names an allowance difference when nothing else separates them', () => {
+    const full = skins('g1', net)
+    const ninety = skins('g2', { ...net, allowancePct: 90 })
+    expect(gameLabel(full, [full, ninety])).toBe('Skins (100%)')
+    expect(gameLabel(ninety, [full, ninety])).toBe('Skins (90%)')
   })
 })

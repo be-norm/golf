@@ -10,6 +10,7 @@ import {
 } from './catalog'
 import { EventLog, makePlayers, makeRound, TEST_ONLY_ENGINE_TYPES } from './test/harness'
 import type { GameConfig } from './core/types'
+import { isPaintable } from './label'
 
 // `satisfies` alone only checks each element is a MEMBER — it does not check
 // the list is complete, which an earlier comment here claimed and tsc quietly
@@ -63,8 +64,20 @@ describe('engine registry invariants', () => {
    */
   it('every game name can be painted in the pixel font', () => {
     for (const engine of shippedEngines()) {
-      expect(engine.meta.name, `${engine.type} name`).toMatch(/^[\x20-\x7E]+$/)
+      expect(isPaintable(engine.meta.name), `${engine.type} name`).toBe(true)
     }
+  })
+
+  /**
+   * `gameLabel` disambiguates games sharing a TYPE. Two engines sharing a NAME
+   * would defeat it entirely — each sees one sibling, so both render the bare
+   * name and every surface shows two identical rows, which is the failure MAI-42
+   * exists to remove. The catalog has 26 more games to come and several have
+   * overlapping common names (Best Ball / Four-Ball, Match Play / Matches).
+   */
+  it('no two games share a name', () => {
+    const names = shippedEngines().map((e) => e.meta.name)
+    expect(new Set(names).size, `duplicate game name in ${names.join(', ')}`).toBe(names.length)
   })
 
   it('every game ships complete player-facing rules', () => {
@@ -145,6 +158,24 @@ describe('roleOf', () => {
     // beside a game that can only be the main event, it is the side bet
     expect(roleOf(skins, [skins, nassau])).toBe('side')
     expect(roleOf(nassau, [skins, nassau])).toBe('main')
+  })
+
+  /**
+   * A sibling's EXPLICIT role has to count when deriving another game's. Reading
+   * only `meta.category` meant a user demoting their Nassau to a side bet left
+   * the round with two side bets and no main event — and MAI-44 is precisely
+   * the feature that starts writing explicit roles.
+   */
+  it('respects a sibling\'s explicit role, not just its category', () => {
+    const skins = game('g1', 'skins')
+    const nassau = { ...game('g2', 'nassau'), role: 'side' as const }
+    // nobody claims the main event any more, so the "either" game takes it
+    expect(roleOf(skins, [skins, nassau])).toBe('main')
+
+    // and the mirror: one of two "either" games promoted makes the other the side bet
+    const a = { ...game('g1', 'skins'), role: 'main' as const }
+    const b = game('g2', 'skins')
+    expect(roleOf(b, [a, b])).toBe('side')
   })
 
   it('takes an explicit choice over any default', () => {

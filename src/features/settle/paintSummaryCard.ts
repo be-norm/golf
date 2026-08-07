@@ -308,22 +308,17 @@ function gameBlock(g: Ctx, game: SummaryCard['games'][number]): Block {
       // is no longer ours to assume. Room reserved on the right for the
       // allowance chip, which is positioned off the title's measured width —
       // an unbounded title pushed that chip off the panel entirely.
-      const title = ellipsize(
-        g,
-        game.name.toUpperCase(),
-        // room for the allowance chip is reserved only when one is drawn — it is
-        // absent on every gross game and every 100% net game, i.e. most panels
-        INNER - 28 - (game.allowance ? 56 : 0),
-        titleOpts,
-        '...',
-      )
+      const chipOpts: TextOpts = { size: 11, display: true, color: C.faint }
+      // MEASURED, like every other reservation in this painter — a guessed 56px
+      // is ~4 glyphs at this size, and `allowancePct` is a plain number, so an
+      // 87.5% allowance renders 5 and runs past the panel edge. Reserved only
+      // when a chip is actually drawn: it is absent on every gross game and
+      // every 100% net game, i.e. most panels.
+      const chipRoom = game.allowance ? width(g, game.allowance, chipOpts) + 8 : 0
+      const title = ellipsize(g, game.name.toUpperCase(), INNER - 28 - chipRoom, titleOpts, '...')
       text(g, title, PAD + 14, y + 24, titleOpts)
       if (game.allowance) {
-        text(g, game.allowance, PAD + 22 + width(g, title, titleOpts), y + 24, {
-          size: 11,
-          display: true,
-          color: C.faint,
-        })
+        text(g, game.allowance, PAD + 22 + width(g, title, titleOpts), y + 24, chipOpts)
       }
       let cursor = y + 40
       if (wrapped.length === 0) {

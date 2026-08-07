@@ -25,7 +25,12 @@ import type { GameConfig } from './core/types'
  */
 export function gameLabel(game: GameConfig, allGames: readonly GameConfig[]): string {
   const engine = getEngine(game.type)
-  const name = engine?.meta.name ?? game.type
+  // A REGISTERED engine's name is guaranteed paintable by catalog.test.ts. The
+  // fallback is not: an imported round validates `type` as any string
+  // (exportRound.ts), so a card naming a game this build doesn't ship could put
+  // arbitrary text — 'スキンズ' — straight into the painted title. Sanitised, so
+  // the one path around the choke point below is closed too.
+  const name = engine?.meta.name ?? paintableOrPlaceholder(game.type)
   const siblings = allGames.filter((g) => g.type === game.type)
   if (siblings.length < 2) return name
   const tag = discriminator(game, siblings, engine)
@@ -66,7 +71,8 @@ function discriminator(
 
   for (const field of engine?.configFields ?? []) {
     const valueOf = (g: GameConfig) => (g.config as Record<string, unknown>)[field.key]
-    // Distinctness is checked on the RENDERED phrase, not the raw value: two
+    // Rendered ONCE per sibling and reused for both checks and the answer.
+    // Distinctness is judged on the RENDERED phrase, not the raw value: two
     // select options can carry the same display label, and separating on the
     // values behind them would commit to a field that shows both games the same
     // word — the duplicate this whole function exists to prevent.
@@ -76,12 +82,20 @@ function discriminator(
     // missing the key, a select value not in `options`) would otherwise commit
     // the field and leave that game falling through to "#1" beside a sibling
     // named "$5" — two rows named on different axes, with a #1 and no #2.
-    if (phrases.some((p) => p === undefined) || !separates((g) => renderFieldValue(field, valueOf(g)))) {
-      continue
-    }
-    const rendered = renderFieldValue(field, valueOf(game))
-    if (rendered !== undefined) return rendered
+    if (phrases.some((p) => p === undefined)) continue
+    if (new Set(phrases).size !== siblings.length) continue
+    const mine = phrases[siblings.findIndex((g) => g.gameId === game.gameId)]
+    if (mine !== undefined) return mine
   }
+
+  // Allowance LAST, not never. It is skipped above the config tier because the
+  // standings heading and the share-card panel render it beside this label, so
+  // preferring it would print "Skins (90%) 90%". But two of the four surfaces
+  // that show a label — the scorecard's chips and the actions sheet — render no
+  // allowance at all, so refusing it outright leaves two net games at 100% and
+  // 90% as "#1" and "#2": meaningless everywhere, rather than redundant in two
+  // places and useful in two.
+  if (separates((g) => g.handicap.allowancePct)) return `${game.handicap.allowancePct}%`
 
   // Alike in every way we can name. Still label them, because two rows reading
   // exactly "Skins" is worse than "Skins (#1)" and "Skins (#2)" — the player at
@@ -109,8 +123,20 @@ function renderFieldValue(field: ConfigFieldSpec, value: unknown): string | unde
   return phrase !== undefined && isPaintable(phrase) ? phrase : undefined
 }
 
-/** Printable ASCII only — the range Press Start 2P is known to cover. */
-const isPaintable = (s: string) => /^[\x20-\x7E]+$/.test(s)
+/**
+ * Printable ASCII only — the range Press Start 2P is known to cover. Exported
+ * so the tests that claim to verify this rule check the SAME predicate the
+ * painter's input is filtered by, instead of three copies of a regex that can
+ * drift apart the day the font's coverage is revised.
+ */
+export const isPaintable = (s: string) => /^[\x20-\x7E]+$/.test(s)
+
+/** Strip what the pixel font cannot draw; 'Game' if nothing survives. */
+function paintableOrPlaceholder(raw: string): string {
+  if (isPaintable(raw)) return raw
+  const stripped = [...raw].filter((c) => isPaintable(c)).join('').trim()
+  return stripped.length > 0 ? stripped : 'Game'
+}
 
 function fieldPhrase(field: ConfigFieldSpec, value: unknown): string | undefined {
   switch (field.kind) {

@@ -149,8 +149,9 @@ export type ConfigFieldSpec =
 export type GameCategory = 'main' | 'side' | 'either'
 
 /**
- * THE role of a game in a round — every display rule reads it through here, so
- * the default cannot be implemented once and forgotten elsewhere.
+ * THE role of a game in a round. Every display rule is to read it through
+ * here rather than re-deriving the default — MAI-44's picker and density rules
+ * are the first consumers; today only its tests call it.
  *
  * It takes the whole round because 'either' CANNOT be answered from the engine
  * alone. Skins beside a Nassau is the side bet; Skins on its own is the main
@@ -174,11 +175,18 @@ export function roleOf(game: GameConfig, allGames: readonly GameConfig[]): 'main
 
   const category = getEngine(game.type)?.meta.category ?? 'main'
   if (category !== 'either') return category
-  // an "either" game is the side bet when something else is unambiguously the
-  // main event, and the main event when nothing else claims it
-  const hasMainGame = allGames.some(
-    (g) => g.gameId !== game.gameId && getEngine(g.type)?.meta.category === 'main',
-  )
+  // An "either" game is the side bet when something else claims the main event,
+  // and the main event when nothing does. "Claims" reads a sibling's EXPLICIT
+  // role first: a user who demotes their Nassau to a side bet has said this
+  // round has no main game, and ignoring that would leave the round with two
+  // side bets and no main event — while a user promoting one of two Skins has
+  // said the other is the side bet. Non-recursive by construction: a sibling
+  // without an explicit role answers from its category alone.
+  const claimsMain = (g: GameConfig) =>
+    g.role === 'main' || g.role === 'side'
+      ? g.role === 'main'
+      : getEngine(g.type)?.meta.category === 'main'
+  const hasMainGame = allGames.some((g) => g.gameId !== game.gameId && claimsMain(g))
   return hasMainGame ? 'side' : 'main'
 }
 

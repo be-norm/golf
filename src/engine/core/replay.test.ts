@@ -3,7 +3,8 @@ import fc from 'fast-check'
 import '../games/index'
 import { deriveRound, getEngine, listEngines } from '../catalog'
 import { EventLog, makePlayers, makeRound } from '../test/harness'
-import { arbitraryRoundAndEvents, GAME_FUZZ, GUARD_ENGINE_TYPE } from '../test/arbitraries'
+import { arbitraryRoundAndEvents, GAME_FUZZ } from '../test/arbitraries'
+import { TEST_ONLY_ENGINE_TYPES } from '../test/harness'
 import { assertZeroSum, minimalTransfers } from './money'
 import type { RoundEvent } from './events'
 import { effectiveEvents } from './replay'
@@ -55,11 +56,11 @@ describe('replay invariants (fast-check)', () => {
    * in `GAME_FUZZ` (src/engine/test/arbitraries.ts), and the failure says so.
    */
   it('every registered engine contributes an arbitrary', () => {
-    // the guard file's deliberately broken engine is excluded BY NAME rather
-    // than by trusting vitest to isolate modules per file — see GUARD_ENGINE_TYPE
+    // engines registered by sibling test FILES are excluded by name rather than
+    // by trusting vitest to isolate modules — see TEST_ONLY_ENGINE_TYPES
     const registered = listEngines()
       .map((e) => e.type)
-      .filter((t) => t !== GUARD_ENGINE_TYPE)
+      .filter((t) => !TEST_ONLY_ENGINE_TYPES.includes(t))
     expect(new Set(GAME_FUZZ.map((g) => g.type))).toEqual(new Set(registered))
   })
 
@@ -95,7 +96,9 @@ describe('replay invariants (fast-check)', () => {
         .sample(arbitraryRoundAndEvents(), { numRuns: 200 })
         .flatMap(({ round }) => round.games.map((g) => g.type)),
     )
-    expect(seen).toEqual(new Set(listEngines().map((e) => e.type)))
+    expect(seen).toEqual(
+      new Set(listEngines().map((e) => e.type).filter((t) => !TEST_ONLY_ENGINE_TYPES.includes(t))),
+    )
   })
 
   /**

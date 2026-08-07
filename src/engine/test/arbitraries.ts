@@ -142,14 +142,10 @@ export const GAME_FUZZ: readonly GameFuzz[] = [
   wolfFuzz,
 ]
 
-/**
- * The engine type `replay.guard.test.ts` registers to prove the suite catches a
- * non-zero-sum settlement. Named here, and excluded by name from the
- * every-engine-has-an-arbitrary check, so that check does not depend on vitest
- * isolating modules per file — a `pool`/`isolate` change in vitest.config.ts
- * would otherwise fail the wrong test in the wrong file.
- */
-export const GUARD_ENGINE_TYPE = 'broken'
+// Re-exported from harness, which owns the one list of test-registered engine
+// types. Two literals spelling the same name is how a rename leaves the guards
+// asserting against an engine nothing registers.
+export { GUARD_ENGINE_TYPE } from './harness'
 
 const PLAYER_NAMES = ['A', 'B', 'C', 'D'] as const
 
