@@ -45,21 +45,30 @@ const importSchema = z.object({
   round: z.looseObject({
     id: z.string().min(1),
     players: z.array(z.looseObject({ playerId: z.string() })).min(1),
-    games: z.array(
-      // `role` is validated even though the rest stays loose: it is read back
-      // as a two-value union, so an imported 'sausage' would be handed to
-      // display rules typed as something it isn't (catalog.ts roleOf).
-      z.looseObject({
-        gameId: z.string(),
-        type: z.string(),
-        // `.catch`, not a hard failure: this is the sanctioned restore path for
-        // an entire event log (invariant #2), and refusing the round over a
-        // cosmetic tag a later build might spell differently would destroy far
-        // more than it protects. An unusable value degrades to absent, and
-        // `roleOf` derives it.
-        role: z.enum(['main', 'side']).optional().catch(undefined),
+    games: z
+      .array(
+        // `role` is validated even though the rest stays loose: it is read back
+        // as a two-value union, so an imported 'sausage' would be handed to
+        // display rules typed as something it isn't (catalog.ts roleOf).
+        z.looseObject({
+          gameId: z.string(),
+          type: z.string(),
+          // `.catch`, not a hard failure: this is the sanctioned restore path
+          // for an entire event log (invariant #2), and refusing the round over
+          // a cosmetic tag a later build might spell differently would destroy
+          // far more than it protects. An unusable value degrades to absent,
+          // and `roleOf` derives it.
+          role: z.enum(['main', 'side']).optional().catch(undefined),
+        }),
+      )
+      // gameId is the key `deriveRound` files derivations under, so a duplicate
+      // collapses two games into one Map entry: the settle screen then sums ONE
+      // settlement and under-reports what everybody is owed, while the round
+      // renders the same panel twice. Structurally impossible, so refused —
+      // same treatment as the duplicate-`seq` check below.
+      .refine((games) => new Set(games.map((g) => g.gameId)).size === games.length, {
+        message: 'duplicate gameId',
       }),
-    ),
     courseSnapshot: z.looseObject({ holes: z.array(z.unknown()).min(1) }),
   }),
   events: z.array(z.unknown()),

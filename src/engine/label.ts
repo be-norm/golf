@@ -51,10 +51,14 @@ export function gameLabel(game: GameConfig, allGames: readonly GameConfig[]): st
  * `configFields` rather than named per game, so this keeps working for the two
  * dozen games still to land without any of them touching it.
  *
- * Handicap ALLOWANCE is deliberately not a candidate. Both surfaces that show
- * this label already render allowance as its own element beside it (the
- * standings heading, and `GamePanel.allowance` on the share card), so using it
- * here prints "Skins (90%) 90%".
+ * Handicap ALLOWANCE is the LAST candidate rather than an early one, and that
+ * is a trade rather than a clean win. Two of the four surfaces showing this
+ * label render allowance beside it (the standings heading, `GamePanel.allowance`
+ * on the share card) and will read "Skins (90%) 90%"; the other two (scorecard
+ * chips, actions sheet) show no allowance at all. Preferring it would make the
+ * redundancy the common case; refusing it outright left two net games at 100%
+ * and 90% as "#1" and "#2" — meaningless on all four. Last place means the
+ * redundancy only appears when the alternative is telling the player nothing.
  */
 function discriminator(
   game: GameConfig,
@@ -66,8 +70,14 @@ function discriminator(
     new Set(siblings.map(of)).size === siblings.length
 
   // net vs gross is the request that started this, and the difference a golfer
-  // is most likely to be holding in their head
-  if (separates((g) => g.handicap.mode)) return game.handicap.mode
+  // is most likely to be holding in their head.
+  //
+  // Read defensively: `importSchema` validates a game's `gameId`, `type` and
+  // `role` and lets everything else through (z.looseObject), so `handicap` may
+  // be absent entirely — an unguarded `g.handicap.mode` throws inside a render,
+  // taking the scoring screen down rather than degrading to a duller label.
+  const modeOf = (g: GameConfig) => (g.handicap?.mode === 'net' ? 'net' : 'gross')
+  if (separates(modeOf)) return modeOf(game)
 
   for (const field of engine?.configFields ?? []) {
     const valueOf = (g: GameConfig) => (g.config as Record<string, unknown>)[field.key]
@@ -124,17 +134,35 @@ function renderFieldValue(field: ConfigFieldSpec, value: unknown): string | unde
 }
 
 /**
- * Printable ASCII only — the range Press Start 2P is known to cover. Exported
- * so the tests that claim to verify this rule check the SAME predicate the
- * painter's input is filtered by, instead of three copies of a regex that can
- * drift apart the day the font's coverage is revised.
+ * A LABEL PORTABILITY RULE, not a font lookup table: printable ASCII, so any
+ * renderer can draw a game label — including one that cannot fall back.
+ *
+ * Deliberately phrased as the engine's own constraint rather than "what Press
+ * Start 2P covers", because the engine must not encode what a specific painter
+ * three layers up can draw (`summaryCard.ts` lives in features for exactly that
+ * reason). The motivating case is real — the hand-painted share card uses a
+ * pixel font with sparse coverage, and a missing glyph falls back per-glyph to
+ * the system face mid-title, where jsdom cannot test it — but the rule earns
+ * its place as "labels are plain text", which stays true if that font changes.
+ *
+ * It lives here rather than beside the painter because it has to fire where the
+ * string is BUILT: sanitising at paint time would give the card a different
+ * label from the screen, which is the divergence one-formatter rules exist to
+ * stop. Exported so the tests verifying the rule check the same predicate the
+ * label is filtered by, not a third copy of the regex.
  */
 export const isPaintable = (s: string) => /^[\x20-\x7E]+$/.test(s)
 
 /** Strip what the pixel font cannot draw; 'Game' if nothing survives. */
 function paintableOrPlaceholder(raw: string): string {
   if (isPaintable(raw)) return raw
-  const stripped = [...raw].filter((c) => isPaintable(c)).join('').trim()
+  // collapse the gaps the strip leaves: 'Skins — net' → 'Skins net', not
+  // 'Skins  net', whose double space `wrapText` splits into an empty token
+  const stripped = [...raw]
+    .map((c) => (isPaintable(c) ? c : ' '))
+    .join('')
+    .replace(/\s+/g, ' ')
+    .trim()
   return stripped.length > 0 ? stripped : 'Game'
 }
 
@@ -143,8 +171,13 @@ function fieldPhrase(field: ConfigFieldSpec, value: unknown): string | undefined
     case 'money':
       return typeof value === 'number' ? formatCents(value) : undefined
     case 'boolean':
-      // the field's own label carries the meaning: "Carryovers" / "no carryovers"
-      return value === true ? field.label.toLowerCase() : `no ${field.label.toLowerCase()}`
+      // Only for an ACTUAL boolean. Treating anything else as `false` would
+      // turn a legacy config missing the key into a confident "no carryovers" —
+      // a factual claim about somebody's bet derived from an absent value, and
+      // a silent breach of the "every sibling must GET a phrase" rule above.
+      // The field's own label carries the meaning: "Carryovers"/"no carryovers".
+      if (typeof value !== 'boolean') return undefined
+      return value ? field.label.toLowerCase() : `no ${field.label.toLowerCase()}`
     case 'select':
       return field.options.find((o) => o.value === value)?.label
     // teams and rotation are player assignments — no short phrase names them,

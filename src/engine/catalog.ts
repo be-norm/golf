@@ -196,10 +196,10 @@ export function roleOf(game: GameConfig, allGames: readonly GameConfig[]): 'main
  * One axis, chosen deliberately over the two alternatives (MAI-43):
  *
  * - "Who plays whom" (solo/teams/partners) reads better in a picker, but it
- *   CANNOT live on `meta`: Nassau is 1v1 or 2v2 by config, and so are Best Ball
- *   and Skins. An axis that can't file the three most-played games without
- *   reading their config isn't a property of the engine. It survives as
- *   `shapes` below, as a SET rather than a single value.
+ *   CANNOT live on `meta`: Nassau is 1v1 or 2v2 by its `teams` config, and Best
+ *   Ball will be the same. An axis that can't file the most-played game in the
+ *   catalog without reading its config isn't a property of the engine. It
+ *   survives as `shapes` below, as a SET rather than a single value.
  * - "How scores are entered" (strokes / team gross / extra inputs) is what
  *   docs/games-catalog.md tags games with and it predicts build cost well, but
  *   it barely divides them: against 3 team-gross formats and 9 with extra

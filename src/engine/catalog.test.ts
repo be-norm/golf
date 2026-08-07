@@ -136,7 +136,11 @@ describe('engine registry invariants', () => {
         ).toBe(true)
       }
       if (shapes.includes('headToHead')) {
-        expect(minPlayers, `${engine.type} head-to-head needs 2`).toBeLessThanOrEqual(2)
+        // a RANGE, both ends: 2 has to be inside it. `minPlayers <= 2` alone is
+        // satisfied by a game accepting 1, which cannot play one-against-one
+        // either — the message said "needs 2" while checking only one bound.
+        expect(minPlayers, `${engine.type} head-to-head needs to accept 2`).toBeLessThanOrEqual(2)
+        expect(maxPlayers, `${engine.type} head-to-head needs to accept 2`).toBeGreaterThanOrEqual(2)
       }
     }
   })

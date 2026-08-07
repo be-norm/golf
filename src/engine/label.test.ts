@@ -165,7 +165,9 @@ describe('gameLabel', () => {
     const mixed: GameConfig = { gameId: 'g1', type: 'Skins — net', handicap: net, config: {} }
     const label = gameLabel(mixed, [mixed])
     expect(isPaintable(label)).toBe(true)
-    expect(label).toBe('Skins  net')
+    // whitespace collapsed, not doubled: `wrapText` splits a double space
+    // into an empty token
+    expect(label).toBe('Skins net')
   })
 
   /**

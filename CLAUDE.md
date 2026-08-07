@@ -48,8 +48,10 @@ Full plan/architecture history: see `docs/` and the games catalog in `docs/games
    **`deriveRound` reads none of them, and both halves are enforced.** `role` by test —
    `catalog.test.ts` derives every registered engine three ways and the same card must settle
    identically whether its games are labelled main, side, or nothing at all. The three `meta`
-   fields by ESLint: an engine can only reach its own meta through the registry, so
-   `getEngine`/`listEngines` are banned inside `src/engine/games/**`.
+   fields by ESLint: `getEngine`/`listEngines` are banned inside `src/engine/games/**`, and
+   so is importing another engine (or the games barrel) — the registry is not the only door
+   to a singleton's meta, and that second ban is what makes "engines never read each other"
+   enforced rather than merely stated. `games/index.ts` is exempt; registering is its job.
    **`role` is DERIVED, not stamped** (`roleOf`, catalog.ts), and it takes the whole round
    because 'either' cannot be answered from the engine alone — Skins beside a Nassau is the
    side bet, Skins alone is the main event. Setup writes nothing; only an explicit user choice

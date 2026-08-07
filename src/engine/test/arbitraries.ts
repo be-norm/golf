@@ -142,11 +142,6 @@ export const GAME_FUZZ: readonly GameFuzz[] = [
   wolfFuzz,
 ]
 
-// Re-exported from harness, which owns the one list of test-registered engine
-// types. Two literals spelling the same name is how a rename leaves the guards
-// asserting against an engine nothing registers.
-export { GUARD_ENGINE_TYPE } from './harness'
-
 const PLAYER_NAMES = ['A', 'B', 'C', 'D'] as const
 
 /**

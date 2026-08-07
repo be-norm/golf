@@ -71,7 +71,8 @@ export default tseslint.config(
     // reach its own meta through the registry, and none does — so banning the
     // registry inside game engines turns "we reviewed it" into a build error.
     files: ['src/engine/games/**/*.ts'],
-    ignores: ['src/engine/games/**/*.test.ts'],
+    // index.ts IS the registration barrel — importing every engine is its job
+    ignores: ['src/engine/games/**/*.test.ts', 'src/engine/games/index.ts'],
     rules: {
       // NOTE the spread: this block replaces invariant #1's options for these
       // files, so it has to carry them.
@@ -87,6 +88,15 @@ export default tseslint.config(
               importNames: ['getEngine', 'listEngines'],
               message:
                 'an engine must not read the registry — taxonomy (meta.category/family/shapes) is presentation and must never reach a settlement (CLAUDE.md invariant #7)',
+            },
+            {
+              // The registry is not the only door. An engine reaching another
+              // engine's singleton directly reads its meta just as well, and
+              // gets cross-derivation besides — so "engines NEVER read each
+              // other" needs its own ban, or the claim is only about one route.
+              group: ['../*/engine', '../index', '../../games', '../../games/*', '../../games/*/*'],
+              message:
+                'engines never read each other — a game is a pure function of (config, its own events, RoundContext); overlays contribute to RoundContext instead (CLAUDE.md invariant #7)',
             },
           ],
         },

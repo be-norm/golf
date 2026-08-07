@@ -4,7 +4,8 @@ import { z } from 'zod'
 import '../games/index'
 import { deriveRound, registerEngine, type GameEngine } from '../catalog'
 import { addLine, assertZeroSum, emptySettlement } from './money'
-import { arbitraryRoundAndEvents, GUARD_ENGINE_TYPE, type GameFuzz } from '../test/arbitraries'
+import { arbitraryRoundAndEvents, type GameFuzz } from '../test/arbitraries'
+import { GUARD_ENGINE_TYPE } from '../test/harness'
 
 /**
  * Is the alarm wired to anything?
