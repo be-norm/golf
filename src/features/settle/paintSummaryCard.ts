@@ -308,7 +308,15 @@ function gameBlock(g: Ctx, game: SummaryCard['games'][number]): Block {
       // is no longer ours to assume. Room reserved on the right for the
       // allowance chip, which is positioned off the title's measured width —
       // an unbounded title pushed that chip off the panel entirely.
-      const title = ellipsize(g, game.name.toUpperCase(), INNER - 28 - 56, titleOpts, '...')
+      const title = ellipsize(
+        g,
+        game.name.toUpperCase(),
+        // room for the allowance chip is reserved only when one is drawn — it is
+        // absent on every gross game and every 100% net game, i.e. most panels
+        INNER - 28 - (game.allowance ? 56 : 0),
+        titleOpts,
+        '...',
+      )
       text(g, title, PAD + 14, y + 24, titleOpts)
       if (game.allowance) {
         text(g, game.allowance, PAD + 22 + width(g, title, titleOpts), y + 24, {
@@ -456,7 +464,12 @@ function footerBlock(card: SummaryCard): Block {
     height,
     draw(g, y) {
       if (card.strokeNote) {
-        text(g, card.strokeNote, W / 2, y + 10, { size: 16, color: C.ghost, align: 'center' })
+        // BOUNDED for the same reason the panel title is: this string now ends
+        // in `gameLabel`, so its tail is assembled from engine-authored config
+        // labels rather than being copy we control. Centered text that outgrows
+        // the canvas is clipped at BOTH edges on the image people share.
+        const noteOpts: TextOpts = { size: 16, color: C.ghost, align: 'center' }
+        text(g, ellipsize(g, card.strokeNote, INNER, noteOpts), W / 2, y + 10, noteOpts)
       }
       text(g, 'golf.mainspring.fyi', W / 2, y + noteH + 10, {
         size: 9,

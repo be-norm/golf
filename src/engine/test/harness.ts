@@ -11,6 +11,14 @@ import type {
 
 /** Deterministic test-only builders — no clocks, no randomness. */
 
+/**
+ * Engine types that tests register into the module-global registry (there is no
+ * `unregisterEngine`). Registry-iterating guards in `catalog.test.ts` skip
+ * these BY NAME, so those guards do not silently depend on vitest isolating
+ * modules per file — which is a config default, not a guarantee.
+ */
+export const TEST_ONLY_ENGINE_TYPES: readonly string[] = ['broken', 'fancy']
+
 const FIXED_AT = '2026-07-18T12:00:00.000Z'
 
 export function makeCourse(pars: number[], strokeIndexes: number[]): Course {

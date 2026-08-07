@@ -56,6 +56,31 @@ export default tseslint.config(
     },
   },
   {
+    // MAI-43, invariant #7: taxonomy is presentation, and an engine must not
+    // settle money by it. `role` is guarded by a test (catalog.test.ts derives
+    // every engine three ways), but `meta.category`/`family`/`shapes` live on
+    // the engine singleton, so no fixture can vary them. An engine can only
+    // reach its own meta through the registry, and none does — so banning the
+    // registry inside game engines turns "we reviewed it" into a build error.
+    files: ['src/engine/games/**/*.ts'],
+    ignores: ['src/engine/games/**/*.test.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            {
+              name: '../../catalog',
+              importNames: ['getEngine', 'listEngines'],
+              message:
+                'an engine must not read the registry — taxonomy (meta.category/family/shapes) is presentation and must never reach a settlement (CLAUDE.md invariant #7)',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
     // MAI-76: saved-course membership has ONE write path. CourseRepo pairs
     // every `saved_courses` write with its outbox push in a single transaction;
     // reaching for db.saved_courses directly is exactly how the feature

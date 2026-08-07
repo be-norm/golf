@@ -45,12 +45,16 @@ Full plan/architecture history: see `docs/` and the games catalog in `docs/games
    bet the next, and only the round knows); `meta.family` groups the picker by how the bet is
    decided, with `meta.shapes` as the set of social shapes a game supports — a SET because
    Nassau is 1v1 or 2v2 by config, which is exactly why that can't be `family`'s axis.
-   **`deriveRound` reads none of them.** For `role` that is PROVEN — `catalog.test.ts` derives
-   every registered engine three ways and the same card must settle identically whether its
-   games are labelled main, side, or nothing at all. For the three `meta` fields it is a rule,
-   not a proof: they live on the engine singleton, so no fixture can vary them, and only review
-   keeps them out of `derive`. Missing `role` means 'main' (`roleOf`, catalog.ts) — rounds
-   predate it.
+   **`deriveRound` reads none of them, and both halves are enforced.** `role` by test —
+   `catalog.test.ts` derives every registered engine three ways and the same card must settle
+   identically whether its games are labelled main, side, or nothing at all. The three `meta`
+   fields by ESLint: an engine can only reach its own meta through the registry, so
+   `getEngine`/`listEngines` are banned inside `src/engine/games/**`.
+   **`role` is DERIVED, not stamped** (`roleOf`, catalog.ts), and it takes the whole round
+   because 'either' cannot be answered from the engine alone — Skins beside a Nassau is the
+   side bet, Skins alone is the main event. Setup writes nothing; only an explicit user choice
+   is stored, so a round holding no `role` can be re-read by a better rule instead of being
+   permanently wrong in a synced archive.
    **The one-way rule:** an engine is a pure function of `(config, its own events,
    RoundContext)` and engines NEVER read each other. That purity is why the app layer has zero
    per-game branching, and why a game can be added without touching a screen. The escape hatch

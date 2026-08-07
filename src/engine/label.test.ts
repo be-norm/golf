@@ -122,15 +122,19 @@ describe('gameLabel', () => {
   it('refuses an engine-authored label the pixel font cannot paint', () => {
     registerEngine({
       ...skinsEngine,
+      // named in TEST_ONLY_ENGINE_TYPES so catalog.test.ts's registry guards
+      // skip it by name rather than relying on vitest's per-file isolation
       type: 'fancy',
       configFields: [
         { key: 'stakeCents', kind: 'money', label: 'Stake' },
-        // the shape of label this codebase actually writes
+        // the shape of label this codebase actually writes (nassau ships one)
         { key: 'carryover', kind: 'boolean', label: 'Carryovers · rollover' },
       ],
     })
     const a: GameConfig = {
       gameId: 'g1',
+      // named in TEST_ONLY_ENGINE_TYPES so catalog.test.ts's registry guards
+      // skip it by name rather than relying on vitest's per-file isolation
       type: 'fancy',
       handicap: net,
       config: { stakeCents: 100, carryover: true },

@@ -119,12 +119,12 @@ describe('SetupScreen — 9-hole courses', () => {
   })
 
   /**
-   * `role` is stamped at tee-off and never re-derived, so it is baked into every
-   * round archive from here on — including synced ones. Nothing reads it until
-   * the picker ships (MAI-44), which is exactly why the default is worth
-   * pinning now: a wrong default is invisible until it is already permanent.
+   * Setup writes NO `role`. Whether an "either" game is this round's main event
+   * or its side bet depends on what else is in the round, so a per-game guess
+   * frozen here would be permanently wrong in a synced archive — `roleOf`
+   * derives it instead (see catalog.test.ts for the rule itself).
    */
-  it('stamps every game with the role its category defaults to', async () => {
+  it('leaves role unstamped, for roleOf to derive', async () => {
     await pickPenmar()
     await cont()
     await addPlayer('Bogey', 16.5)
@@ -136,10 +136,8 @@ describe('SetupScreen — 9-hole courses', () => {
 
     await waitFor(async () => expect(await db.rounds.count()).toBe(1))
     const round = (await db.rounds.toArray())[0]!
-    // skins is category 'either' — main until a picker offers the choice
-    expect(round.games.map((g) => ({ type: g.type, role: g.role }))).toEqual([
-      { type: 'skins', role: 'main' },
-    ])
+    expect(round.games).toHaveLength(1)
+    expect(round.games[0]!.role).toBeUndefined()
   })
 
   it('resets the hole range when switching from a nine to an eighteen', async () => {

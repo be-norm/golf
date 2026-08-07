@@ -149,23 +149,37 @@ export type ConfigFieldSpec =
 export type GameCategory = 'main' | 'side' | 'either'
 
 /**
- * The role a game takes when nothing has said otherwise — 'either' games start
- * as the main event, because that is what they were before side bets existed.
+ * THE role of a game in a round — every display rule reads it through here, so
+ * the default cannot be implemented once and forgotten elsewhere.
+ *
+ * It takes the whole round because 'either' CANNOT be answered from the engine
+ * alone. Skins beside a Nassau is the side bet; Skins on its own is the main
+ * event — the same engine, the same config, a different answer, which is
+ * precisely what invariant #7 means by "only the round knows". A per-game
+ * default blind to that would call both games in a Skins+Nassau round the main
+ * event.
+ *
+ * Which is also why setup does not STAMP this. `role` is presentation-only, so
+ * a round that stores nothing can be re-read by a better rule later; a round
+ * that stored a guess is wrong permanently, in an archive that syncs. Only an
+ * explicit user choice gets written (MAI-44), and only that short-circuits here.
  */
-export function defaultRole(category: GameCategory): 'main' | 'side' {
-  return category === 'side' ? 'side' : 'main'
-}
+export function roleOf(game: GameConfig, allGames: readonly GameConfig[]): 'main' | 'side' {
+  // An explicit choice wins — but only if it is one of the two things it can
+  // be. `role` arrives from imported JSON that validates games loosely
+  // (exportRound.ts), so an unvalidated value would be handed back typed as the
+  // union while being neither, and the first `=== 'side'` check would silently
+  // treat it as a main event.
+  if (game.role === 'main' || game.role === 'side') return game.role
 
-/**
- * THE role of a game in a round. Both callers that need it — setup, which
- * stamps it, and every display rule that reads it — go through here, so the
- * "absent means main" default cannot be implemented once and forgotten
- * elsewhere. Every round created before MAI-43 has no `role`, and the first
- * consumer writing `g.role === 'side'` would silently read all of them as
- * not-main, which is the opposite of what the doc promises.
- */
-export function roleOf(game: GameConfig): 'main' | 'side' {
-  return game.role ?? defaultRole(getEngine(game.type)?.meta.category ?? 'main')
+  const category = getEngine(game.type)?.meta.category ?? 'main'
+  if (category !== 'either') return category
+  // an "either" game is the side bet when something else is unambiguously the
+  // main event, and the main event when nothing else claims it
+  const hasMainGame = allGames.some(
+    (g) => g.gameId !== game.gameId && getEngine(g.type)?.meta.category === 'main',
+  )
+  return hasMainGame ? 'side' : 'main'
 }
 
 /**

@@ -45,7 +45,16 @@ const importSchema = z.object({
   round: z.looseObject({
     id: z.string().min(1),
     players: z.array(z.looseObject({ playerId: z.string() })).min(1),
-    games: z.array(z.looseObject({ gameId: z.string(), type: z.string() })),
+    games: z.array(
+      // `role` is validated even though the rest stays loose: it is read back
+      // as a two-value union, so an imported 'sausage' would be handed to
+      // display rules typed as something it isn't (catalog.ts roleOf).
+      z.looseObject({
+        gameId: z.string(),
+        type: z.string(),
+        role: z.enum(['main', 'side']).optional(),
+      }),
+    ),
     courseSnapshot: z.looseObject({ holes: z.array(z.unknown()).min(1) }),
   }),
   events: z.array(z.unknown()),

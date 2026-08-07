@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router'
 import { useLiveQuery } from 'dexie-react-hooks'
 import '../../engine/games'
-import { defaultRole, getEngine, listEngines } from '../../engine/catalog'
+import { getEngine, listEngines } from '../../engine/catalog'
 import { courseHandicapForTee } from '../../engine/core/handicap'
 import { applyTee, doubleNine } from '../../engine/core/tees'
 import type { Course, GameConfig, RoundHoles, TeeSet } from '../../engine/core/types'
@@ -192,10 +192,11 @@ export function SetupScreen() {
     const gameConfigs: GameConfig[] = games.map((g) => ({
       gameId: newId(),
       type: g.type,
-      // The per-round truth, defaulted from the engine's eligibility through
-      // the shared rule — the picker (MAI-44) will override it per round rather
-      // than re-deciding what the default was.
-      role: defaultRole(getEngine(g.type)?.meta.category ?? 'main'),
+      // `role` is deliberately NOT stamped here. Whether an "either" game is
+      // this round's main event or its side bet depends on what else is in the
+      // round, and freezing a guess into a synced archive makes it wrong
+      // permanently — `roleOf` derives it, and MAI-44 will write only what the
+      // user explicitly chooses.
       handicap: g.handicap,
       config: resolveDraftPlayers(g.config, draftToReal),
     }))

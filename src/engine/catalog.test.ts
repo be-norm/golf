@@ -3,11 +3,13 @@ import './games/index'
 import {
   deriveRound,
   listEngines,
+  roleOf,
   type GameCategory,
   type GameFamily,
   type GameShape,
 } from './catalog'
-import { EventLog, makePlayers, makeRound } from './test/harness'
+import { EventLog, makePlayers, makeRound, TEST_ONLY_ENGINE_TYPES } from './test/harness'
+import type { GameConfig } from './core/types'
 
 // `satisfies` alone only checks each element is a MEMBER — it does not check
 // the list is complete, which an earlier comment here claimed and tsc quietly
@@ -34,6 +36,9 @@ const _exhaustive: [_FamiliesCovered, _CategoriesCovered, _ShapesCovered] = [
 ]
 void _exhaustive
 
+/** the registry minus anything a sibling test file registered for its own use */
+const shippedEngines = () => listEngines().filter((e) => !TEST_ONLY_ENGINE_TYPES.includes(e.type))
+
 describe('engine registry invariants', () => {
   /**
    * Every guard below iterates the registry, and registration happens only as a
@@ -44,13 +49,26 @@ describe('engine registry invariants', () => {
    * proof has to fail loudly rather than evaporate.
    */
   it('has engines to check at all', () => {
-    expect(listEngines().length).toBeGreaterThanOrEqual(5)
+    expect(shippedEngines().length).toBeGreaterThanOrEqual(5)
+  })
+
+  /**
+   * `meta.name` IS the label whenever a round holds one of a game — and it is
+   * painted onto the share card in Press Start 2P. `gameLabel` enforces this
+   * for the parenthetical it builds, but the name itself comes straight from
+   * the engine, and neighbouring engine strings in this repo already carry "·",
+   * "—" and emoji (wolf's prompt is "🐺 Hole N: …"). A game named "Wolf 🐺"
+   * would render that glyph in the system face mid-title, and jsdom has no
+   * canvas to catch it.
+   */
+  it('every game name can be painted in the pixel font', () => {
+    for (const engine of shippedEngines()) {
+      expect(engine.meta.name, `${engine.type} name`).toMatch(/^[\x20-\x7E]+$/)
+    }
   })
 
   it('every game ships complete player-facing rules', () => {
-    const engines = listEngines()
-    expect(engines.length).toBeGreaterThanOrEqual(4)
-    for (const engine of engines) {
+    for (const engine of shippedEngines()) {
       const { rules } = engine.meta
       expect(rules.tagline.length, `${engine.type} tagline`).toBeGreaterThan(0)
       expect(rules.howToPlay.length, `${engine.type} howToPlay`).toBeGreaterThan(0)
@@ -70,7 +88,7 @@ describe('engine registry invariants', () => {
    * presented as somebody's main event (MAI-43).
    */
   it('every game declares where it belongs', () => {
-    for (const engine of listEngines()) {
+    for (const engine of shippedEngines()) {
       expect(CATEGORIES, `${engine.type} category`).toContain(engine.meta.category)
       expect(FAMILIES, `${engine.type} family`).toContain(engine.meta.family)
       expect(engine.meta.shapes.length, `${engine.type} shapes`).toBeGreaterThan(0)
@@ -86,7 +104,7 @@ describe('engine registry invariants', () => {
    * two sides, and a rotating-partner game needs at least three.
    */
   it('declares no shape its player limits cannot seat', () => {
-    for (const engine of listEngines()) {
+    for (const engine of shippedEngines()) {
       const { shapes, minPlayers, maxPlayers } = engine.meta
       const needsThree = (s: GameShape) => s === 'teams' || s === 'partners'
       // Two claims, and the difference matters. Nassau declares both
@@ -108,6 +126,47 @@ describe('engine registry invariants', () => {
         expect(minPlayers, `${engine.type} head-to-head needs 2`).toBeLessThanOrEqual(2)
       }
     }
+  })
+})
+
+describe('roleOf', () => {
+  const game = (gameId: string, type: string): GameConfig => ({
+    gameId,
+    type,
+    handicap: { mode: 'gross', allowancePct: 100, reference: 'absolute' },
+    config: {},
+  })
+
+  it('reads an "either" game off the ROUND, not off the engine', () => {
+    const skins = game('g1', 'skins')
+    const nassau = game('g2', 'nassau')
+    // alone, skins IS the round — the thing invariant #7 says only the round knows
+    expect(roleOf(skins, [skins])).toBe('main')
+    // beside a game that can only be the main event, it is the side bet
+    expect(roleOf(skins, [skins, nassau])).toBe('side')
+    expect(roleOf(nassau, [skins, nassau])).toBe('main')
+  })
+
+  it('takes an explicit choice over any default', () => {
+    const skins = game('g1', 'skins')
+    const nassau = game('g2', 'nassau')
+    expect(roleOf({ ...skins, role: 'main' }, [skins, nassau])).toBe('main')
+    expect(roleOf({ ...nassau, role: 'side' }, [skins, nassau])).toBe('side')
+  })
+
+  /**
+   * `role` arrives from imported JSON whose games are validated loosely, so a
+   * value that is neither would otherwise be handed back typed as the union and
+   * silently read as a main event by the first `=== 'side'` check.
+   */
+  it('ignores a role that is not one of the two things it can be', () => {
+    const bogus = { ...game('g1', 'skins'), role: 'sausage' } as unknown as GameConfig
+    expect(roleOf(bogus, [bogus])).toBe('main')
+  })
+
+  it('treats an unregistered game type as a main event', () => {
+    const orphan = game('g1', 'notAGame')
+    expect(roleOf(orphan, [orphan])).toBe('main')
   })
 })
 
@@ -136,7 +195,7 @@ describe('taxonomy never reaches the money', () => {
    * a fixture naming two games would let the other three, and every game still
    * to be written, do exactly what invariant #7 forbids and ship green.
    */
-  for (const engine of listEngines()) {
+  for (const engine of shippedEngines()) {
     const names = ['A', 'B', 'C', 'D'].slice(0, engine.meta.minPlayers)
     // `slice` clamps rather than erroring, so an engine wanting 5+ would get a
     // short roster and fail later with a message blaming the invariant instead

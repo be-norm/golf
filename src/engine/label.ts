@@ -70,7 +70,15 @@ function discriminator(
     // select options can carry the same display label, and separating on the
     // values behind them would commit to a field that shows both games the same
     // word — the duplicate this whole function exists to prevent.
-    if (!separates((g) => renderFieldValue(field, valueOf(g)))) continue
+    const phrases = siblings.map((g) => renderFieldValue(field, valueOf(g)))
+    // and every sibling must actually GET a phrase. `undefined` counts as
+    // distinct in a Set, so a field one game cannot render (a legacy config
+    // missing the key, a select value not in `options`) would otherwise commit
+    // the field and leave that game falling through to "#1" beside a sibling
+    // named "$5" — two rows named on different axes, with a #1 and no #2.
+    if (phrases.some((p) => p === undefined) || !separates((g) => renderFieldValue(field, valueOf(g)))) {
+      continue
+    }
     const rendered = renderFieldValue(field, valueOf(game))
     if (rendered !== undefined) return rendered
   }
@@ -115,7 +123,19 @@ function fieldPhrase(field: ConfigFieldSpec, value: unknown): string | undefined
       return field.options.find((o) => o.value === value)?.label
     // teams and rotation are player assignments — no short phrase names them,
     // and two games differing only in who is on which side need the index
-    default:
+    case 'teams':
+    case 'rotation':
       return undefined
+    default: {
+      // EXHAUSTIVE on purpose. `RoundStartScreen.configChips` renders the same
+      // specs with a different framing (it names the field, and skips false
+      // booleans), so a new `ConfigFieldSpec` kind has two places to reach —
+      // and a `default: return undefined` here would swallow it silently,
+      // quietly downgrading a real difference to "#1"/"#2". This makes it a
+      // compile error instead.
+      const exhaustive: never = field
+      void exhaustive
+      return undefined
+    }
   }
 }
