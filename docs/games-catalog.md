@@ -191,16 +191,16 @@ the hole has no value. Modelling the throw as a prompt would nag on every hole.
 
 ### 29. Yellow Ball — Tier 3. Inputs: ball-survival flag. Rotating money ball + best ball aggregate.
 
-### 30. Closest to the Pin (KP) — Tier 1. Inputs: one award per eligible hole.
+### 30. Closest to the Pin (CTP) — Tier 1. Inputs: one award per eligible hole.
 The most-played side bet in golf and, until now, missing from this catalog. Par 3s only (the
 engine decides eligibility from `courseSnapshot` par, so the award grid simply doesn't offer
 it elsewhere). One winner per hole collects from every other player, or a fixed pot per hole.
-**Dead-money story required:** nobody hits the green on a par 3 and the hole's KP goes
+**Dead-money story required:** nobody hits the green on a par 3 and the hole's CTP goes
 unclaimed — declare it dead on `notes`, never a $0 settlement line (MAI-40).
 
 ### 31. Long Drive — Tier 1. Inputs: one award per eligible hole.
 Usually one nominated hole (a par 5), sometimes several; fairway-only is the common house
-rule. Same shape as KP — one winner, one award, same dead-money problem when nobody keeps it
+rule. Same shape as CTP — one winner, one award, same dead-money problem when nobody keeps it
 in play. Eligible holes are config, not derivable, since the group picks them at the tee.
 
 ---
