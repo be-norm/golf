@@ -12,6 +12,37 @@ export interface CourseSearchHit {
   /** For library hits only: the stored provenance, so the UI can badge
    *  user-contributed courses. Undefined for live API hits. */
   source?: Course['source']
+  /** Library hits only: `courses.created_by` — who authored this version, so
+   *  the viewer's own copy can rank first. Undefined for API hits AND for a row
+   *  whose author deleted their account (`on delete set null`), which is why
+   *  "mine" tests for a non-empty value rather than plain equality. */
+  createdBy?: string
+  /** Library hits only: `courses.updated_at`, which `pushCourse` writes from
+   *  `course.updatedAt` — the CARD's clock (when this version was last
+   *  corrected), never a membership clock. Ranks and dates community versions. */
+  updatedAt?: string
+}
+
+/** A hit, classified for display. Structurally still a `CourseSearchHit`, so it
+ *  passes straight to `importCourseHit` with nothing to unwrap. */
+export interface CourseVersion extends CourseSearchHit {
+  /** 'api' = a directory's card (or our cached/seeded copy of one);
+   *  'community' = one a golfer entered or corrected (`source === 'user'`). */
+  kind: 'api' | 'community'
+  /** the viewer authored this version */
+  mine: boolean
+}
+
+/** One place, and every version of it search found — best first (MAI-79). */
+export interface CourseGroup {
+  /** the normalized name+location key, or `id:<hit id>` for a location-less hit
+   *  (which never groups). React key and expanded-state key. */
+  key: string
+  /** the top-ranked version's name/location — what the collapsed row reads */
+  name: string
+  location: string
+  /** ranked mine → newest community → api. Never empty. */
+  versions: CourseVersion[]
 }
 
 const OPENGOLF_BASE = 'https://api.opengolfapi.org'
@@ -20,12 +51,14 @@ const GOLFCOURSEAPI_KEY = import.meta.env.VITE_GOLFCOURSEAPI_KEY as string | und
 
 /**
  * Search the shared Supabase library, GolfCourseAPI, and OpenGolfAPI in
- * parallel; all best-effort (offline → empty results, never an error). Results
- * are de-duplicated across sources with the library winning (it's our
- * curated/community copy), then GolfCourseAPI (richer tee data), then
- * OpenGolfAPI.
+ * parallel; all best-effort (offline → empty results, never an error), then
+ * collapse the lot into ONE result per place, each carrying its versions.
+ *
+ * Takes the viewer explicitly for the same reason `importCourseHit` takes the
+ * owner: ranking needs to know whose version is whose, and the caller is the
+ * only one who knows who is signed in. Guests pass LOCAL_USER.
  */
-export async function searchCourses(query: string): Promise<CourseSearchHit[]> {
+export async function searchCourses(query: string, viewerId: string): Promise<CourseGroup[]> {
   const q = query.trim()
   if (q.length < 3) return []
 
@@ -35,16 +68,21 @@ export async function searchCourses(query: string): Promise<CourseSearchHit[]> {
     openGolfSearch(q),
   ])
 
-  return mergeCourseHits({ library, golfcourseapi: golf, opengolfapi: open })
+  return groupCourseHits(
+    mergeCourseHits({ library, golfcourseapi: golf, opengolfapi: open }),
+    viewerId,
+  )
 }
 
 /**
- * De-dup + precedence, pulled out as a pure function so it's unit-testable.
- * Order is precedence: library beats GolfCourseAPI beats OpenGolfAPI. A hit is
- * dropped if its id OR its normalized name+location was already taken by a
- * higher-precedence source. Best-effort — the name+location key can miss
- * ("Penmar GC" vs "Penmar Golf Course") or over-merge; it only affects the
- * list shown, never imported data.
+ * Flatten the three sources into one precedence-ordered list: library beats
+ * GolfCourseAPI beats OpenGolfAPI, and a repeated id keeps the first.
+ *
+ * This used to ALSO drop any hit whose normalized name+location was already
+ * taken — which quietly deleted the golfer's fork of an API course, i.e. the
+ * exact version MAI-79 exists to offer. That collapse (and the result cap) now
+ * lives in `groupCourseHits`, which keeps the duplicate as a VERSION of one
+ * result instead of discarding it.
  */
 export function mergeCourseHits(groups: {
   library: CourseSearchHit[]
@@ -52,18 +90,106 @@ export function mergeCourseHits(groups: {
   opengolfapi: CourseSearchHit[]
 }): CourseSearchHit[] {
   const seenIds = new Set<string>()
-  const seenKeys = new Set<string>()
   const out: CourseSearchHit[] = []
   for (const group of [groups.library, groups.golfcourseapi, groups.opengolfapi]) {
     for (const h of group) {
-      const key = normKey(h.name, h.location)
-      if (seenIds.has(h.id) || seenKeys.has(key)) continue
+      if (seenIds.has(h.id)) continue
       seenIds.add(h.id)
-      seenKeys.add(key)
       out.push(h)
     }
   }
-  return out.slice(0, 20)
+  return out
+}
+
+const MAX_GROUPS = 20
+
+/**
+ * One result per place, versions on demand (MAI-79).
+ *
+ * The same course can exist several times over: the row a directory published,
+ * plus a version each golfer entered or corrected (MAI-78 makes forks the only
+ * way to fix an API card, so this is by design, not an accident). Listing them
+ * as separate near-identical rows makes picking a course a comparison instead
+ * of a decision — so they collapse into one group, and the versions are the
+ * second, explicit choice.
+ *
+ * Pure, and takes the whole hit list rather than querying, so the ranking is
+ * unit-testable without a network or a Supabase stub.
+ */
+export function groupCourseHits(hits: CourseSearchHit[], viewerId: string): CourseGroup[] {
+  // a Map preserves insertion order, which is mergeCourseHits' precedence order
+  const buckets = new Map<string, CourseSearchHit[]>()
+  for (const h of hits) {
+    const key = groupKeyFor(h)
+    const bucket = buckets.get(key)
+    if (bucket) bucket.push(h)
+    else buckets.set(key, [h])
+  }
+
+  const out: CourseGroup[] = []
+  for (const [key, bucket] of buckets) {
+    if (out.length === MAX_GROUPS) break
+    const versions = versionsOf(bucket, viewerId)
+    const top = versions[0]
+    if (!top) continue // unreachable — a bucket exists because a hit made it
+    out.push({ key, name: top.name, location: top.location, versions })
+  }
+  return out
+}
+
+/**
+ * A hit with NO location never groups — it is keyed by its own id.
+ *
+ * Merging two genuinely different courses is the worst outcome here, and a bare
+ * name is exactly where name+location stops being evidence: every "Municipal"
+ * on earth would fuse into one row. (`id:` can't collide with a normKey, which
+ * is always `[a-z0-9]*|[a-z0-9]*`.)
+ */
+function groupKeyFor(h: CourseSearchHit): string {
+  return h.location.trim() ? normKey(h.name, h.location) : `id:${h.id}`
+}
+
+function versionsOf(bucket: CourseSearchHit[], viewerId: string): CourseVersion[] {
+  const versions: CourseVersion[] = []
+  let api: CourseVersion | undefined
+  for (const h of bucket) {
+    if (h.source === 'user') {
+      // createdBy must be non-empty before comparing: an API hit and a row
+      // whose author deleted their account both carry undefined, and neither
+      // is anybody's.
+      versions.push({ ...h, kind: 'community', mine: !!h.createdBy && h.createdBy === viewerId })
+    } else if (!api) {
+      // every non-user hit is the same directory card off a different shelf —
+      // three rows all reading "API" is the noise this ticket removes. First
+      // wins, i.e. library → golfcourseapi → opengolfapi.
+      api = { ...h, kind: 'api', mine: false }
+    }
+  }
+  if (api) versions.push(api)
+  return versions.sort(compareVersions)
+}
+
+/**
+ * Mine → other golfers' (newest first) → the directory's. A TOTAL order: the id
+ * tie-break is what makes "the same search twice offers the same version" true.
+ */
+function compareVersions(a: CourseVersion, b: CourseVersion): number {
+  const ra = rankOf(a)
+  const rb = rankOf(b)
+  if (ra !== rb) return ra - rb
+  const ta = stamp(a.updatedAt)
+  const tb = stamp(b.updatedAt)
+  if (ta !== tb) return tb - ta
+  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0
+}
+
+const rankOf = (v: CourseVersion) => (v.mine ? 0 : v.kind === 'community' ? 1 : 2)
+
+/** Instants, never strings — local stamps end `Z`, Postgres returns `+00:00`.
+ *  Undated or unparseable sorts last rather than putting NaN in a comparator. */
+function stamp(iso: string | undefined): number {
+  const t = iso ? Date.parse(iso) : NaN
+  return Number.isNaN(t) ? -Infinity : t
 }
 
 const normKey = (name: string, location: string) =>
@@ -100,23 +226,30 @@ async function librarySearch(q: string): Promise<CourseSearchHit[]> {
     const raw = q.replace(/[%_]/g, '').replace(/[\\"]/g, '\\$&')
     const pattern = `"%${raw}%"`
     // Ordered, with id as the tie-break: without an ORDER BY, which of two
-    // same-name rows (an API card and a golfer's fork of it, MAI-78) comes
-    // back first — and therefore which one survives mergeCourseHits' first-
-    // wins dedupe — changed between searches. Collapsing the pair into one
-    // result is MAI-79; this only makes the pick deterministic.
+    // same-name rows (an API card and a golfer's fork of it, MAI-78) came back
+    // first changed between searches. Both now survive as versions of one
+    // result (MAI-79), but the order still decides where the LIMIT falls.
+    //
+    // 12 → 30 because duplicates now consume slots instead of being dropped.
+    // Known limit: rows come back alphabetically, so "Broadmoor CC" and
+    // "Broadmoor Country Club" sort far apart and a busy query can still cut
+    // your own version before grouping ever sees it — deterministically, but
+    // silently. Fixing that properly means a second owner-scoped query.
     const { data } = await supabase
       .from('courses')
-      .select('id, name, location, source')
+      .select('id, name, location, source, created_by, updated_at')
       .or(`name.ilike.${pattern},location.ilike.${pattern}`)
       .order('name')
       .order('id')
-      .limit(12)
+      .limit(30)
     return (data ?? []).map((c) => ({
       id: c.id as string,
       name: c.name as string,
       location: (c.location as string | null) ?? '',
       origin: 'library' as const,
       source: (c.source as Course['source'] | null) ?? undefined,
+      createdBy: (c.created_by as string | null) ?? undefined,
+      updatedAt: (c.updated_at as string | null) ?? undefined,
     }))
   } catch {
     return []

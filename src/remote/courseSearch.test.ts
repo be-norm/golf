@@ -37,6 +37,7 @@ vi.mock('./supabase', () => ({
 
 import {
   golfApiName,
+  groupCourseHits,
   importCourseHit,
   isDoubledNine,
   mergeCourseHits,
@@ -44,7 +45,7 @@ import {
   type CourseSearchHit,
 } from './courseSearch'
 import { db } from '../db/schema'
-import { ORPHANED_AUTHOR } from '../db/ids'
+import { LOCAL_USER, ORPHANED_AUTHOR } from '../db/ids'
 
 describe('isDoubledNine (GolfCourseAPI 9-hole stored as 18)', () => {
   const nine = [281, 355, 139, 298, 208, 436, 342, 162, 361].map((yardage) => ({ par: 4, yardage }))
@@ -82,41 +83,15 @@ const hit = (
   location: string,
   origin: CourseSearchHit['origin'],
   source?: CourseSearchHit['source'],
-): CourseSearchHit => ({ id, name, location, origin, source })
+  extra: { createdBy?: string; updatedAt?: string } = {},
+): CourseSearchHit => ({ id, name, location, origin, source, ...extra })
 
-describe('mergeCourseHits (dedup + precedence)', () => {
-  it('keeps the library copy over both APIs for the same course', () => {
-    const merged = mergeCourseHits({
-      library: [hit('lib-1', 'Broadmoor Country Club', 'Indianapolis, IN', 'library', 'user')],
-      golfcourseapi: [hit('gca:9', 'Broadmoor Country Club', 'Indianapolis, IN', 'golfcourseapi')],
-      opengolfapi: [hit('og-1', 'Broadmoor Country Club', 'Indianapolis, IN', 'opengolfapi')],
-    })
-    expect(merged).toHaveLength(1)
-    expect(merged[0]!.origin).toBe('library')
-    expect(merged[0]!.source).toBe('user')
-  })
+/** a golfer's published version of a course (MAI-78 fork) */
+const community = (id: string, name: string, location: string, createdBy: string, updatedAt: string) =>
+  hit(id, name, location, 'library', 'user', { createdBy, updatedAt })
 
-  it('collapses the two APIs by normalized name+location, GolfCourseAPI winning', () => {
-    // different punctuation/casing/spacing must still normalize to one course
-    const merged = mergeCourseHits({
-      library: [],
-      golfcourseapi: [hit('gca:1', 'Penmar Golf Course', 'Venice, CA', 'golfcourseapi')],
-      opengolfapi: [hit('og-2', 'Penmar  golf course', 'venice, ca', 'opengolfapi')],
-    })
-    expect(merged).toHaveLength(1)
-    expect(merged[0]!.origin).toBe('golfcourseapi')
-  })
-
-  it('keeps genuinely different courses in the same town', () => {
-    const merged = mergeCourseHits({
-      library: [hit('lib-1', 'Pebble Beach', 'Pebble Beach, CA', 'library')],
-      golfcourseapi: [hit('gca:2', 'Spyglass Hill', 'Pebble Beach, CA', 'golfcourseapi')],
-      opengolfapi: [],
-    })
-    expect(merged).toHaveLength(2)
-  })
-
-  it('dedupes by id too, keeping the higher-precedence source', () => {
+describe('mergeCourseHits (flatten + precedence)', () => {
+  it('dedupes by id, keeping the higher-precedence source', () => {
     const merged = mergeCourseHits({
       library: [hit('dup', 'A', 'X', 'library')],
       golfcourseapi: [hit('dup', 'B', 'Y', 'golfcourseapi')],
@@ -126,11 +101,219 @@ describe('mergeCourseHits (dedup + precedence)', () => {
     expect(merged[0]!.origin).toBe('library')
   })
 
-  it('caps the merged list at 20', () => {
+  it('orders library, then GolfCourseAPI, then OpenGolfAPI', () => {
+    const merged = mergeCourseHits({
+      library: [hit('lib-1', 'A', 'X', 'library')],
+      golfcourseapi: [hit('gca:1', 'B', 'Y', 'golfcourseapi')],
+      opengolfapi: [hit('og-1', 'C', 'Z', 'opengolfapi')],
+    })
+    expect(merged.map((h) => h.origin)).toEqual(['library', 'golfcourseapi', 'opengolfapi'])
+  })
+
+  it('no longer drops a same-name hit — that dropped the golfer fork MAI-79 exists to offer', () => {
+    // the API card and a golfer's correction of it share a normalized
+    // name+location; the old first-wins key dedupe deleted the correction here
+    const merged = mergeCourseHits({
+      library: [
+        hit('lib-api', 'Broadmoor Country Club', 'Indianapolis, IN', 'library', 'remote'),
+        community('lib-fork', 'Broadmoor Country Club', 'Indianapolis, IN', 'ann', '2026-07-12T12:00:00.000Z'),
+      ],
+      golfcourseapi: [],
+      opengolfapi: [],
+    })
+    expect(merged).toHaveLength(2)
+  })
+})
+
+describe('groupCourseHits (one result per place, versions on demand — MAI-79)', () => {
+  const ME = 'me-uid'
+
+  it('offers the library card and its golfer fork as two versions of one result', () => {
+    const groups = groupCourseHits(
+      mergeCourseHits({
+        library: [community('lib-1', 'Broadmoor Country Club', 'Indianapolis, IN', 'ann', '2026-07-12T12:00:00.000Z')],
+        golfcourseapi: [hit('gca:9', 'Broadmoor Country Club', 'Indianapolis, IN', 'golfcourseapi')],
+        opengolfapi: [hit('og-1', 'Broadmoor Country Club', 'Indianapolis, IN', 'opengolfapi')],
+      }),
+      ME,
+    )
+    expect(groups).toHaveLength(1)
+    // the two API rows are the same card off different shelves — one version,
+    // library precedence… except there is no library API row here, so gca wins
+    expect(groups[0]!.versions.map((v) => [v.kind, v.id])).toEqual([
+      ['community', 'lib-1'],
+      ['api', 'gca:9'],
+    ])
+    // the collapsed row reads the top-ranked version's name/location
+    expect(groups[0]!.name).toBe('Broadmoor Country Club')
+    expect(groups[0]!.location).toBe('Indianapolis, IN')
+  })
+
+  it('collapses the two API directories into ONE api version, keeping precedence', () => {
+    // different punctuation/casing/spacing must still normalize to one course
+    const groups = groupCourseHits(
+      mergeCourseHits({
+        library: [],
+        golfcourseapi: [hit('gca:1', 'Penmar Golf Course', 'Venice, CA', 'golfcourseapi')],
+        opengolfapi: [hit('og-2', 'Penmar  golf course', 'venice, ca', 'opengolfapi')],
+      }),
+      ME,
+    )
+    expect(groups).toHaveLength(1)
+    expect(groups[0]!.versions).toHaveLength(1)
+    expect(groups[0]!.versions[0]!.kind).toBe('api')
+    expect(groups[0]!.versions[0]!.id).toBe('gca:1')
+  })
+
+  it('prefers the library copy of an API card over both live directories', () => {
+    const groups = groupCourseHits(
+      mergeCourseHits({
+        library: [hit('lib-1', 'Penmar Golf Course', 'Venice, CA', 'library', 'remote')],
+        golfcourseapi: [hit('gca:1', 'Penmar Golf Course', 'Venice, CA', 'golfcourseapi')],
+        opengolfapi: [hit('og-2', 'Penmar Golf Course', 'Venice, CA', 'opengolfapi')],
+      }),
+      ME,
+    )
+    expect(groups[0]!.versions).toHaveLength(1)
+    expect(groups[0]!.versions[0]!.id).toBe('lib-1')
+  })
+
+  it('ranks MY version first even when a stranger published a newer one', () => {
+    const groups = groupCourseHits(
+      [
+        community('theirs', 'Penmar', 'Venice, CA', 'ann', '2026-08-01T12:00:00.000Z'),
+        community('mine', 'Penmar', 'Venice, CA', ME, '2026-01-01T12:00:00.000Z'),
+        hit('gca:1', 'Penmar', 'Venice, CA', 'golfcourseapi'),
+      ],
+      ME,
+    )
+    expect(groups[0]!.versions.map((v) => v.id)).toEqual(['mine', 'theirs', 'gca:1'])
+    expect(groups[0]!.versions[0]!.mine).toBe(true)
+    expect(groups[0]!.versions[1]!.mine).toBe(false)
+    // the collapsed row takes its label from the version it's offering
+    expect(groups[0]!.name).toBe('Penmar')
+  })
+
+  it("orders other golfers' versions newest first, breaking ties on id", () => {
+    const groups = groupCourseHits(
+      [
+        community('c', 'Penmar', 'Venice, CA', 'ann', '2026-01-01T12:00:00.000Z'),
+        community('b', 'Penmar', 'Venice, CA', 'bob', '2026-06-01T12:00:00.000Z'),
+        community('a', 'Penmar', 'Venice, CA', 'cal', '2026-06-01T12:00:00.000Z'),
+      ],
+      ME,
+    )
+    // b and a share an instant, so the id tie-break decides — and decides the
+    // same way every time, which is what "the same search twice" requires
+    expect(groups[0]!.versions.map((v) => v.id)).toEqual(['a', 'b', 'c'])
+  })
+
+  it('compares stamps as instants, not strings (Z vs +00:00)', () => {
+    // the same moment, written both ways: local stamps end Z, Postgres returns
+    // +00:00, and a string sort would put the offset form first every time
+    const groups = groupCourseHits(
+      [
+        community('older', 'Penmar', 'Venice, CA', 'ann', '2026-01-01T00:00:00+00:00'),
+        community('newer', 'Penmar', 'Venice, CA', 'bob', '2026-06-01T00:00:00.000Z'),
+      ],
+      ME,
+    )
+    expect(groups[0]!.versions.map((v) => v.id)).toEqual(['newer', 'older'])
+  })
+
+  it('sorts an undated version last rather than putting NaN in the comparator', () => {
+    const groups = groupCourseHits(
+      [
+        hit('undated', 'Penmar', 'Venice, CA', 'library', 'user', { createdBy: 'ann' }),
+        community('dated', 'Penmar', 'Venice, CA', 'bob', '2026-06-01T12:00:00.000Z'),
+      ],
+      ME,
+    )
+    expect(groups[0]!.versions.map((v) => v.id)).toEqual(['dated', 'undated'])
+  })
+
+  it('keeps genuinely different courses in the same town apart', () => {
+    const groups = groupCourseHits(
+      [
+        hit('lib-1', 'Pebble Beach', 'Pebble Beach, CA', 'library'),
+        hit('gca:2', 'Spyglass Hill', 'Pebble Beach, CA', 'golfcourseapi'),
+      ],
+      ME,
+    )
+    expect(groups).toHaveLength(2)
+  })
+
+  it('keeps the same course name in different towns apart', () => {
+    const groups = groupCourseHits(
+      [
+        hit('a', 'Municipal Golf Course', 'Carmel, IN', 'library'),
+        hit('b', 'Municipal Golf Course', 'Carmel, CA', 'library'),
+      ],
+      ME,
+    )
+    expect(groups).toHaveLength(2)
+  })
+
+  it('never groups location-less hits — a bare name is not evidence of one place', () => {
+    // merging two real courses is the worse failure (MAI-79), and without a
+    // town every "Municipal" on earth would fuse into a single row
+    const groups = groupCourseHits(
+      [hit('a', 'Municipal', '', 'library'), hit('b', 'Municipal', '', 'library')],
+      ME,
+    )
+    expect(groups).toHaveLength(2)
+    expect(groups.map((g) => g.key)).toEqual(['id:a', 'id:b'])
+  })
+
+  it('makes a version state its own name when it differs from the group label', () => {
+    // the key ignores punctuation, so these group — and the row has to say
+    // which card it is rather than silently claiming the group's label
+    const groups = groupCourseHits(
+      [
+        hit('api', 'Penmar Golf Course', 'Venice, CA', 'library', 'remote'),
+        community('fork', 'Penmar  Golf-Course', 'Venice, CA', 'ann', '2026-06-01T12:00:00.000Z'),
+      ],
+      ME,
+    )
+    expect(groups).toHaveLength(1)
+    expect(groups[0]!.name).toBe('Penmar  Golf-Course')
+    expect(groups[0]!.versions.map((v) => v.name)).toEqual([
+      'Penmar  Golf-Course',
+      'Penmar Golf Course',
+    ])
+  })
+
+  it('caps at 20 groups, in first-appearance order', () => {
     const many = Array.from({ length: 30 }, (_, i) =>
       hit(`og-${i}`, `Course ${i}`, 'Town, ST', 'opengolfapi'),
     )
-    expect(mergeCourseHits({ library: [], golfcourseapi: [], opengolfapi: many })).toHaveLength(20)
+    const groups = groupCourseHits(many, ME)
+    expect(groups).toHaveLength(20)
+    expect(groups[0]!.name).toBe('Course 0')
+    expect(groups[19]!.name).toBe('Course 19')
+  })
+
+  it('owns nothing as a guest, and never calls an unauthored card mine', () => {
+    const groups = groupCourseHits(
+      [
+        community('theirs', 'Penmar', 'Venice, CA', 'ann', '2026-06-01T12:00:00.000Z'),
+        // author deleted their account: created_by is null → undefined here.
+        // Without the non-empty guard this would match a viewer of undefined.
+        hit('orphan', 'Penmar', 'Venice, CA', 'library', 'user'),
+        hit('gca:1', 'Penmar', 'Venice, CA', 'golfcourseapi'),
+      ],
+      LOCAL_USER,
+    )
+    expect(groups[0]!.versions.every((v) => !v.mine)).toBe(true)
+  })
+
+  it('is idempotent — the same hits group identically twice', () => {
+    const hits = [
+      community('b', 'Penmar', 'Venice, CA', 'ann', '2026-06-01T12:00:00.000Z'),
+      hit('gca:1', 'Penmar', 'Venice, CA', 'golfcourseapi'),
+      hit('lib-2', 'Rancho Park', 'Los Angeles, CA', 'library'),
+    ]
+    expect(groupCourseHits(hits, ME)).toEqual(groupCourseHits(hits, ME))
   })
 })
 
@@ -230,7 +413,7 @@ describe('librarySearch query quoting', () => {
       }),
     )
     try {
-      await searchCourses('Carmel, IN')
+      await searchCourses('Carmel, IN', LOCAL_USER)
       expect(remote.lastOr).toBe('name.ilike."%Carmel, IN%",location.ilike."%Carmel, IN%"')
     } finally {
       vi.unstubAllGlobals()

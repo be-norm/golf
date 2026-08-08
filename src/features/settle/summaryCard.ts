@@ -7,6 +7,7 @@ import {
   minimalTransfers,
 } from '../../engine/core/money'
 import type { Round, Uuid } from '../../engine/core/types'
+import { formatDate } from '../../lib/date'
 import { holeLoop, ordinal } from '../scoring/holeLoop'
 
 /**
@@ -96,14 +97,6 @@ export interface ScorecardRow {
   /** parallel to `scores`; true where the player gets a handicap stroke */
   strokes: boolean[]
   total: number
-}
-
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-
-/** Fixed format rather than toLocaleDateString — deterministic across locales and in tests. */
-function formatDate(iso: string): string {
-  const d = new Date(iso)
-  return `${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`
 }
 
 export function buildSummaryCard(

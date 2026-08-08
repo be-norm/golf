@@ -74,7 +74,8 @@ Full plan/architecture history: see `docs/` and the games catalog in `docs/games
   (`match` for match play + the one `closeMargin`, `points` for rank-points/points-money,
   `standings`); `src/engine/games/<game>/` —
   one engine per game + golden fixtures; `src/engine/catalog.ts` — GameEngine registry
-- `src/db/` — Dexie schema + repos; `src/features/` — screens; `src/components/` — primitives
+- `src/db/` — Dexie schema + repos; `src/features/` — screens; `src/components/` — primitives;
+  `src/lib/` — app-layer helpers shared across features (e.g. `date.ts`, the one date format)
 - `data/courses/` — seed scorecards (bundled into app + used by Supabase seed)
 - `supabase/` — migrations + seed/import scripts
 

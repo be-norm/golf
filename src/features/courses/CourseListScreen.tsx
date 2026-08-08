@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { courseRepo } from '../../db/repos'
+import { courseRepo, ownsCourse } from '../../db/repos'
 import { useAuth } from '../../auth/AuthProvider'
 import { CourseSourceMark } from '../../components/CourseSourceMark'
 import { CourseSearch } from './CourseSearch'
@@ -61,7 +61,9 @@ export function CourseListScreen() {
                 className="pixel block w-full border-stone-700 bg-stone-900/70 px-4 py-3 text-left"
               >
                 <span className="text-lg font-semibold">{c.name}</span>
-                <CourseSourceMark source={c.source} />
+                {/* `mine` off ownsCourse, not source: without it a course you
+                    typed in yourself reads "community" on your own library */}
+                <CourseSourceMark source={c.source} mine={ownsCourse(c, activeUserId)} />
                 <span className="ml-2 text-stone-400">
                   {c.holeCount} holes{c.location ? ` · ${c.location}` : ''}
                 </span>

@@ -6,7 +6,7 @@ import { getEngine, listEngines } from '../../engine/catalog'
 import { courseHandicapForTee } from '../../engine/core/handicap'
 import { applyTee, doubleNine } from '../../engine/core/tees'
 import type { Course, GameConfig, RoundHoles, TeeSet } from '../../engine/core/types'
-import { courseRepo, playerRepo, roundRepo } from '../../db/repos'
+import { courseRepo, ownsCourse, playerRepo, roundRepo } from '../../db/repos'
 import { LOCAL_USER, newId } from '../../db/ids'
 import { enqueuePushPlayer } from '../../remote/outbox'
 import { useAuth } from '../../auth/AuthProvider'
@@ -260,7 +260,7 @@ export function SetupScreen() {
                 }`}
               >
                 <span className="font-semibold">{c.name}</span>
-                <CourseSourceMark source={c.source} />
+                <CourseSourceMark source={c.source} mine={ownsCourse(c, activeUserId)} />
                 {c.location && <span className="ml-2 text-sm text-stone-400">{c.location}</span>}
               </button>
             ))}
