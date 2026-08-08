@@ -537,7 +537,13 @@ export function SetupScreen() {
                   <button
                     aria-label={`remove ${p.name}`}
                     className="text-stone-500"
-                    onClick={() => setPlayers(players.filter((_, j) => j !== i))}
+                    onClick={() => {
+                      const gone = p.draftId
+                      setPlayers(players.filter((_, j) => j !== i))
+                      setGames(
+                        games.map((g) => ({ ...g, config: dropPlayer(g.config, gone) })),
+                      )
+                    }}
                   >
                     ✕
                   </button>
@@ -698,6 +704,34 @@ export function SetupScreen() {
       <RulesSheet type={rulesFor} onClose={() => setRulesFor(undefined)} />
     </main>
   )
+}
+
+/**
+ * Strip a departed player from every game's participant fields.
+ *
+ * Team and rotation configs hold draft ids, and step 2 renders one row per
+ * CURRENT player — so a removed player's id lingers in the config invisibly.
+ * Nassau then reports "every player must be on exactly one nassau side" about a
+ * screen where every player you can see is on exactly one side, because the
+ * fourth id is a ghost. An error you cannot act on is worse than no error.
+ *
+ * This is not the position-remapping that stable draft ids exist to prevent —
+ * that hazard is a player's id coming to mean SOMEONE ELSE. Here the player is
+ * gone, so the only truthful config is one that doesn't mention them.
+ *
+ * Arrays only, which covers every participant field the catalog declares
+ * (`teams`, `rotation`). A scalar that happens to equal the id has no safe
+ * generic answer, and `validateSetup` still catches that.
+ */
+function dropPlayer(config: unknown, draftId: string): unknown {
+  const walk = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.filter((v) => v !== draftId).map(walk)
+    if (value !== null && typeof value === 'object') {
+      return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, walk(v)]))
+    }
+    return value
+  }
+  return walk(config)
 }
 
 /**

@@ -490,6 +490,39 @@ describe('SetupScreen — choosing games', () => {
     expect(sheet.getByText(/need a different group size/)).toBeInTheDocument()
   })
 
+  /**
+   * Removing a player left their draft id in Nassau's `teams`, where nothing
+   * renders it — so the screen showed three players each on exactly one side
+   * while reporting "every player must be on exactly one nassau side" about a
+   * fourth nobody could see. Correct, and impossible to act on.
+   */
+  it('drops a removed player out of the teams they were on', async () => {
+    await pickPenmar()
+    await cont() // → players
+    for (const name of ['Ann', 'Ben', 'Cal', 'Dee']) await addPlayer(name, 10)
+    await cont() // → games
+    await pickGame('Nassau')
+    // four players: Nassau seeds a 2v2, so every id is spoken for
+    expect(screen.queryByText(/exactly one nassau side/)).not.toBeInTheDocument()
+
+    // back to the roster, drop one, and return
+    await userEvent.click(screen.getByText('← Back'))
+    await userEvent.click(await screen.findByRole('button', { name: 'remove Dee' }))
+    await cont()
+
+    // 2v1 is a legal Nassau, so there is nothing left to complain about
+    expect(screen.queryByText(/exactly one nassau side/)).not.toBeInTheDocument()
+    await teeOff()
+    await waitFor(async () => expect(await roundFor('penmar')).toBeDefined())
+    const { teams } = (await roundFor('penmar'))!.games[0]!.config as {
+      teams: { a: string[]; b: string[] }
+    }
+    // three real player ids, and no ghost
+    expect([...teams.a, ...teams.b]).toHaveLength(3)
+    expect(teams.a.length).toBeGreaterThan(0)
+    expect(teams.b.length).toBeGreaterThan(0)
+  })
+
   it('keeps an unplayable game visible in the by-type view, with the reason', async () => {
     await toStepTwo() // two players
     const sheet = within(await picker())
