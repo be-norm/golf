@@ -54,9 +54,14 @@ Full plan/architecture history: see `docs/` and the games catalog in `docs/games
    enforced rather than merely stated. `games/index.ts` is exempt; registering is its job.
    **`role` is DERIVED, not stamped** (`roleOf`, catalog.ts), and it takes the whole round
    because 'either' cannot be answered from the engine alone — Skins beside a Nassau is the
-   side bet, Skins alone is the main event. Setup writes nothing; only an explicit user choice
-   is stored, so a round holding no `role` can be re-read by a better rule instead of being
-   permanently wrong in a synced archive.
+   side bet, Skins alone is the main event. Setup stores `role` only where something READS
+   the distinction — i.e. only when the section the user picked into contradicts what `roleOf`
+   derives, AND the round holds more than one game (in a one-game round `primaryGame` returns
+   that game either way, the bar collapses nothing and the card groups nothing, so a stamp
+   there is a value with no consumer). A round holding no `role` can be re-read by a better
+   rule instead of being permanently wrong in a synced archive.
+   `roleOf`'s production callers are `src/lib/gameRoles.ts` (primary game + role partition)
+   and setup's role stamping; the density rules and the picker are what consume it.
    **The one-way rule:** an engine is a pure function of `(config, its own events,
    RoundContext)` and engines NEVER read each other. That purity is why the app layer has zero
    per-game branching, and why a game can be added without touching a screen. The escape hatch
@@ -77,7 +82,11 @@ Full plan/architecture history: see `docs/` and the games catalog in `docs/games
 - `src/db/` — Dexie schema + repos; `src/features/` — screens; `src/components/` — primitives;
   `src/lib/` — app-layer helpers shared across features (`date.ts` is the fixed, locale-independent
   `18 Jul 2026` format shared by the share card and course versions; the round lists still use
-  `toLocaleDateString`, so this is not yet app-wide)
+  `toLocaleDateString`, so this is not yet app-wide. `gameRoles.ts` is the one primary-game /
+  role-partition rule — see UI conventions). `src/lib/**` is inside the engine-purity denylist
+  (`eslint.config.js`) and its tests are inside the `app` vitest project: both lists enumerate
+  directories, so a new top-level directory has to be added to each or it is silently unguarded
+  and its tests silently never run.
 - `data/courses/` — seed scorecards (bundled into app + used by Supabase seed)
 - `supabase/` — migrations + seed/import scripts
 
@@ -193,6 +202,22 @@ change, use a 6-digit code (`{{ .Token }}` + `verifyOtp`) rather than a link.
   aggregate (that's the standings sheet). New games follow this by default.
   Match-play games (Nassau) are the documented exception: their bar shows live
   bet status because the stakes are the running match, not a single hole.
+  The **collapsed side-bets row** is the second exception (MAI-50): with a main
+  game and 2+ side bets the bar folds them into one aggregate ("SIDE BETS ·
+  Ben +$7 · Rob −$4"), which IS a running total, because nothing else compresses
+  N games into one line — the per-hole detail is one tap away in the sheet.
+  Collapsing happens only when it saves a row (`shouldGroupSideBets`): a lone
+  side bet keeps its own row and its recap, and a round of only side bets shows
+  them expanded.
+- **One default primary game, shared by every surface** (`src/lib/gameRoles.ts`).
+  `primaryGame(round)` = first NET main game → first main game → `games[0]`;
+  `strokeGame(round)` is that game only when it allocates strokes. Three
+  surfaces used to answer this three different ways, so a round whose `games[0]`
+  was gross showed no scorecard underlines while the share card underlined
+  something else, and a cheap net side bet could capture the scoring screen's
+  stroke dots. The scorecard still honours the user's chip selection ON TOP of
+  that default. `roleOf` is what makes it work, and this is its first
+  production caller.
 - **A decided bet is a won bet, everywhere at once.** A Nassau bet is settled
   the moment a side is up more holes than the bet has left — not when its holes
   run out. It then reports in golf's notation (`Ann wins 3&2`, or `2 up` for one
@@ -237,9 +262,10 @@ change, use a 6-digit code (`{{ .Token }}` + `verifyOtp`) rather than a link.
   un-inlined, and iOS Safari, for a design that is rectangles and text.
   `buildSummaryCard` (`summaryCard.ts`) is the single derivation behind the
   settle screen AND the painter — both render that one model, so their numbers
-  can't drift. (`ScorecardScreen` still derives its own grid, and marks strokes
-  from the game the user has selected rather than the model's first-net-game
-  rule; that's why the image names the game in its stroke note.) The model
+  can't drift. (`ScorecardScreen` still derives its own grid. Its DEFAULT stroke
+  game now agrees with the card's — both `src/lib/gameRoles.ts` — so only an
+  explicit chip tap diverges; the image still names the game in its stroke note,
+  because that tap is exactly what it can't know about.) The model
   carries its own display discriminators — `GamePanel.kind` says ledger-vs-list
   rather than letting a renderer infer layout from whether a label is empty.
   Keep the split — numbers in the model (tested), placement

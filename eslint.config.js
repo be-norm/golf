@@ -24,7 +24,20 @@ const ENGINE_PURITY_PATTERNS = [
     message: 'engine must stay persistence/network-free',
   },
   {
-    group: ['**/db/*', '**/features/*', '**/components/*', '**/pwa/*', '**/remote/*', '**/app/*'],
+    // `lib` earns its place here the moment something shared lives in it:
+    // `src/lib/gameRoles.ts` calls `roleOf`, so an engine importing it would
+    // reach the taxonomy through a directory this list didn't name — the exact
+    // route the invariant-#7 block below closes by banning `roleOf` from the
+    // catalog. A denylist of directories has to grow when a directory does.
+    group: [
+      '**/db/*',
+      '**/features/*',
+      '**/components/*',
+      '**/pwa/*',
+      '**/remote/*',
+      '**/app/*',
+      '**/lib/*',
+    ],
     message: 'engine cannot import from app layers',
   },
 ]

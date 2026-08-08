@@ -77,7 +77,17 @@ describe('replay invariants (fast-check)', () => {
       for (const game of round.games) {
         const engine = getEngine(game.type)!
         expect(engine.configSchema.safeParse(game.config).success, `${game.type} config`).toBe(true)
-        expect(engine.validateSetup(game, round.players), `${game.type} setup`).toEqual([])
+        // Real siblings, not []: the fuzz deals every eligible game into one
+        // round, so this also asserts none of them mistake a peer for a
+        // duplicate of itself (MAI-45).
+        expect(
+          engine.validateSetup(
+            game,
+            round.players,
+            round.games.filter((g) => g.gameId !== game.gameId),
+          ),
+          `${game.type} setup`,
+        ).toEqual([])
       }
     }
   })

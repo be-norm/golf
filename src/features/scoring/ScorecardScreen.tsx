@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router'
 import { buildHoleLedger } from '../../engine/ledger'
 import { gameLabel } from '../../engine/label'
 import { formatCentsSigned } from '../../engine/core/money'
+import { primaryGame } from '../../lib/gameRoles'
 import { GameSummary } from '../../components/GameSummary'
 import { useRound } from './useRound'
 import { holeLoop, ordinal } from './holeLoop'
@@ -29,7 +30,12 @@ export function ScorecardScreen() {
   if (!view) return null
   const { round, ctx, derivations } = view
   const nameOf = new Map(round.players.map((p) => [p.playerId, p.name]))
-  const activeGame = round.games.find((g) => g.gameId === selectedGameId) ?? round.games[0]
+  // The user's chip selection still wins (CLAUDE.md) — it is only the DEFAULT
+  // that moves onto the shared rule. `games[0]` meant a round whose first game
+  // was gross showed no underlines at all until someone tapped a chip, while
+  // the share card underlined a different game's strokes.
+  const activeGame =
+    round.games.find((g) => g.gameId === selectedGameId) ?? primaryGame(round)
   const loopOf = (holes: number[]) =>
     holes[0] === undefined ? undefined : holeLoop(round.courseSnapshot, holes[0])
 
@@ -133,7 +139,7 @@ export function ScorecardScreen() {
       {back.length > 0 && half(back)}
       <p className="text-center text-sm text-stone-500">
         Tap a cell to correct that hole
-        {activeGame && activeGame.handicap.mode === 'net'
+        {activeGame?.handicap?.mode === 'net'
           ? ' · green underline = stroke hole'
           : ''}
       </p>

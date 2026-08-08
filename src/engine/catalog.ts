@@ -134,7 +134,14 @@ export interface GameDerivation {
  * first-class participant-assignment field types (Vegas teams, Wolf order).
  */
 export type ConfigFieldSpec =
-  | { key: string; kind: 'money'; label: string; hint?: string }
+  /**
+   * `min`/`max`/`step` are per-field because one range cannot serve every
+   * money field: a Nassau unit moves in dollars, a Vegas point in nickels, and
+   * the setup card used to hardcode 25–10000¢ with an implicit 1¢ step for all
+   * of them — which put 400 taps between $1 and $5 (MAI-44). Optional, so a
+   * field that doesn't care keeps the sane defaults.
+   */
+  | { key: string; kind: 'money'; label: string; hint?: string; min?: number; max?: number; step?: number }
   | { key: string; kind: 'boolean'; label: string; hint?: string }
   | { key: string; kind: 'select'; label: string; options: { value: string; label: string }[] }
   | { key: string; kind: 'teams'; label: string }
@@ -150,8 +157,10 @@ export type GameCategory = 'main' | 'side' | 'either'
 
 /**
  * THE role of a game in a round. Every display rule is to read it through
- * here rather than re-deriving the default — MAI-44's picker and density rules
- * are the first consumers; today only its tests call it.
+ * here rather than re-deriving the default. Its consumers are
+ * `src/lib/gameRoles.ts` (the one primary-game rule, and the main/side split
+ * behind the pinned bar's collapse and the share card's grouping) and setup,
+ * which uses it to decide what — if anything — to store.
  *
  * It takes the whole round because 'either' CANNOT be answered from the engine
  * alone. Skins beside a Nassau is the side bet; Skins on its own is the main
@@ -160,10 +169,13 @@ export type GameCategory = 'main' | 'side' | 'either'
  * default blind to that would call both games in a Skins+Nassau round the main
  * event.
  *
- * Which is also why setup does not STAMP this. `role` is presentation-only, so
- * a round that stores nothing can be re-read by a better rule later; a round
- * that stored a guess is wrong permanently, in an archive that syncs. Only an
- * explicit user choice gets written (MAI-44), and only that short-circuits here.
+ * Which is also why setup stamps this as RARELY as it can. `role` is
+ * presentation-only, so a round that stores nothing can be re-read by a better
+ * rule later, while a round that stored a guess is wrong permanently in an
+ * archive that syncs. Setup writes one only where the section the user picked
+ * into contradicts what this function derives, and only in a round holding more
+ * than one game — below that nothing reads the difference at all. See
+ * `reconcileRoles` (SetupScreen.tsx).
  */
 export function roleOf(game: GameConfig, allGames: readonly GameConfig[]): 'main' | 'side' {
   // An explicit choice wins — but only if it is one of the two things it can
@@ -289,8 +301,23 @@ export interface GameEngine<C = unknown> {
   configFields: ConfigFieldSpec[]
   defaultConfig(players: readonly RoundPlayer[]): C
   defaultHandicap(): HandicapSettings
-  /** [] = valid; otherwise human-readable problems shown in setup */
-  validateSetup(config: GameConfig<C>, players: readonly RoundPlayer[]): string[]
+  /**
+   * [] = valid; otherwise human-readable problems shown in setup.
+   *
+   * `siblings` is THE OTHER GAMES IN THE ROUND, this one excluded — setup can
+   * hold two instances of the same game (MAI-44), so "you've added Skins twice
+   * with identical settings" is only answerable with the round in view.
+   *
+   * It stays a validation channel, not a coupling: an engine may compare its
+   * own type's settings, but reading another engine — its meta, its derive —
+   * is invariant #7's one-way rule and is banned by lint. Nothing here reaches
+   * `derive`, so no sibling can ever move money.
+   */
+  validateSetup(
+    config: GameConfig<C>,
+    players: readonly RoundPlayer[],
+    siblings: readonly GameConfig[],
+  ): string[]
   /** zod schema per game/event kind this engine understands */
   eventKinds: Record<string, z.ZodType>
   /** Pure derivation from config + this game's events + the shared context. */

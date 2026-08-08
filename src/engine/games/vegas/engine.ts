@@ -3,6 +3,7 @@ import type { GameEngine, GameDerivation } from '../../catalog'
 import type { RoundContext } from '../../core/context'
 import type { GameScopedEvent } from '../../core/events'
 import { addLine, emptySettlement, type Settlement } from '../../core/money'
+import { duplicateInstanceProblems } from '../../core/setup'
 import { standingsFromSettlement } from '../../core/standings'
 import { firstName, joinNames, latestHoleSummary, summaryString } from '../../core/summary'
 import { teamsSchema, teamPartitionProblems } from '../../core/teams'
@@ -231,10 +232,15 @@ function derive(
   }
 }
 
+/** The one name for this game — `meta.name` and every message that has to
+ *  say it. label.ts is the single source of a game's name (MAI-42), so a
+ *  second literal in `validateSetup` would drift the moment this is renamed. */
+const VEGAS_NAME = 'Vegas'
+
 export const vegasEngine: GameEngine<VegasConfig> = {
   type: 'vegas',
   meta: {
-    name: 'Vegas',
+    name: VEGAS_NAME,
     blurb: 'Pair up. Team scores combine into one number — birdies flip the other side.',
     minPlayers: 4,
     maxPlayers: 4,
@@ -267,7 +273,7 @@ export const vegasEngine: GameEngine<VegasConfig> = {
   },
   configSchema: vegasConfigSchema,
   configFields: [
-    { key: 'pointCents', kind: 'money', label: 'Per point' },
+    { key: 'pointCents', kind: 'money', label: 'Per point', min: 5, max: 500, step: 5 },
     { key: 'teams', kind: 'teams', label: 'Teams' },
     { key: 'birdieFlip', kind: 'boolean', label: 'Birdie flip', hint: 'Gross birdie flips opponents' },
     { key: 'eagleDouble', kind: 'boolean', label: 'Eagle doubles', hint: 'Eagle doubles the hole' },
@@ -282,11 +288,16 @@ export const vegasEngine: GameEngine<VegasConfig> = {
     eagleDouble: true,
   }),
   defaultHandicap: (): HandicapSettings => ({ mode: 'net', allowancePct: 100, reference: 'offLow' }),
-  validateSetup: (config: GameConfig<VegasConfig>, players: readonly RoundPlayer[]) => {
-    if (players.length !== 4) return ['Vegas needs exactly 4 players']
+  validateSetup: (
+    config: GameConfig<VegasConfig>,
+    players: readonly RoundPlayer[],
+    siblings: readonly GameConfig[],
+  ) => {
+    const dupes = duplicateInstanceProblems(config, siblings, VEGAS_NAME)
+    if (players.length !== 4) return [...dupes, `${VEGAS_NAME} needs exactly 4 players`]
     const parsed = vegasConfigSchema.safeParse(config.config)
-    if (!parsed.success) return ['Invalid vegas configuration']
-    return teamPartitionProblems(parsed.data.teams, players, 'Vegas')
+    if (!parsed.success) return [...dupes, 'Invalid vegas configuration']
+    return [...teamPartitionProblems(parsed.data.teams, players, VEGAS_NAME), ...dupes]
   },
   eventKinds: {},
   derive,

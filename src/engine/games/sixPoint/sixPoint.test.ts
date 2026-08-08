@@ -241,17 +241,22 @@ describe('six point — golden fixtures (hand-verified)', () => {
       handicap: { mode: 'gross', allowancePct: 100, reference: 'absolute' },
       config: { pointCents: 100 },
     }
-    expect(sixPointEngine.validateSetup(cfg, makePlayers([{ name: 'A' }, { name: 'B' }]))).toEqual([
-      'Six Point is a threesome game — exactly 3 players',
-    ])
+    expect(
+      sixPointEngine.validateSetup(cfg, makePlayers([{ name: 'A' }, { name: 'B' }]), []),
+    ).toEqual(['Six Point is a threesome game — exactly 3 players'])
     expect(
       sixPointEngine.validateSetup(
         cfg,
         makePlayers([{ name: 'A' }, { name: 'B' }, { name: 'C' }, { name: 'D' }]),
+        [],
       ),
     ).toEqual(['Six Point is a threesome game — exactly 3 players'])
     expect(
-      sixPointEngine.validateSetup(cfg, makePlayers([{ name: 'A' }, { name: 'B' }, { name: 'C' }])),
+      sixPointEngine.validateSetup(
+        cfg,
+        makePlayers([{ name: 'A' }, { name: 'B' }, { name: 'C' }]),
+        [],
+      ),
     ).toEqual([])
   })
 })

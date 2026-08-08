@@ -4,6 +4,7 @@ import type { RoundContext } from '../../core/context'
 import type { GameScopedEvent } from '../../core/events'
 import { addLine, emptySettlement, type Settlement } from '../../core/money'
 import { rankPoints } from '../../core/points'
+import { duplicateInstanceProblems } from '../../core/setup'
 import { standingsFromSettlement } from '../../core/standings'
 import { firstName, joinNames, latestHoleSummary, summaryString } from '../../core/summary'
 import type { GameConfig, HandicapSettings, RoundPlayer, Uuid } from '../../core/types'
@@ -204,10 +205,15 @@ function derive(
   }
 }
 
+/** The one name for this game — `meta.name` and every message that has to
+ *  say it. label.ts is the single source of a game's name (MAI-42), so a
+ *  second literal in `validateSetup` would drift the moment this is renamed. */
+const SIX_POINT_NAME = 'Six Point'
+
 export const sixPointEngine: GameEngine<SixPointConfig> = {
   type: 'sixPoint',
   meta: {
-    name: 'Six Point',
+    name: SIX_POINT_NAME,
     blurb: 'Threesomes only. Six points split every hole by score: 4 · 2 · 0.',
     minPlayers: 3,
     maxPlayers: 3,
@@ -239,14 +245,19 @@ export const sixPointEngine: GameEngine<SixPointConfig> = {
     },
   },
   configSchema: sixPointConfigSchema,
-  configFields: [{ key: 'pointCents', kind: 'money', label: 'Per point' }],
+  configFields: [{ key: 'pointCents', kind: 'money', label: 'Per point', min: 5, step: 5 }],
   defaultConfig: () => ({ pointCents: 25 }),
   defaultHandicap: (): HandicapSettings => ({ mode: 'net', allowancePct: 100, reference: 'offLow' }),
-  validateSetup: (config: GameConfig<SixPointConfig>, players: readonly RoundPlayer[]) => {
+  validateSetup: (
+    config: GameConfig<SixPointConfig>,
+    players: readonly RoundPlayer[],
+    siblings: readonly GameConfig[],
+  ) => {
     const problems: string[] = []
-    if (players.length !== 3) problems.push('Six Point is a threesome game — exactly 3 players')
+    if (players.length !== 3) problems.push(`${SIX_POINT_NAME} is a threesome game — exactly 3 players`)
     const parsed = sixPointConfigSchema.safeParse(config.config)
     if (!parsed.success) problems.push('Invalid six point configuration')
+    problems.push(...duplicateInstanceProblems(config, siblings, SIX_POINT_NAME))
     return problems
   },
   eventKinds: {},

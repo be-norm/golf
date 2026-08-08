@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { wrapText } from './paintSummaryCard'
+import { cardScale, wrapText } from './paintSummaryCard'
 
 /**
  * The painter is deliberately untested as a whole — jsdom has no 2D context,
@@ -67,5 +67,28 @@ describe('wrapText', () => {
 
   it('is empty-safe', () => {
     expect(wrapText(mono, '', 10)).toEqual([])
+  })
+})
+
+/**
+ * The other pure part of the painter. Everything else here measures text in a
+ * 2D context, which jsdom does not have — but the retina cliff is arithmetic,
+ * and getting it wrong ships the card people actually share at half resolution
+ * without any visible failure.
+ */
+describe('cardScale', () => {
+  it('paints at 2× for any realistic round', () => {
+    // a 4-player, 8-game round lands well inside this; the tall end of the
+    // range is a nine played twice with a full scorecard
+    expect(cardScale(900)).toBe(2)
+    expect(cardScale(2400)).toBe(2)
+  })
+
+  it('drops to 1× only at the real ceiling, not the legacy one', () => {
+    // 8192 per side is what iOS Safari enforces, so 2× survives to 4096 logical
+    // px. The legacy 4096 figure put this cliff at 2048 — which a 4-player
+    // 3-game round clears, and those rounds shipped at 480px wide.
+    expect(cardScale(4096)).toBe(2)
+    expect(cardScale(4097)).toBe(1)
   })
 })

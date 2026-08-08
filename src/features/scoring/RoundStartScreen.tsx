@@ -18,8 +18,11 @@ const HOLES_LABEL: Record<string, string> = {
 }
 
 /** "Net · 80% · off the low" / "Gross — no strokes" */
-function handicapLine(h: HandicapSettings): string {
-  if (h.mode === 'gross') return 'Gross — no strokes'
+/** `h` is optional because a round pulled from the archive is applied with a
+ *  bare cast (remote/sync.ts), so a game written by another build can arrive
+ *  without one — and an unguarded read here throws inside a render. */
+function handicapLine(h: HandicapSettings | undefined): string {
+  if (h?.mode !== 'net') return 'Gross — no strokes'
   return `Net · ${h.allowancePct}%${h.reference === 'offLow' ? ' · off the low' : ''}`
 }
 
@@ -149,7 +152,7 @@ export function RoundStartScreen() {
 
       {/* Handicaps belong to the round, not to one game — and they're only
           honest to change while the card is blank, so they lock on first score. */}
-      {round.games.some((g) => g.handicap.mode === 'net') && (
+      {round.games.some((g) => g.handicap?.mode === 'net') && (
         <section className="pixel border-stone-700 bg-stone-900/60 p-4">
           <h2 className="font-display text-[10px] uppercase text-stone-400">Course handicaps</h2>
           {/* Once scoring starts the per-game rows below already carry each CH,
@@ -183,7 +186,7 @@ export function RoundStartScreen() {
           const label = gameLabel(game, round.games)
           const config = (game.config ?? {}) as Record<string, unknown>
           const chips = configChips(engine, config)
-          const isNet = game.handicap.mode === 'net'
+          const isNet = game.handicap?.mode === 'net'
           const rows = round.players
             .map((p) => ({
               p,

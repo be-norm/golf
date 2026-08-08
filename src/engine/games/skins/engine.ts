@@ -3,6 +3,7 @@ import type { GameEngine, GameDerivation } from '../../catalog'
 import type { RoundContext } from '../../core/context'
 import type { GameScopedEvent } from '../../core/events'
 import { addLine, emptySettlement, type Settlement } from '../../core/money'
+import { duplicateInstanceProblems } from '../../core/setup'
 import { standingsFromSettlement } from '../../core/standings'
 import { latestHoleSummary, summaryString } from '../../core/summary'
 import type { GameConfig, HandicapSettings, RoundPlayer, Uuid } from '../../core/types'
@@ -165,10 +166,15 @@ function derive(
   }
 }
 
+/** The one name for this game — `meta.name` and every message that has to
+ *  say it. label.ts is the single source of a game's name (MAI-42), so a
+ *  second literal in `validateSetup` would drift the moment this is renamed. */
+const SKINS_NAME = 'Skins'
+
 export const skinsEngine: GameEngine<SkinsConfig> = {
   type: 'skins',
   meta: {
-    name: 'Skins',
+    name: SKINS_NAME,
     blurb: 'Win the hole outright, win the skin. Ties carry over.',
     minPlayers: 2,
     maxPlayers: 8,
@@ -206,7 +212,7 @@ export const skinsEngine: GameEngine<SkinsConfig> = {
   },
   configSchema: skinsConfigSchema,
   configFields: [
-    { key: 'stakeCents', kind: 'money', label: 'Skin value' },
+    { key: 'stakeCents', kind: 'money', label: 'Skin value', min: 25, step: 25 },
     { key: 'carryover', kind: 'boolean', label: 'Carryovers', hint: 'Tied holes roll over' },
   ],
   defaultConfig: () => ({ stakeCents: 100, carryover: true }),
@@ -215,11 +221,18 @@ export const skinsEngine: GameEngine<SkinsConfig> = {
     allowancePct: 100,
     reference: 'offLow',
   }),
-  validateSetup: (config: GameConfig<SkinsConfig>, players: readonly RoundPlayer[]) => {
+  validateSetup: (
+    config: GameConfig<SkinsConfig>,
+    players: readonly RoundPlayer[],
+    siblings: readonly GameConfig[],
+  ) => {
     const problems: string[] = []
-    if (players.length < 2) problems.push('Skins needs at least 2 players')
+    if (players.length < 2) problems.push(`${SKINS_NAME} needs at least 2 players`)
     const parsed = skinsConfigSchema.safeParse(config.config)
     if (!parsed.success) problems.push('Invalid skins configuration')
+    // Gross skins beside net skins is a real round — only settings identical
+    // in every respect are a mistap. See duplicateInstanceProblems.
+    problems.push(...duplicateInstanceProblems(config, siblings, SKINS_NAME))
     return problems
   },
   eventKinds: {},

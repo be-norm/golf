@@ -162,6 +162,131 @@ describe('buildSummaryCard', () => {
     expect(c.games[0]!.lines[0]!.value).toMatch(/Hole 1/)
   })
 
+  /**
+   * MAI-50. One panel per game is fine at two and a scrolling wall at six, and
+   * the shared PNG has a real height budget — so the side bets fold into one
+   * panel HERE, in the model, where the settle screen and the painter both read
+   * it and so cannot disagree about it.
+   */
+  describe('side-bet grouping', () => {
+    /** A nassau main event with two skins side bets beside it. */
+    const roundWithSideBets = () => {
+      const round = makeRound({
+        players: makePlayers([{ name: 'Ben' }, { name: 'Al' }]),
+        holes: 'front9',
+        games: [
+          { type: 'nassau', config: { stakeCents: 500, teams: null, autoPress: false } },
+          { type: 'skins', config: { stakeCents: 100, carryover: true } },
+          { type: 'skins', config: { stakeCents: 200, carryover: false } },
+        ],
+      })
+      const log = new EventLog(round.id)
+      log.scoreByHole(round, { Ben: [3, 4], Al: [4, 4] }, [1, 2])
+      return { round, log }
+    }
+
+    it('folds several side bets into one panel, main games untouched', () => {
+      const { round, log } = roundWithSideBets()
+      const c = card(round, log)
+
+      expect(c.games).toHaveLength(2)
+      expect(c.games[0]!.name).toBe('Nassau')
+      expect(c.games[1]!.name).toBe('Side bets')
+      // each side bet keeps its own name as the gold chip on its first line, so
+      // the grouped panel still says who won what
+      const chips = c.games[1]!.lines.filter((l) => l.label !== '').map((l) => l.label)
+      expect(chips).toHaveLength(2)
+      expect(chips.every((l) => l.startsWith('Skins'))).toBe(true)
+    })
+
+    /**
+     * The empty value is the trap: `wrapText('')` returns [], so the painter
+     * reserves ZERO height for such a row and draws the next line on top of it.
+     * Every grouped row must carry something.
+     */
+    it('never emits a row with an empty value', () => {
+      const { round, log } = roundWithSideBets()
+      const grouped = card(round, log).games[1]!
+      expect(grouped.lines.length).toBeGreaterThan(0)
+      expect(grouped.lines.every((l) => l.value.trim() !== '')).toBe(true)
+    })
+
+    it('keeps notes as notes, attributed to the game that said them', () => {
+      const round = makeRound({
+        players: makePlayers([{ name: 'Ben' }, { name: 'Al' }]),
+        holes: 'front9',
+        games: [
+          { type: 'nassau', config: { stakeCents: 500, teams: null, autoPress: false } },
+          { type: 'skins', config: { stakeCents: 100, carryover: true } },
+          { type: 'skins', config: { stakeCents: 200, carryover: true } },
+        ],
+      })
+      const log = new EventLog(round.id)
+      log.scoreByHole(round, { Ben: [4, 4], Al: [4, 4] }, [1, 2]) // all tied
+      log.append({ type: 'round/completed' })
+
+      const grouped = card(round, log).games[1]!
+      // narration stayed in `notes` — merging it into `lines` is exactly what
+      // MAI-40 undid, and would make "No money moved." false
+      expect(grouped.notes.length).toBeGreaterThan(0)
+      expect(grouped.notes.every((n) => n.startsWith('Skins'))).toBe(true)
+      // a side bet that moved nothing still says so rather than vanishing
+      expect(grouped.lines.some((l) => l.value === 'No money moved.')).toBe(true)
+    })
+
+    it('does NOT group a lone side bet — that saves no space and costs detail', () => {
+      const round = makeRound({
+        players: makePlayers([{ name: 'Ben' }, { name: 'Al' }]),
+        holes: 'front9',
+        games: [
+          { type: 'nassau', config: { stakeCents: 500, teams: null, autoPress: false } },
+          { type: 'skins', config: { stakeCents: 100, carryover: true } },
+        ],
+      })
+      const log = new EventLog(round.id)
+      log.scoreByHole(round, { Ben: [3, 4], Al: [4, 4] }, [1, 2])
+
+      const c = card(round, log)
+      expect(c.games.map((g) => g.name)).toEqual(['Nassau', 'Skins'])
+    })
+
+    it('does NOT group a round that is only side bets', () => {
+      // two "either" games and nothing else: roleOf makes the first the main
+      // event, so there is no all-side round to collapse in the first place
+      const round = makeRound({
+        players: makePlayers([{ name: 'Ben' }, { name: 'Al' }]),
+        holes: 'front9',
+        games: [
+          { type: 'skins', config: { stakeCents: 100, carryover: true } },
+          { type: 'skins', config: { stakeCents: 200, carryover: true } },
+        ],
+      })
+      const log = new EventLog(round.id)
+      log.scoreByHole(round, { Ben: [3, 4], Al: [4, 4] }, [1, 2])
+
+      expect(card(round, log).games).toHaveLength(2)
+    })
+
+    /** The height budget in the form that is actually testable: panel count. */
+    it('holds an eight-game round to two panels', () => {
+      const round = makeRound({
+        players: makePlayers([{ name: 'Ben' }, { name: 'Al' }]),
+        holes: 'front9',
+        games: [
+          { type: 'nassau', config: { stakeCents: 500, teams: null, autoPress: false } },
+          ...Array.from({ length: 7 }, (_, i) => ({
+            type: 'skins',
+            config: { stakeCents: 100 + i, carryover: true },
+          })),
+        ],
+      })
+      const log = new EventLog(round.id)
+      log.scoreByHole(round, { Ben: [3, 4], Al: [4, 4] }, [1, 2])
+
+      expect(card(round, log).games).toHaveLength(2)
+    })
+  })
+
   it('splits 18 holes into two halves with pars, totals and stroke flags', () => {
     const round = makeRound({
       players: makePlayers([{ name: 'Ben', ch: 18 }, { name: 'Al', ch: 0 }]),
