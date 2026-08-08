@@ -36,6 +36,22 @@ export type WolfConfig = z.infer<typeof wolfConfigSchema>
  * Ties halve the hole. After the rotation runs out (holes 17–18, or the 9th
  * hole of a nine), the player with the fewest points is the wolf — still the
  * trailing player now that the totals can go negative.
+ *
+ * LONE AND BLIND ARE SYMMETRIC ON PURPOSE, and that is a design decision, not
+ * an oversight. It means going lone breaks even only when your single ball
+ * beats the best of three MORE THAN HALF the time — realistically a quarter to
+ * a third, even off a great drive — so the wolf should usually decline, and
+ * takes it when they are genuinely, visibly confident. That is the call the
+ * option is meant to be.
+ *
+ * Traditional tables instead pay a premium for going lone (win 4 against a
+ * partnered 2) to price the 1-v-3 odds, and a reviewer will reasonably ask for
+ * one. We chose otherwise: a premium makes lone the default play, which is the
+ * failure this whole change fixed, just at a gentler slope. If it is ever
+ * revisited, change the multipliers deliberately — a lone win worth 3 holes
+ * against a loss worth 1 gives the wolf +9/−3 and a ~25% break-even, still
+ * zero-sum — rather than letting an asymmetry emerge from two conventions
+ * disagreeing, which is how the original bug happened.
  */
 const HOLE_UNITS: Record<WolfPick['kind'], number> = {
   partner: 1,
