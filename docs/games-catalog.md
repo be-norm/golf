@@ -79,11 +79,15 @@ Extra inputs: per-hole pick — partner / lone / blind.
 Wolf tees last (config), picks a partner immediately after that player's drive or passes;
 pass all three = **Lone Wolf** (1v3). **Blind Wolf** = declare solo before anyone tees (3×).
 Hole decided by best net ball of each side.
-- **Point table (config, no universal standard):** Wolf+partner win: 2 each · non-wolf pair win:
-  3 each · Lone Wolf wins: 4 · Lone Wolf loses: 1 each to others · Blind multiplies.
+- **Stakes, not a score table (MAI-83):** every player has the stake on the line each hole;
+  a won hole pays one stake per player in 2v2. Lone DOUBLES the hole and Blind TRIPLES it, and
+  the outnumbered wolf plays that stake against EACH opponent — so at $1 a hole, lone is
+  ±$6 for the wolf and ∓$2 for the others, blind is ±$9 / ∓$3. Symmetric both ways, so going
+  lone is a real gamble rather than free money. The pack gets no bonus for beating the picker.
+  (Tables vary by group; this one is `HOLE_UNITS` in the engine.)
 - Ties: halved (config: carryover doubles next hole).
 - Holes 17–18: lowest-points player is Wolf (config alternates).
-- Config: point table, lone/blind multipliers, tie carryover, 17–18 rule, wolf tee position, $/point.
+- Config: per-hole stake, lone/blind multipliers, tie carryover, 17–18 rule, wolf tee position.
 
 ### 4. Vegas `[shipped]`
 **Format:** exactly 4, two fixed teams. **Tier 1. Strokes-only.**

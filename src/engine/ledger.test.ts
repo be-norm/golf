@@ -190,12 +190,13 @@ describe('buildHoleLedger', () => {
     const wolf = ledger.get('game-1')!
     expect(wolf).toHaveLength(1)
     expect(wolf[0]!.hole).toBe(1)
-    // A+2 B+2 points → pairwise money: A/B +$4, C/D −$4
+    // A rides with B and their 4 beats C/D's 5. Partnered is one unit and the
+    // sides are even, so the hole is worth its stake to each player: ±$1.
     expect(wolf[0]!.deltas).toEqual([
-      { playerId: 'p-a', cents: 400 },
-      { playerId: 'p-b', cents: 400 },
-      { playerId: 'p-c', cents: -400 },
-      { playerId: 'p-d', cents: -400 },
+      { playerId: 'p-a', cents: 100 },
+      { playerId: 'p-b', cents: 100 },
+      { playerId: 'p-c', cents: -100 },
+      { playerId: 'p-d', cents: -100 },
     ])
   })
 
