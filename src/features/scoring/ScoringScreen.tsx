@@ -145,9 +145,17 @@ export function ScoringScreen() {
     if (last) void eventStore.append(round.id, [{ type: 'meta/retract', targetEventId: last.id }])
   }
 
-  const answerInput = (input: InputRequest, choice: string) => {
+  // An option's own `data` rides UNDER `{ hole, choice }`, never over it: those
+  // two are the channel's contract, and an option disagreeing with the prompt
+  // it was rendered beneath is a bug rather than a feature (MAI-46).
+  const answerInput = (input: InputRequest, option: InputRequest['options'][number]) => {
     void eventStore.append(round.id, [
-      { type: 'game/event', gameId: input.gameId, kind: input.eventKind, data: { hole: input.hole, choice } },
+      {
+        type: 'game/event',
+        gameId: input.gameId,
+        kind: input.eventKind,
+        data: { ...option.data, hole: input.hole, choice: option.value },
+      },
     ])
   }
 
@@ -263,7 +271,7 @@ export function ScoringScreen() {
                 {input.options.map((o) => (
                   <button
                     key={o.value}
-                    onClick={() => answerInput(input, o.value)}
+                    onClick={() => answerInput(input, o)}
                     className="pixel-press border-stone-600 bg-stone-800 px-4 py-2.5 text-lg"
                   >
                     {o.label}
