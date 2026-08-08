@@ -253,6 +253,57 @@ describe('CourseSearch — one row per place (MAI-79)', () => {
     await userEvent.click(row)
     await waitFor(() => expect(onPicked).toHaveBeenCalledWith(localCourse))
     expect(importMock).not.toHaveBeenCalled() // the card was already here
+    // the id MATTERS: reading the wrong one throws 'course not found' in
+    // production while a permissive mock keeps the test green
+    expect(getMock).toHaveBeenCalledWith('og-7')
+  })
+
+  it('finds the saved copy under a folded-away id, not just the offered one', async () => {
+    // the whole reason savedAs searches every id: the library holds og-2, but
+    // the version on offer is gca:1
+    const onPicked = vi.fn()
+    const folded: CourseGroup = {
+      key: 'penmargolfcourse|veniceca',
+      name: 'Penmar Golf Course',
+      location: 'Venice, CA',
+      versions: [{ ...version('gca:1', 'api'), name: 'Penmar Golf Course', aliasIds: ['og-2'] }],
+    }
+    searchMock.mockResolvedValue([folded])
+    render(<CourseSearch localIds={new Set(['og-2'])} intent="play" onPicked={onPicked} />)
+    fireEvent.change(screen.getByPlaceholderText('Search courses (online)…'), {
+      target: { value: 'penmar' },
+    })
+
+    await userEvent.click(await header(/Penmar Golf Course/))
+    await waitFor(() => expect(getMock).toHaveBeenCalledWith('og-2'))
+    expect(importMock).not.toHaveBeenCalled()
+  })
+
+  it('does not quote the directory\'s date for a card it will serve from the cache', async () => {
+    // the date describes the card on the server; a saved copy may predate it,
+    // and that copy is what freezes into the round
+    const saved = { ...MINE, id: 'v-mine' }
+    const group: CourseGroup = { ...broadmoor, versions: [saved, THEIRS, API] }
+    searchMock.mockResolvedValue([group])
+    render(<CourseSearch localIds={new Set(['v-mine'])} intent="play" />)
+    fireEvent.change(screen.getByPlaceholderText('Search courses (online)…'), {
+      target: { value: 'broadmoor' },
+    })
+    await userEvent.click(await header(/Broadmoor Country Club/))
+
+    // the held copy says so instead of quoting 12 Jul 2026…
+    expect(screen.getByText('· in your library')).toBeInTheDocument()
+    expect(screen.queryByText('· 12 Jul 2026')).not.toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: 'Play Broadmoor Country Club — your version, your saved copy' }),
+    ).toBeInTheDocument()
+    // …while a version we'd actually fetch still carries its date
+    expect(screen.getByText('· 3 Jun 2026')).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', {
+        name: 'Play Broadmoor Country Club — community version, updated 3 Jun 2026',
+      }),
+    ).toBeInTheDocument()
   })
 
   it('still finishes at "saved ✓" when the search is for stocking the library', async () => {

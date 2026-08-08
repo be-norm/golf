@@ -46,7 +46,9 @@ function versionLabel(
   const kind = v.kind === 'api' ? 'directory version' : v.mine ? 'your version' : 'community version'
   const dated = on ? `, updated ${on}` : ''
   const what = `${v.name} — ${kind}${dated}`
-  if (intent === 'play') return `Play ${what}`
+  if (intent === 'play') {
+    return saved ? `Play ${v.name} — ${kind}, your saved copy` : `Play ${what}`
+  }
   return saved ? `${what}, already in your library` : `Add ${what}`
 }
 
@@ -262,7 +264,12 @@ export function CourseSearch({ localIds, intent = 'add', onPicked, placeholder }
                     <ul id={panelId} className="border-t border-felt-800/60">
                       {g.versions.map((v) => {
                         const state = rowState(v)
-                        const on = updatedOn(v)
+                        // A card we already hold is served from the cache, so
+                        // the directory's "last corrected" date describes a
+                        // scorecard we are NOT about to hand over. Say which
+                        // one you're getting instead of quoting a date for
+                        // something else.
+                        const on = state.here ? undefined : updatedOn(v)
                         return (
                         <li key={v.id}>
                           <button
@@ -276,6 +283,11 @@ export function CourseSearch({ localIds, intent = 'add', onPicked, placeholder }
                               {on && (
                                 <span className="font-display ml-2 text-[9px] uppercase text-stone-500">
                                   · {on}
+                                </span>
+                              )}
+                              {state.here && (
+                                <span className="font-display ml-2 text-[9px] uppercase text-stone-500">
+                                  · in your library
                                 </span>
                               )}
                               {/* over-merge insurance: the group key ignores

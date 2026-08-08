@@ -34,6 +34,16 @@ interface PlayerDraft {
   ghinNumber?: string
 }
 
+/**
+ * The wizard's steps, named. Splitting the course picker in two meant
+ * renumbering seven bare integers by hand, and a missed one fails silently and
+ * specifically: leaving `problems` on the players step would have validated
+ * nothing on the games step and let an invalid game tee off.
+ */
+const STEP = { course: 0, tees: 1, players: 2, games: 3 } as const
+type Step = (typeof STEP)[keyof typeof STEP]
+const LAST_STEP = STEP.games
+
 let draftCounter = 0
 const nextDraftId = () => `draft-${++draftCounter}-${Math.random().toString(36).slice(2, 8)}`
 
@@ -53,8 +63,19 @@ export function SetupScreen() {
   const courses = useLiveQuery(() => courseRepo.list(activeUserId), [activeUserId])
   const roster = useLiveQuery(() => playerRepo.list(activeUserId), [activeUserId])
 
-  const [step, setStep] = useState(0)
-  const [courseId, setCourseId] = useState<string>()
+  const [step, setStep] = useState<Step>(STEP.course)
+  /**
+   * The course you chose, held as the CARD and not just its id.
+   *
+   * Deriving it from the live library made setup depend on membership twice
+   * over: right after a search-import the query hasn't re-run yet, so step 1
+   * rendered "that course has left your library" about the course you had just
+   * successfully added — and a genuine removal mid-setup silently un-rated
+   * every handicap and turned Tee off into a no-op. A round freezes its own
+   * `courseSnapshot` anyway (invariant #4), so what you're playing does not
+   * depend on the library still listing it.
+   */
+  const [picked, setPicked] = useState<Course>()
   const [teeSetId, setTeeSetId] = useState<string>()
   const [holes, setHoles] = useState<RoundHoles>('full18')
   const [players, setPlayers] = useState<PlayerDraft[]>([])
@@ -73,7 +94,25 @@ export function SetupScreen() {
    */
   const autoOpened = useRef(false)
 
-  const course = courses?.find((c) => c.id === courseId)
+  /**
+   * Picking a course now advances the step, which unmounts the button that was
+   * just activated — focus would land back on <body> with nothing announced.
+   * Every other transition rides the persistent Continue button, which keeps
+   * its focus, so this moves focus to the new step's question instead.
+   */
+  const heading = useRef<HTMLHeadingElement>(null)
+  const landed = useRef(false)
+  useEffect(() => {
+    if (!landed.current) {
+      landed.current = true // don't steal focus on first paint
+      return
+    }
+    heading.current?.focus()
+  }, [step])
+
+  // prefer the live row, so an edit to the card reaches this screen; fall back
+  // to the copy you picked, so a lagging query or a removal can't erase it
+  const course = courses?.find((c) => c.id === picked?.id) ?? picked
 
   // Pick a course + its first tee, and reset the hole range to that course's
   // default — a nine to its nine, an eighteen to the full round. Without the
@@ -81,9 +120,17 @@ export function SetupScreen() {
   // silently tee an 18-hole course off as a partial round ('front9' is valid
   // for both, so `playedHoles` wouldn't correct it).
   const selectCourse = (c: Course) => {
-    setCourseId(c.id)
+    // Re-tapping the course you already chose is navigation, not a new choice.
+    // Now that the tees live on their own screen, resetting here would throw
+    // away a hole range picked two screens ago for no visible reason.
+    if (c.id === picked?.id) return setStep(STEP.tees)
+    setPicked(c)
     setTeeSetId(c.teeSets[0]?.id)
     setHoles(c.holeCount === 9 ? 'front9' : 'full18')
+    // …and move on. Tees and holes belong to the course you just chose, so
+    // asking for them beneath a list of every OTHER course invited the reader
+    // to think the list was still the question.
+    setStep(STEP.tees)
   }
 
   const holeOptions: [RoundHoles, string][] =
@@ -110,7 +157,11 @@ export function SetupScreen() {
     () => (course && playTwice ? doubleNine(course) : course),
     [course, playTwice],
   )
-  const playedTee = played?.teeSets.find((t) => t.id === teeSetId)
+  // Self-correcting, like `playedHoles` above and for the same reason: the card
+  // is a live query and its tee set can change shape under a stale `teeSetId`.
+  // Falling back to the first tee keeps the screen and teeOff agreeing.
+  const playedTee = played?.teeSets.find((t) => t.id === teeSetId) ?? played?.teeSets[0]
+  const activeTeeId = course?.teeSets.find((t) => t.id === teeSetId)?.id ?? course?.teeSets[0]?.id
 
   // Handicaps get quietly scaled for a nine; say so rather than let the numbers
   // look wrong.
@@ -154,7 +205,16 @@ export function SetupScreen() {
   }
 
   const canContinue =
-    step === 0 ? !!course && !!teeSetId : step === 1 ? players.length >= 2 : games.length >= 1
+    step === STEP.course
+      ? !!course
+      : step === STEP.tees
+        ? // the RESOLVED tee, not the id: a stale id that no longer names a tee
+          // on this card would pass a truthiness check and then dead-end at
+          // teeOff's own guard, with Tee off doing nothing and saying nothing
+          !!course && !!playedTee
+        : step === STEP.players
+          ? players.length >= 2
+          : games.length >= 1
 
   const draftRoundPlayers = players.map((p) => ({
     playerId: p.draftId,
@@ -163,7 +223,7 @@ export function SetupScreen() {
   }))
 
   useEffect(() => {
-    if (step !== 2 || games.length > 0 || autoOpened.current) return
+    if (step !== STEP.games || games.length > 0 || autoOpened.current) return
     autoOpened.current = true
     setPicker('main')
   }, [step, games.length])
@@ -179,7 +239,7 @@ export function SetupScreen() {
   const sideDrafts = games.filter((g) => g.section === 'side')
 
   const problems =
-    step === 2
+    step === LAST_STEP
       ? // DEDUPED: two drafts with identical settings each report the same
         // duplicate string, and the list below keys on the message.
         [
@@ -287,11 +347,11 @@ export function SetupScreen() {
   return (
     <main className="flex min-h-dvh flex-col gap-5 py-6">
       <header className="flex items-center justify-between pt-2">
-        <button className="text-stone-400" onClick={() => (step === 0 ? navigate('/') : setStep(step - 1))}>
+        <button className="text-stone-400" onClick={() => (step === STEP.course ? navigate('/') : setStep((step - 1) as Step))}>
           ← Back
         </button>
         <div className="flex gap-1.5">
-          {[0, 1, 2].map((s) => (
+          {Object.values(STEP).map((s) => (
             <div
               key={s}
               className={`h-1.5 w-8 rounded-full ${s <= step ? 'bg-felt-500' : 'bg-stone-800'}`}
@@ -301,9 +361,11 @@ export function SetupScreen() {
         <span className="w-12" />
       </header>
 
-      {step === 0 && (
+      {step === STEP.course && (
         <section className="flex flex-col gap-4">
-          <h1 className="font-display text-sm uppercase text-felt-300">Where are you playing?</h1>
+          <h1 ref={heading} tabIndex={-1} className="font-display text-sm uppercase text-felt-300 outline-none">
+            Where are you playing?
+          </h1>
           <CourseSearch
             localIds={new Set(courses?.map((c) => c.id))}
             intent="play"
@@ -316,7 +378,7 @@ export function SetupScreen() {
                 key={c.id}
                 onClick={() => selectCourse(c)}
                 className={`block w-full px-4 py-4 text-left ${
-                  c.id === courseId
+                  c.id === picked?.id
                     ? 'pixel border-felt-300 bg-felt-700'
                     : 'pixel border-stone-700 bg-stone-900/70'
                 }`}
@@ -331,6 +393,32 @@ export function SetupScreen() {
           <Link to="/courses" className="text-sm text-felt-400">
             Manage courses →
           </Link>
+        </section>
+      )}
+
+      {/* Tees and holes are questions ABOUT the chosen course, so they get the
+          screen to themselves. Sharing step 0 with the course list meant
+          choosing a tee while every other course sat above it still looking
+          like the live question — and Back is how you change your mind. */}
+      {step === STEP.tees && (
+        <section className="flex flex-col gap-4">
+          <div>
+            <h1 ref={heading} tabIndex={-1} className="font-display text-sm uppercase text-felt-300 outline-none">
+              How are you playing it?
+            </h1>
+            {course && (
+              <p className="mt-2 text-lg font-semibold">
+                {course.name}
+                {/* the mark travels with the name (MAI-77): this is the last
+                    screen before the card freezes into the round, and two
+                    versions of one course read identically without it */}
+                <CourseSourceMark source={course.source} mine={ownsCourse(course, activeUserId)} />
+                {course.location && (
+                  <span className="ml-2 text-sm font-normal text-stone-400">{course.location}</span>
+                )}
+              </p>
+            )}
+          </div>
 
           {course && (
             <>
@@ -342,7 +430,7 @@ export function SetupScreen() {
                       key={t.id}
                       onClick={() => setTeeSetId(t.id)}
                       className={`px-4 py-2.5 text-lg ${
-                        t.id === teeSetId
+                        t.id === activeTeeId
                           ? 'pixel border-felt-300 bg-felt-700'
                           : 'pixel border-stone-700 bg-stone-900/70'
                       }`}
@@ -379,9 +467,11 @@ export function SetupScreen() {
         </section>
       )}
 
-      {step === 1 && (
+      {step === STEP.players && (
         <section className="flex flex-col gap-4">
-          <h1 className="font-display text-sm uppercase text-felt-300">Who's playing?</h1>
+          <h1 ref={heading} tabIndex={-1} className="font-display text-sm uppercase text-felt-300 outline-none">
+            Who's playing?
+          </h1>
           <form
             className="flex gap-2"
             onSubmit={(e) => {
@@ -488,9 +578,18 @@ export function SetupScreen() {
         </section>
       )}
 
-      {step === 2 && (
+      {step === STEP.games && (
         <section className="flex flex-col gap-5">
-          <h1 className="font-display text-sm uppercase text-felt-300">What are you playing?</h1>
+          {/* `ref`/`tabIndex` from MAI-79: auto-advance unmounts the button the
+              user just activated, so focus is moved here rather than dropped to
+              <body>. */}
+          <h1
+            ref={heading}
+            tabIndex={-1}
+            className="font-display text-sm uppercase text-felt-300 outline-none"
+          >
+            What are you playing?
+          </h1>
 
           {/* CHOSEN ONLY. Listing every registered engine was fine at five games
               and unusable at twenty-five; the picker is the entry point now,
@@ -569,8 +668,8 @@ export function SetupScreen() {
       )}
 
       <div className="mt-auto pb-2">
-        {step < 2 ? (
-          <BigButton className="w-full" disabled={!canContinue} onClick={() => setStep(step + 1)}>
+        {step < LAST_STEP ? (
+          <BigButton className="w-full" disabled={!canContinue} onClick={() => setStep((step + 1) as Step)}>
             Continue
           </BigButton>
         ) : (
