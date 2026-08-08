@@ -441,6 +441,10 @@ function derive(
         effect: `${taken ? 'Running' : 'New'} ${formatCents(stake)} bet · ${span}`,
         // nothing to recommend once it's running
         recommended: !taken && (down?.by ?? 0) >= 2,
+        // The badge beside a gold row, in Nassau's own words. Two down is the
+        // traditional moment and the only one the game pushes; the offer itself
+        // stands at any deficit.
+        recommendedReason: '2 down',
         eventKind: 'nassau/press',
         data: { hole: frontier, segment: seg },
         ...(taken && {
@@ -564,6 +568,17 @@ export const nassauEngine: GameEngine<NassauConfig> = {
     // BOTH, declared as a set — the case that ruled a single-value team axis
     // out of `meta` entirely: teams: null is 1v1, teams: {...} is 2v2 or 2v1.
     shapes: ['headToHead', 'teams'],
+    actions: {
+      verb: 'Press',
+      plural: 'Presses',
+      blurb:
+        'A press is a new bet at the same stake, running from that hole to the end of the ' +
+        "stretch. You can press any bet you're down on.",
+      // States the RULE, not one of its causes. "Every bet is level" was true
+      // until bets could close: a decided bet isn't level, it's over, and this
+      // is the sheet that answers "why can't I press?" honestly.
+      emptyState: "Nothing to press — a press needs a live bet you're down on.",
+    },
     rules: {
       tagline: 'Three bets in one round: the front nine, the back nine, and the overall.',
       howToPlay: [

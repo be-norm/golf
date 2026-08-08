@@ -349,6 +349,29 @@ export type GameShape =
   /** sides that re-form each hole */
   | 'partners'
 
+/**
+ * How this game TALKS about its optional actions — the button, the sheet
+ * header, the explainer, the empty state.
+ *
+ * A sibling of `meta.rules` because it is the same kind of thing: player-facing
+ * copy the engine owns. `GameAction` is a generic channel, but every string
+ * around it used to be Nassau's, so the second action-bearing game would have
+ * inherited "Press" as its button and "a press is a new bet at the same stake"
+ * as its explanation (MAI-47).
+ *
+ * `plural` is declared rather than derived: "Press" + "s" is "Presss".
+ */
+export interface GameActionCopy {
+  /** the button and the sheet header — "Press" | "Throw" | "Wager" */
+  verb: string
+  /** the header when nothing names a hole — "Presses" */
+  plural: string
+  /** what taking one of these MEANS, in a sentence or two */
+  blurb: string
+  /** why there is nothing on offer, stated as the RULE rather than one cause */
+  emptyState: string
+}
+
 /** Player-facing rules, rendered generically by the rules sheet. Must describe
  *  THIS implementation (our point tables, our press conventions), not folklore. */
 export interface GameRules {
@@ -377,6 +400,14 @@ export interface GameEngine<C = unknown> {
     /** every shape this game can be played in; see GameShape */
     shapes: readonly GameShape[]
     rules: GameRules
+    /**
+     * Required of any engine whose `derive` returns `availableActions` — the
+     * shared affordance has no vocabulary of its own, and a game that offers
+     * actions without declaring this would render the previous game's verb.
+     * Enforced by catalog.test.ts rather than by the type, which cannot see
+     * inside `derive`.
+     */
+    actions?: GameActionCopy
   }
   configSchema: z.ZodType<C>
   configFields: ConfigFieldSpec[]

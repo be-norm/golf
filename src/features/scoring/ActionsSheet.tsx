@@ -1,4 +1,4 @@
-import type { GameAction, GameDerivation } from '../../engine/catalog'
+import type { GameAction, GameActionCopy, GameDerivation } from '../../engine/catalog'
 import { DetailLines } from '../../components/DetailLines'
 import { Sheet } from '../../components/Sheet'
 
@@ -6,6 +6,8 @@ interface ActionsSheetProps {
   open: boolean
   onClose: () => void
   actions: GameAction[]
+  /** the offering game's own vocabulary — this component owns none (MAI-47) */
+  copy: GameActionCopy
   /** every game with a ledger, so the sheet can show what the action acts ON */
   games: { gameId: string; name: string; derivation: GameDerivation }[]
   onTake: (action: GameAction) => void
@@ -23,7 +25,15 @@ interface ActionsSheetProps {
  * it again takes it back — a mistap on a money bet should not be final, and
  * hunting for the global undo is not an answer.
  */
-export function ActionsSheet({ open, onClose, actions, games, onTake, onUndo }: ActionsSheetProps) {
+export function ActionsSheet({
+  open,
+  onClose,
+  actions,
+  copy,
+  games,
+  onTake,
+  onUndo,
+}: ActionsSheetProps) {
   // Every action starts from the hole being played, which is what the screen is
   // showing — say it anyway, so a press never starts somewhere unexpected.
   const startHole = actions[0]?.hole
@@ -33,21 +43,18 @@ export function ActionsSheet({ open, onClose, actions, games, onTake, onUndo }: 
       <div className="space-y-5">
         <div>
           <h2 className="font-display text-xs uppercase text-felt-300">
-            {startHole === undefined ? 'Presses' : `Press from hole ${startHole}`}
+            {startHole === undefined ? copy.plural : `${copy.verb} from hole ${startHole}`}
           </h2>
-          <p className="mt-1 text-stone-400">
-            A press is a new bet at the same stake, running from that hole to the end of the
-            stretch. You can press any bet you're down on.
-          </p>
+          <p className="mt-1 text-stone-400">{copy.blurb}</p>
         </div>
 
         {actions.length === 0 ? (
-          // States the RULE, not one of its causes. "Every bet is level" was
-          // true until bets could close: a decided bet isn't level, it's over,
-          // and this sheet exists to answer "why can't I press?" honestly.
-          // Which bet is which is right below, in the per-bet ledger.
+          // The engine's own empty state — and it is expected to state the RULE
+          // rather than one of its causes, since this sheet exists to answer
+          // "why can't I do this?" honestly. Which bet is which is right below,
+          // in the per-bet ledger.
           <p className="pixel border-stone-700 bg-stone-800/50 p-4 text-lg text-stone-400">
-            Nothing to press — a press needs a live bet you're down on.
+            {copy.emptyState}
           </p>
         ) : (
           <ul className="space-y-2.5">
@@ -91,7 +98,10 @@ export function ActionsSheet({ open, onClose, actions, games, onTake, onUndo }: 
                       ) : a.taken ? (
                         <span className="text-stone-500">auto</span>
                       ) : (
-                        a.recommended && <span className="text-coin-400">2 down</span>
+                        a.recommended &&
+                        a.recommendedReason && (
+                          <span className="text-coin-400">{a.recommendedReason}</span>
+                        )
                       )}
                     </span>
                   </button>

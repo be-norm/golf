@@ -112,6 +112,35 @@ describe('engine registry invariants', () => {
   })
 
   /**
+   * `GameAction` is a generic channel, but the affordance around it has no
+   * vocabulary of its own (MAI-47) — so a game that offers actions and declares
+   * no copy would render whatever the previous game called its move, or the
+   * neutral fallback, with nothing saying why.
+   *
+   * The type cannot enforce this: whether a game offers actions is decided
+   * inside `derive`, not on `meta`. So it is checked here, against a real
+   * derivation rather than a promise.
+   */
+  it('every game offering actions declares how to talk about them', () => {
+    const players = makePlayers([{ name: 'A' }, { name: 'B' }, { name: 'C' }, { name: 'D' }])
+    for (const engine of shippedEngines()) {
+      const seated = players.slice(0, Math.max(engine.meta.minPlayers, 2))
+      const round = makeRound({
+        players: seated,
+        holes: 'front9',
+        games: [{ type: engine.type, config: engine.defaultConfig(seated) }],
+      })
+      const d = deriveRound(round, new EventLog().events).derivations.get('game-1')!
+      if (!d.availableActions) continue
+      const copy = engine.meta.actions
+      expect(copy, `${engine.type} offers actions with no meta.actions`).toBeDefined()
+      for (const [key, value] of Object.entries(copy!)) {
+        expect(value.length, `${engine.type} meta.actions.${key}`).toBeGreaterThan(0)
+      }
+    }
+  })
+
+  /**
    * A game that can be played solo AND in teams says so, but a game claiming
    * `teams` or `partners` must be able to seat them: two players cannot form
    * two sides, and a rotating-partner game needs at least three.

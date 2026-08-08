@@ -366,6 +366,19 @@ describe('ScoringScreen — award grid', () => {
   const cell = (name: string) =>
     screen.findByRole('button', { name: `Closest to the pin — ${name}` })
 
+  /**
+   * A cell's accessible NAME doesn't change when it lights up, so `findByRole`
+   * happily resolves the stale button before the live query has re-derived —
+   * and the next tap would then call onTake instead of onUndo. Wait on the
+   * state, never on the element.
+   */
+  const litCell = async (name: string) => {
+    await waitFor(async () => {
+      expect(await cell(name)).toHaveAttribute('aria-pressed', 'true')
+    })
+    return cell(name)
+  }
+
   it('offers a cell per player on a par 3, and nothing on a par 4', async () => {
     const round = await ctpRound('round-award-par3')
     showHole(round, 4)
@@ -451,9 +464,7 @@ describe('ScoringScreen — award grid', () => {
       expect(await eventStore.list(round.id)).toHaveLength(1)
     })
 
-    const lit = await cell('Ann')
-    expect(lit).toHaveAttribute('aria-pressed', 'true')
-    await userEvent.click(lit)
+    await userEvent.click(await litCell('Ann'))
 
     await waitFor(async () => {
       expect(await eventStore.list(round.id)).toHaveLength(2)
@@ -480,7 +491,7 @@ describe('ScoringScreen — award grid', () => {
       expect(await eventStore.list(round.id)).toHaveLength(1)
     })
 
-    const lit = await cell('Bob')
+    const lit = await litCell('Bob')
     fireEvent.click(lit)
     fireEvent.click(lit)
 

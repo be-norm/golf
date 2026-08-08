@@ -5,9 +5,11 @@ import { eventStore } from '../../db/eventStore'
 import { roundRepo } from '../../db/repos'
 import { effectiveEvents, isCompleted } from '../../engine/core/replay'
 import { combineSettlements, formatCentsSigned } from '../../engine/core/money'
+import { getEngine } from '../../engine/catalog'
 import type {
   Award,
   GameAction,
+  GameActionCopy,
   GameDerivation,
   GameEventOffer,
   InputRequest,
@@ -27,6 +29,18 @@ import { RulesSheet } from '../games/RulesSheet'
 import { useRound } from './useRound'
 import { holeLoop, ordinal } from './holeLoop'
 import { ScoreRow } from './ScoreRow'
+
+/**
+ * Used only when no single game owns the affordance — several games offering
+ * at once, or (a bug catalog.test.ts fails on) one that declares nothing.
+ * Deliberately says nothing about any game's rules.
+ */
+const DEFAULT_ACTION_COPY: GameActionCopy = {
+  verb: 'Actions',
+  plural: 'Actions',
+  blurb: 'Optional moves your games are offering right now. Each one says what it costs.',
+  emptyState: 'Nothing on offer right now.',
+}
 
 export function ScoringScreen() {
   const { roundId } = useParams<{ roundId: string }>()
@@ -77,6 +91,21 @@ export function ScoringScreen() {
     () => (view ? [...view.derivations.values()].some((d) => d.availableActions) : false),
     [view],
   )
+  // The vocabulary belongs to whichever game is actually offering (MAI-47).
+  // Exactly one → its own words, which is every round that exists today and is
+  // what makes Nassau render identically. Several games offering at once →
+  // neutral wording, because "⚡ Press" over a list holding a hammer throw
+  // would be worse than saying nothing specific. A game that offers actions
+  // without declaring copy is a bug catalog.test.ts fails on, but the fallback
+  // has to be safe rather than crash a scorekeeper mid-round.
+  const actionCopy = useMemo(() => {
+    if (!view) return DEFAULT_ACTION_COPY
+    const declared = view.round.games
+      .filter((g) => view.derivations.get(g.gameId)?.availableActions)
+      .map((g) => getEngine(g.type)?.meta.actions)
+      .filter((c): c is GameActionCopy => c !== undefined)
+    return declared.length === 1 ? declared[0]! : DEFAULT_ACTION_COPY
+  }, [view])
   const recommendsAction = actions.some((a) => a.recommended)
   // the badge counts what's still on OFFER — a press already running is in the
   // list so it can be undone, but it isn't something left to take
@@ -323,7 +352,7 @@ export function ScoringScreen() {
         <section className="mb-2 flex justify-end">
           <button
             onClick={() => setActionsOpen(true)}
-            aria-label={`press options — ${openActions} available`}
+            aria-label={`${actionCopy.verb.toLowerCase()} options — ${openActions} available`}
             className={`pixel-press font-display px-4 py-2 text-[10px] uppercase ${
               recommendsAction
                 ? 'border-coin-500 bg-coin-500/15 text-coin-400'
@@ -335,7 +364,7 @@ export function ScoringScreen() {
             {/* only the marker blinks — house convention (HomeScreen, UpdateToast).
                 A primary control that strobes for ten holes is worse than the
                 interrupting card this replaced. */}
-            {recommendsAction && <span className="animate-blink mr-1">▶</span>}⚡ Press
+            {recommendsAction && <span className="animate-blink mr-1">▶</span>}⚡ {actionCopy.verb}
             {openActions > 0 && <span className="ml-1.5">· {openActions}</span>}
           </button>
         </section>
@@ -521,6 +550,7 @@ export function ScoringScreen() {
         open={actionsOpen}
         onClose={() => setActionsOpen(false)}
         actions={actions}
+        copy={actionCopy}
         games={round.games.flatMap((g) => {
           const d = derivations.get(g.gameId)
           return d ? [{ gameId: g.gameId, name: gameLabel(g, round.games), derivation: d }] : []
