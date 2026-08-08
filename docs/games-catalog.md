@@ -87,7 +87,7 @@ Hole decided by best net ball of each side.
   (Tables vary by group; this one is `HOLE_UNITS` in the engine.)
 - Ties: halved (config: carryover doubles next hole).
 - Holes 17–18: lowest-points player is Wolf (config alternates).
-- Config: point table, lone/blind multipliers, tie carryover, 17–18 rule, wolf tee position, $/point.
+- Config: per-hole stake, lone/blind multipliers, tie carryover, 17–18 rule, wolf tee position.
 
 ### 4. Vegas `[shipped]`
 **Format:** exactly 4, two fixed teams. **Tier 1. Strokes-only.**

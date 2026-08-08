@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import '../index'
-import { deriveRound } from '../../catalog'
+import { deriveRound, getEngine } from '../../catalog'
 import { EventLog, makePlayers, makeRound } from '../../test/harness'
 
 function pick(log: EventLog, hole: number, choice: string) {
@@ -60,7 +60,7 @@ describe('wolf — golden fixture (hand-verified)', () => {
       C: [5, 4, 5, 4, 4, 4, 3, 5, 4],
       D: [5, 4, 5, 5, 4, 5, 4, 4, 4],
     })
-    pick(log, 9, 'p-b') // trailing-player wolf C rides with B
+    pick(log, 9, 'p-b') // trailing-player wolf (D, on −12) rides with B
 
     const d = deriveRound(round, log.events).derivations.get('game-1')!
     expect(d.settlement.perPlayerCents).toEqual({
@@ -76,7 +76,7 @@ describe('wolf — golden fixture (hand-verified)', () => {
     expect(d.holeSummary(2)[0]).toContain('B +6')
     // blind loss: the other three collect three stakes each
     expect(d.holeSummary(4)[0]).toContain('+3')
-    // bar recaps the latest decided hole (h9: C rides with B, C+B win → 2 each)
+    // bar recaps the latest decided hole (h9: D rides with B, 4 v 4 → halved)
     expect(d.summaryParts![0]!.label).toBe('H9')
   })
 
@@ -150,15 +150,19 @@ describe('wolf — golden fixture (hand-verified)', () => {
       return [c['p-a'], c['p-b'], c['p-c'], c['p-d']]
     }
 
-    it.each([
+    // typed, so swapping two columns is a compile error rather than a
+    // confusing assertion failure
+    const CASES: [label: string, choice: string, wolfLow: boolean, cents: number[]][] = [
       ['partnered win', 'p-b', true, [100, 100, -100, -100]],
       ['partnered loss', 'p-b', false, [-100, -100, 100, 100]],
       ['lone win', 'lone', true, [600, -200, -200, -200]],
       ['lone loss', 'lone', false, [-600, 200, 200, 200]],
       ['blind win', 'blind', true, [900, -300, -300, -300]],
       ['blind loss', 'blind', false, [-900, 300, 300, 300]],
-    ])('%s', (_label, choice, wolfLow, expected) => {
-      const cents = hole1(choice as string, wolfLow as boolean)
+    ]
+
+    it.each(CASES)('%s', (_label, choice, wolfLow, expected) => {
+      const cents = hole1(choice, wolfLow)
       expect(cents).toEqual(expected)
       expect(cents.reduce((a, b) => a! + b!, 0)).toBe(0)
     })
@@ -173,6 +177,50 @@ describe('wolf — golden fixture (hand-verified)', () => {
         const win = hole1(choice, true)
         const lose = hole1(choice, false)
         expect(win.map((c) => -c!)).toEqual(lose)
+      }
+    })
+  })
+
+  /**
+   * THE PAIRING THIS RESTS ON.
+   *
+   * `sideStake` balances for EVEN SIDES or a LONE side — not for any split. A
+   * 2-v-3 leaves a unit behind (match.test.ts says so outright), and the only
+   * reason Wolf never deals one is that `validateSetup` holds it to exactly
+   * four players. That is a pairing between two files, which is the kind that
+   * rots: raise `maxPlayers` for the 5-player variant the catalog anticipates
+   * and the money silently stops adding up.
+   *
+   * So this asserts the rule against the roster sizes Wolf ACCEPTS, rather
+   * than against the number 4. Widen the engine without generalising the
+   * settlement and it fails here.
+   */
+  describe('balances at every roster it accepts', () => {
+    const engine = getEngine('wolf')!
+
+    it('accepts only sizes whose every split balances', () => {
+      for (let count = 2; count <= 8; count++) {
+        const players = makePlayers(
+          ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'].slice(0, count).map((name) => ({ name })),
+        )
+        const config = {
+          gameId: 'g',
+          type: 'wolf',
+          handicap: engine.defaultHandicap(),
+          config: { pointCents: 100, rotation: players.map((p) => p.playerId) },
+        }
+        if (engine.validateSetup(config, players).length > 0) continue
+
+        // every side split this roster can produce: the wolf alone, or paired
+        for (const wolfSideSize of [1, 2]) {
+          const packSize = count - wolfSideSize
+          const balanced =
+            wolfSideSize === packSize || wolfSideSize === 1 || packSize === 1
+          expect(
+            balanced,
+            `wolf accepts ${count} players but a ${wolfSideSize}-v-${packSize} hole cannot balance — generalise the settlement before widening the roster`,
+          ).toBe(true)
+        }
       }
     })
   })

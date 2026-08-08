@@ -259,7 +259,11 @@ export function matchWonLabel(match: MatchState, sides: MatchSides): string | nu
 }
 
 /**
- * What one player on this side wagers per bet.
+ * What one player on this side wagers — in whatever unit the caller passes.
+ *
+ * BALANCES FOR EVEN SIDES OR A LONE SIDE, and not otherwise: a 3-v-2 does not,
+ * which `match.test.ts` pins explicitly. Every split a foursome can deal is one
+ * of the two that work, and both callers cap themselves at four players.
  *
  * A full side collectively wagers ONE stake (the 1v1/2v2 convention: a $5 bet
  * swings $5 per player). An outnumbered lone player instead plays that stake
@@ -268,7 +272,9 @@ export function matchWonLabel(match: MatchState, sides: MatchSides): string | nu
  * ≤4 players the only uneven split is a lone side, so it stays integer.
  */
 export function sideStake(
-  stakeCents: number,
+  // `stake`, not `stakeCents`: Nassau passes cents, Wolf passes dimensionless
+  // hole units and converts later. The rule is about SHARES, not money.
+  stake: number,
   // only the rosters — Wolf settles its holes with this rule and has no side
   // names to print (MatchSides satisfies it structurally, so Nassau is unchanged)
   sides: { a: readonly Uuid[]; b: readonly Uuid[] },
@@ -276,5 +282,5 @@ export function sideStake(
 ): number {
   const self = sides[side]
   const other = sides[side === 'a' ? 'b' : 'a']
-  return self.length === 1 ? stakeCents * other.length : stakeCents
+  return self.length === 1 ? stake * other.length : stake
 }

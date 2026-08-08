@@ -37,8 +37,8 @@ export type WolfConfig = z.infer<typeof wolfConfigSchema>
  * hole of a nine), the player with the fewest points is the wolf — still the
  * trailing player now that the totals can go negative.
  */
-const HOLE_UNITS = {
-  partnered: 1,
+const HOLE_UNITS: Record<WolfPick['kind'], number> = {
+  partner: 1,
   lone: 2,
   blind: 3,
 }
@@ -120,7 +120,17 @@ function derive(
     const wolfBest = ctx.bestNetAmongPosted(game.gameId, wolfSide, hole) ?? Infinity
     const packBest = ctx.bestNetAmongPosted(game.gameId, packSide, hole) ?? Infinity
     if (wolfBest === Infinity && packBest === Infinity) {
-      holeResults.push({ hole, wolfId, pick, points: new Map(), outcome: 'halved' })
+      // zeros, not an empty map: `points` is documented as the swing BY PLAYER,
+      // and a halved hole where nobody posted is the same outcome as a halved
+      // hole where everybody tied. One of them answering `undefined` to
+      // `points.get(id)` is a trap for the first consumer to trust the doc.
+      holeResults.push({
+        hole,
+        wolfId,
+        pick,
+        points: new Map(playerIds.map((id) => [id, 0])),
+        outcome: 'halved',
+      })
       return
     }
 
@@ -130,20 +140,22 @@ function derive(
       outcome = 'halved'
     } else {
       outcome = wolfBest < packBest ? 'wolfWin' : 'packWin'
-      const units =
-        pick.kind === 'blind'
-          ? HOLE_UNITS.blind
-          : pick.kind === 'lone'
-            ? HOLE_UNITS.lone
-            : HOLE_UNITS.partnered
+      // keyed by the pick's own discriminant, so a new kind is a compile error
+      // rather than silently falling through to the partnered stake
+      const units = HOLE_UNITS[pick.kind]
       // `sideStake` is the rule, not a table: an OUTNUMBERED player settles the
-      // hole against EACH opponent, evenly-matched sides settle it once. That
-      // is the same primitive Nassau uses for its 2-v-1, and taking it from
-      // there is what keeps this zero-sum BY CONSTRUCTION for any split —
-      // hardcoding "+6/−2" would balance only at exactly four players, and the
-      // catalog already anticipates 3- and 5-player Wolf.
+      // hole against EACH opponent, evenly-matched sides settle it once. Same
+      // primitive Nassau uses for its 2-v-1.
+      //
+      // IT BALANCES FOR EVEN SIDES OR A LONE SIDE — not for any split. A 2-v-3
+      // does NOT (2×1 against 3×1 leaves a unit behind), which match.test.ts
+      // states outright. Every split a FOURSOME can deal is one of the two that
+      // work, and `validateSetup` holds Wolf to exactly four; the catalog's
+      // 3/5-player variants would need this rule generalised first. That pairing
+      // is load-bearing, so `wolf.test.ts` asserts the holes balance at every
+      // player count `validateSetup` accepts — raise the cap and it fails.
       const sides = { a: wolfSide, b: packSide }
-      const sign = outcome === 'wolfWin' ? 1 : -1
+      const sign = wolfBest < packBest ? 1 : -1
       const wolfShare = sideStake(units, sides, 'a')
       const packShare = sideStake(units, sides, 'b')
       for (const id of wolfSide) points.set(id, sign * wolfShare)
@@ -160,13 +172,13 @@ function derive(
   // zero, which `sideStake` guarantees above and `wolf.test.ts` pins directly.
   const settlement: Settlement = emptySettlement(playerIds)
   for (const id of playerIds) {
-    settlement.perPlayerCents[id] = pointCents * (totals.get(id) ?? 0)
+    settlement.perPlayerCents[id] = pointCents * totals.get(id)!
   }
   // Totals are signed now, so they are written signed: "+6 pts" / "−12 pts".
   // An unsigned "-12 pts" beside "-$12" reads like the minus belongs to the
   // money alone.
   const ptsLabel = (id: Uuid) => {
-    const t = totals.get(id) ?? 0
+    const t = totals.get(id)!
     return `${t > 0 ? '+' : ''}${t} pt${Math.abs(t) === 1 ? '' : 's'}`
   }
   // Itemised per PLAYER rather than per transaction, which is why a player
@@ -180,7 +192,7 @@ function derive(
 
   const standings = standingsFromSettlement(players, settlement, (p) => ptsLabel(p.playerId))
 
-  // Bar recaps the latest decided hole — "H4 · Ben lone +4" / "Ben & Rob +2".
+  // Bar recaps the latest decided hole — "H4 · Ben lone +6" / "Ben & Rob +1".
   const pickTag = (r: WolfHoleResult): string =>
     r.pick!.kind === 'partner'
       ? `& ${nameOf.get(r.pick!.partnerId)}`
@@ -197,9 +209,18 @@ function derive(
       const gainers = [...r.points!.entries()].filter(([, p]) => p > 0)
       const pts = gainers[0]?.[1] ?? 0
       const names = gainers.map(([id]) => nameOf.get(id)).join(' & ')
-      // solo wins keep the mode tag ("Ben lone +4"); partner/pack just name them
-      const soloTag = r.pick!.kind !== 'partner' && r.outcome === 'wolfWin' ? ` ${pickTag(r)}` : ''
-      return `${names}${soloTag} +${pts}`
+      // the mode tag rides on ANY solo hole, won or lost ("Ben lone +6" /
+      // "Colby & DJ & Grant +2 · lone"): the multiplier is what makes those
+      // numbers surprising, and it is the losing side that sees the big one
+      const solo = r.pick!.kind !== 'partner'
+      // won or LOST. The multiplier is why the number is what it is, and the
+      // loser of a blind hole moves nine stakes — dropping the tag there left
+      // "+3" on the bar with nothing explaining why it wasn't "+1".
+      return solo
+        ? r.outcome === 'wolfWin'
+          ? `${names} ${pickTag(r)} +${pts}`
+          : `${names} +${pts} · ${pickTag(r)} lost`
+        : `${names} +${pts}`
     },
     'no points yet',
   )
@@ -247,14 +268,27 @@ function derive(
           ? 'lone'
           : 'blind'
     if (r.outcome === 'halved') return [`Wolf ${wolfName} (${pickLabel}) — halved`]
-    const gains = [...r.points!.entries()]
-      .filter(([, p]) => p > 0)
-      .map(([id, p]) => `${nameOf.get(id)} +${p}`)
+    // BOTH sides. Under the old score table a losing wolf simply scored 0, so
+    // listing gains alone lost nothing; now they pay the hole's whole swing —
+    // a blind loss is nine stakes — and a ledger that shows "A +3, B +3, C +3"
+    // without D's −9 is exactly the "reader has to ask why" this convention
+    // exists to prevent.
+    const swing = (p: number) => `${p > 0 ? '+' : ''}${p}`
+    const movement = [...r.points!.entries()]
+      .filter(([, p]) => p !== 0)
+      .sort((x, y) => y[1] - x[1])
+      .map(([id, p]) => `${nameOf.get(id)} ${swing(p)}`)
       .join(', ')
-    const lines = [`Wolf ${wolfName} (${pickLabel}) — ${gains}`]
+    const lines = [`Wolf ${wolfName} (${pickLabel}) — ${movement}`]
     // explain the elevated points behind a solo pick
-    if (r.pick!.kind === 'lone') lines.push('↳ lone wolf — solo stakes')
-    if (r.pick!.kind === 'blind') lines.push('↳ blind wolf — called before any tee shot')
+    // say what the multiplier DID — the swing is double or triple a partnered
+    // hole, and that is the whole reason these numbers look different
+    if (r.pick!.kind === 'lone') {
+      lines.push('↳ lone wolf — the hole doubles, and he plays it against all three')
+    }
+    if (r.pick!.kind === 'blind') {
+      lines.push('↳ blind wolf — called before any tee shot, so the hole triples')
+    }
     return lines
   }
 
@@ -302,7 +336,7 @@ export const wolfEngine: GameEngine<WolfConfig> = {
   },
   configSchema: wolfConfigSchema,
   configFields: [
-    { key: 'pointCents', kind: 'money', label: 'Per point' },
+    { key: 'pointCents', kind: 'money', label: 'Per hole', hint: "Each player's stake; lone doubles it, blind triples" },
     { key: 'rotation', kind: 'rotation', label: 'Wolf order' },
   ],
   defaultConfig: (players) => ({
