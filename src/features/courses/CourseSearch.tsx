@@ -19,20 +19,18 @@ interface Props {
   placeholder?: string
 }
 
-/** When this version was last corrected, or undefined if it has no usable date.
- *  Guarded like the ranking's `stamp`: an unparseable value would otherwise
- *  render "NaN undefined NaN" rather than simply omitting the date. */
+/** When this version was last corrected. Only a community card carries one; an
+ *  unusable stamp was already dropped at the query boundary (`toLibraryHit`),
+ *  so there is nothing to re-guard here. */
 function updatedOn(v: CourseVersion): string | undefined {
-  if (v.kind !== 'community' || !v.updatedAt) return undefined
-  return Number.isFinite(Date.parse(v.updatedAt)) ? formatDate(v.updatedAt) : undefined
+  return v.kind === 'community' && v.updatedAt ? formatDate(v.updatedAt) : undefined
 }
 
 /** What a version row reads out. The button's own label supersedes the source
  *  mark's, so it has to restate the kind and the date — and it names the
  *  VERSION, not the group, because that is the card being added. */
-function versionLabel(v: CourseVersion, saved: boolean): string {
+function versionLabel(v: CourseVersion, saved: boolean, on: string | undefined): string {
   const kind = v.kind === 'api' ? 'directory version' : v.mine ? 'your version' : 'community version'
-  const on = updatedOn(v)
   const dated = on ? `, updated ${on}` : ''
   return saved
     ? `${v.name} — ${kind}${dated}, already in your library`
@@ -91,6 +89,9 @@ export function CourseSearch({ localIds, onImported, placeholder }: Props) {
       requestSeq.current++
       setGroups(undefined)
       setSearching(false)
+      // the message now lives outside the results block, so it no longer
+      // disappears with them — it has to be cleared on its own
+      setError(undefined)
       return
     }
     debounce.current = setTimeout(() => {
@@ -123,10 +124,16 @@ export function CourseSearch({ localIds, onImported, placeholder }: Props) {
     setError(undefined)
     try {
       const course = await importCourseHit(activeUserId, version)
-      requestSeq.current++ // don't let an in-flight search repopulate the list
+      // both halves matter: the bump discards a search already in flight, and
+      // the clear kills one still queued behind the debounce. Without the
+      // clear, typing then picking repaints a full result list 350 ms later,
+      // underneath a search box the pick just emptied.
+      requestSeq.current++
+      clearTimeout(debounce.current)
       setQuery('')
       setGroups(undefined)
       setExpanded(undefined)
+      setSearching(false)
       onImported?.(course)
     } catch (e) {
       // keep the results and the open panel: the point of showing versions is
@@ -137,13 +144,21 @@ export function CourseSearch({ localIds, onImported, placeholder }: Props) {
     }
   }
 
+  // A version can already be in the library under a folded-away id, so the
+  // check is over all of them, and it's derived once per row rather than by
+  // each of the three things that need it.
   const saved = (v: CourseVersion) => versionIds(v).some((id) => localIds.has(id))
-  // every add is disabled while ANY import is in flight: two overlapping picks
-  // share one `importing` slot, so the first to settle would re-enable the
-  // second's row mid-flight and fire onImported twice
-  const disabled = (v: CourseVersion) => importing !== undefined || saved(v)
-  const action = (v: CourseVersion) =>
-    saved(v) ? 'saved ✓' : importing === v.id ? '…' : '+ add'
+  const rowState = (v: CourseVersion) => {
+    const here = saved(v)
+    return {
+      here,
+      // every add is disabled while ANY import is in flight: two overlapping
+      // picks share one `importing` slot, so the first to settle would
+      // re-enable the second's row mid-flight and fire onImported twice
+      disabled: importing !== undefined || here,
+      action: here ? 'saved ✓' : importing === v.id ? '…' : '+ add',
+    }
+  }
 
   return (
     <div>
@@ -166,28 +181,30 @@ export function CourseSearch({ localIds, onImported, placeholder }: Props) {
           <ul className="space-y-2">
             {groups.map((g) => {
               const only = g.versions.length === 1 ? g.versions[0] : undefined
+
+              if (only) {
+                const state = rowState(only)
+                return (
+                  <li key={g.key}>
+                    <button
+                      disabled={state.disabled}
+                      onClick={() => void pick(only)}
+                      className={`${ROW} flex w-full items-center justify-between px-4 py-3 text-left disabled:opacity-50`}
+                    >
+                      <ResultLine name={g.name} location={g.location} />
+                      <CourseSourceMark source={only.source} mine={only.mine} />
+                      <span className="ml-2 shrink-0 text-lg text-felt-400">{state.action}</span>
+                    </button>
+                  </li>
+                )
+              }
+
               const open = expanded === g.key
               const panelId = `${panelBase}-${g.key}`
               // without this a course already in your library reads only
               // "2 versions", and you add a SECOND version of it — the
               // duplicate problem, rebuilt inside your own library
               const savedHere = g.versions.some(saved)
-
-              if (only) {
-                return (
-                  <li key={g.key}>
-                    <button
-                      disabled={disabled(only)}
-                      onClick={() => void pick(only)}
-                      className={`${ROW} flex w-full items-center justify-between px-4 py-3 text-left disabled:opacity-50`}
-                    >
-                      <ResultLine name={g.name} location={g.location} />
-                      <CourseSourceMark source={only.source} mine={only.mine} />
-                      <span className="ml-2 shrink-0 text-lg text-felt-400">{action(only)}</span>
-                    </button>
-                  </li>
-                )
-              }
 
               return (
                 <li key={g.key} className={ROW}>
@@ -218,19 +235,22 @@ export function CourseSearch({ localIds, onImported, placeholder }: Props) {
                   </button>
                   {open && (
                     <ul id={panelId} className="border-t border-felt-800/60">
-                      {g.versions.map((v) => (
+                      {g.versions.map((v) => {
+                        const state = rowState(v)
+                        const on = updatedOn(v)
+                        return (
                         <li key={v.id}>
                           <button
-                            disabled={disabled(v)}
+                            disabled={state.disabled}
                             onClick={() => void pick(v)}
-                            aria-label={versionLabel(v, saved(v))}
+                            aria-label={versionLabel(v, state.here, on)}
                             className="flex w-full items-center justify-between px-4 py-2.5 text-left disabled:opacity-50"
                           >
                             <span className="min-w-0 truncate">
                               <CourseSourceMark source={v.source} mine={v.mine} />
-                              {updatedOn(v) && (
+                              {on && (
                                 <span className="font-display ml-2 text-[9px] uppercase text-stone-500">
-                                  · {updatedOn(v)}
+                                  · {on}
                                 </span>
                               )}
                               {/* over-merge insurance: the group key ignores
@@ -240,10 +260,13 @@ export function CourseSearch({ localIds, onImported, placeholder }: Props) {
                                 <span className="ml-2 truncate text-stone-400">{v.name}</span>
                               )}
                             </span>
-                            <span className="ml-2 shrink-0 text-lg text-felt-400">{action(v)}</span>
+                            <span className="ml-2 shrink-0 text-lg text-felt-400">
+                              {state.action}
+                            </span>
                           </button>
                         </li>
-                      ))}
+                        )
+                      })}
                     </ul>
                   )}
                 </li>

@@ -330,6 +330,23 @@ describe('groupCourseHits (one result per place, versions on demand — MAI-79)'
     expect(groups.map((g) => g.key)).toEqual(['id:a', 'id:b'])
   })
 
+  it('never groups nameless hits either — one bare half is not evidence', () => {
+    // GolfCourseAPI can return a course with neither club_name nor
+    // course_name, which golfApiName renders as ''. Guarding only the location
+    // half let two unrelated nameless cards in one town fuse into "2 versions".
+    const groups = groupCourseHits(
+      from({
+        golfcourseapi: [
+          hit('gca:1', '', 'Venice, CA', 'golfcourseapi'),
+          hit('gca:2', '', 'Venice, CA', 'golfcourseapi'),
+        ],
+      }),
+      ME,
+    )
+    expect(groups).toHaveLength(2)
+    expect(groups.map((g) => g.key)).toEqual(['id:gca:1', 'id:gca:2'])
+  })
+
   it('treats a punctuation-only location as no location at all', () => {
     // '-' and ',' survive .trim() but normalize to nothing, so a guard on the
     // RAW location would wave these straight through into the fusion it exists
@@ -387,14 +404,40 @@ describe('groupCourseHits (one result per place, versions on demand — MAI-79)'
     expect(groups.some((g) => g.versions[0]!.id === 'gca:1')).toBe(true)
   })
 
-  it('does not spend the library budget on my own versions', () => {
-    // the owned query exists to guarantee my card is offered; making it compete
-    // for the same 12 slots would hand back the failure it was added to remove
-    const owned = Array.from({ length: 14 }, (_, i) =>
-      community(`mine-${i}`, `Mine ${i}`, 'Town, ST', ME, '2026-06-01T12:00:00.000Z'),
+  it('counts MY versions against the same budget — a source that sidesteps it reserves nothing', () => {
+    // 10 of my own courses plus 10 library rows filled all 20 slots and hid
+    // every live directory result, which is the very failure the budget exists
+    // to prevent — a budget one Supabase source can walk around is not a budget
+    const owned = Array.from({ length: 10 }, (_, i) =>
+      community(`own-${i}`, `Golf ${i}`, 'Town, ST', ME, '2026-06-01T12:00:00.000Z'),
     )
-    const groups = groupCourseHits(from({ owned }), ME)
-    expect(groups).toHaveLength(14)
+    const library = Array.from({ length: 30 }, (_, i) =>
+      hit(`lib-${i}`, `Golf L${i}`, 'Town, ST', 'library'),
+    )
+    const groups = groupCourseHits(
+      from({ owned, library, golfcourseapi: [hit('gca:1', 'Golf Live', 'Town, ST', 'golfcourseapi')] }),
+      ME,
+    )
+    expect(groups.some((g) => g.versions.some((v) => v.origin === 'golfcourseapi'))).toBe(true)
+    // and mine come first within that budget, so they are never what's cut
+    expect(groups.slice(0, 10).every((g) => g.versions[0]!.mine)).toBe(true)
+  })
+
+  it('keeps a place the live directory found even when the library budget is spent', () => {
+    // the budgeted bucket was skipped WHOLE, so a course GolfCourseAPI returned
+    // vanished just because a library row had also seeded its group — the 13th
+    // place became unreachable, where before it simply arrived via the API
+    const library = Array.from({ length: 20 }, (_, i) =>
+      hit(`lib-${i}`, `Club ${i}`, 'Town, ST', 'library'),
+    )
+    const groups = groupCourseHits(
+      from({ library, golfcourseapi: [hit('gca:15', 'Club 15', 'Town, ST', 'golfcourseapi')] }),
+      ME,
+    )
+    const club15 = groups.find((g) => g.name === 'Club 15')
+    expect(club15).toBeDefined()
+    // the library version is what the budget dropped; the live one survives
+    expect(club15!.versions.map((v) => v.id)).toEqual(['gca:15'])
   })
 
   it('owns nothing as a guest, and never calls an unauthored card mine', () => {

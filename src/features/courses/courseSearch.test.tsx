@@ -216,6 +216,37 @@ describe('CourseSearch — one row per place (MAI-79)', () => {
     expect(screen.queryByText(/Broadmoor/)).not.toBeInTheDocument()
   })
 
+  it('clears a failure banner when the query drops below the search minimum', async () => {
+    // the message moved outside the results block so a failed search has
+    // somewhere to render — which also means it no longer vanishes with them
+    searchMock.mockRejectedValue(new Error('boom'))
+    render(<CourseSearch localIds={new Set()} />)
+    const input = screen.getByPlaceholderText('Search courses (online)…')
+    fireEvent.change(input, { target: { value: 'broadmoor' } })
+    expect(await screen.findByText('search failed')).toBeInTheDocument()
+
+    fireEvent.change(input, { target: { value: 'br' } })
+    await waitFor(() => expect(screen.queryByText('search failed')).not.toBeInTheDocument())
+  })
+
+  it('cancels a search still queued behind the debounce when a version is picked', async () => {
+    // the pick empties the search box; a timer armed a moment earlier would
+    // otherwise fire and repaint a full result list under an empty input
+    search([rancho])
+    const row = await header(/Rancho Park GC/)
+    // arm a fresh debounce, then pick before it fires
+    fireEvent.change(screen.getByPlaceholderText('Search courses (online)…'), {
+      target: { value: 'rancho p' },
+    })
+    await userEvent.click(row)
+    await waitFor(() => expect(importMock).toHaveBeenCalled())
+
+    searchMock.mockClear()
+    await new Promise((r) => setTimeout(r, 500)) // past the 350 ms debounce
+    expect(searchMock).not.toHaveBeenCalled()
+    expect(screen.queryByText(/Results/)).not.toBeInTheDocument()
+  })
+
   it('surfaces a failed search instead of spinning on "Searching…" forever', async () => {
     searchMock.mockRejectedValue(new Error('boom'))
     render(<CourseSearch localIds={new Set()} />)

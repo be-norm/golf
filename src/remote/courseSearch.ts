@@ -93,12 +93,13 @@ export async function searchCourses(query: string, viewerId: string): Promise<Co
 
 const MAX_GROUPS = 20
 /**
- * Library-seeded groups are capped BELOW the total so the live directories
- * always have room. The old code got this by accident — the library query took
- * 12 and the merged list was sliced to 20, leaving 8 — and losing it silently
- * would be worse than the bug this ticket fixes: search "club" with 20+ cached
- * library courses and every GolfCourseAPI and OpenGolfAPI result disappears,
- * under a header that says "Results (20)" as though nothing was cut.
+ * How many groups our own Supabase table may fill — BOTH `owned` and `library`,
+ * because the point is reserving the remaining 8 for the live directories, and
+ * a budget one of the two sources can sidestep reserves nothing. (Ten of your
+ * own courses plus ten library rows filled all 20 and hid every GolfCourseAPI
+ * and OpenGolfAPI result, under a header reading "Results (20)" as though
+ * nothing had been cut.) The old code had this by accident: the library query
+ * took 12 inside a 20-row slice.
  */
 const MAX_LIBRARY_GROUPS = 12
 
@@ -118,9 +119,11 @@ const MAX_LIBRARY_GROUPS = 12
  */
 export function groupCourseHits(sources: CourseHitSources, viewerId: string): CourseGroup[] {
   // precedence: your own versions, then the shared library, then the live
-  // directories (GolfCourseAPI's richer tee data ahead of OpenGolfAPI).
+  // directories (GolfCourseAPI's richer tee data ahead of OpenGolfAPI). Both
+  // Supabase sources come first, so a bucket is budgeted exactly when it holds
+  // a library-origin hit — nothing else can have created it.
   const ordered = [
-    { hits: sources.owned ?? [], budgeted: false },
+    { hits: sources.owned ?? [], budgeted: true },
     { hits: sources.library, budgeted: true },
     { hits: sources.golfcourseapi, budgeted: false },
     { hits: sources.opengolfapi, budgeted: false },
@@ -141,14 +144,20 @@ export function groupCourseHits(sources: CourseHitSources, viewerId: string): Co
   }
 
   const out: CourseGroup[] = []
-  let libraryGroups = 0
+  let spent = 0
   for (const [key, bucket] of buckets) {
     if (out.length === MAX_GROUPS) break
+    let hits = bucket.hits
     if (bucket.budgeted) {
-      if (libraryGroups === MAX_LIBRARY_GROUPS) continue
-      libraryGroups++
+      if (spent === MAX_LIBRARY_GROUPS) {
+        // Budget spent — but a live directory may have returned this place too,
+        // and dropping the whole bucket would hide a course the API found. Drop
+        // only what the budget covers and keep the rest of the place.
+        hits = hits.filter((h) => h.origin !== 'library')
+        if (!hits.length) continue
+      } else spent++
     }
-    const versions = versionsOf(bucket.hits, viewerId)
+    const versions = versionsOf(hits, viewerId)
     const top = versions[0]
     if (!top) continue // unreachable — a bucket exists because a hit made it
     out.push({ key, name: top.name, location: top.location, versions })
@@ -157,18 +166,22 @@ export function groupCourseHits(sources: CourseHitSources, viewerId: string): Co
 }
 
 /**
- * A hit with no location never groups — it is keyed by its own id.
+ * A hit missing EITHER half never groups — it is keyed by its own id.
  *
- * Merging two genuinely different courses is the worst outcome here, and a bare
- * name is exactly where name+location stops being evidence: every "Municipal"
- * on earth would fuse into one row. The test is on the NORMALIZED location, not
- * the raw one: `-`, `.` and `,` all survive `.trim()` but normalize away, and
- * would slip past a raw check straight into the fusion it exists to prevent.
- * (`id:` can't collide with a normKey, which is always `[a-z0-9]*|[a-z0-9]*`.)
+ * Merging two genuinely different courses is the worst outcome here, and one
+ * bare half is exactly where name+location stops being evidence: every
+ * "Municipal" on earth fuses into one row without a town, and every nameless
+ * card in one town fuses without a name (GolfCourseAPI can return a course with
+ * neither club_name nor course_name, which `golfApiName` renders as '').
+ *
+ * Both tests are on the NORMALIZED key, not the raw fields: `-`, `.` and `,`
+ * survive `.trim()` but normalize away, and would slip past a raw check
+ * straight into the fusion this exists to prevent. (`id:` can't collide with a
+ * normKey, which is always `[a-z0-9]*|[a-z0-9]*`.)
  */
 function groupKeyFor(h: CourseSearchHit): string {
   const key = normKey(h.name, h.location)
-  return key.endsWith('|') ? `id:${h.id}` : key
+  return key.startsWith('|') || key.endsWith('|') ? `id:${h.id}` : key
 }
 
 function versionsOf(bucket: CourseSearchHit[], viewerId: string): CourseVersion[] {
@@ -267,14 +280,18 @@ function libraryFilter(q: string): string {
 }
 
 function toLibraryHit(c: Record<string, unknown>): CourseSearchHit {
+  // An unusable stamp is dropped HERE rather than guarded twice downstream: the
+  // ranking and the rendered date must agree on what counts as dated, and they
+  // can't disagree about a field that only ever holds a parseable value.
+  const stamped = (c.updated_at as string | null) ?? undefined
   return {
     id: c.id as string,
-    name: c.name as string,
+    name: (c.name as string | null) ?? '',
     location: (c.location as string | null) ?? '',
     origin: 'library' as const,
     source: (c.source as Course['source'] | null) ?? undefined,
     createdBy: (c.created_by as string | null) ?? undefined,
-    updatedAt: (c.updated_at as string | null) ?? undefined,
+    updatedAt: stamped && Number.isFinite(Date.parse(stamped)) ? stamped : undefined,
   }
 }
 
@@ -306,11 +323,15 @@ async function librarySearch(q: string): Promise<CourseSearchHit[]> {
  * The viewer's own published versions, as their own small query.
  *
  * "Given I have my own version → mine is the one offered" can't be satisfied by
- * a limit: `librarySearch` sorts by name, so "Broadmoor CC" and "Broadmoor
- * Country Club" land far apart and a common query can cut your corrected card
- * before grouping ever sees it. Grouping would then present "2 versions" as the
- * complete set with yours silently missing. Scoping a second query to
- * `created_by` removes that failure instead of making it rarer.
+ * the shared query: `librarySearch` sorts by name, so "Broadmoor CC" and
+ * "Broadmoor Country Club" land far apart and a common query can page past your
+ * corrected card. Grouping would then present "2 versions" as the complete set
+ * with yours silently missing.
+ *
+ * This still carries a LIMIT, so the guarantee is bounded, not absolute — but
+ * it's bounded by how many courses ONE golfer has authored matching one query,
+ * and 50 is far past any real authored library. Say that rather than implying
+ * the failure is gone.
  */
 async function ownedSearch(q: string, viewerId: string): Promise<CourseSearchHit[]> {
   if (viewerId === LOCAL_USER) return [] // a guest authors nothing on the server
@@ -322,7 +343,7 @@ async function ownedSearch(q: string, viewerId: string): Promise<CourseSearchHit
       .or(libraryFilter(q))
       .order('name')
       .order('id')
-      .limit(10)
+      .limit(50)
     return (data ?? []).map(toLibraryHit)
   } catch {
     return []
@@ -340,7 +361,8 @@ async function openGolfSearch(q: string): Promise<CourseSearchHit[]> {
     }
     return (data.courses ?? []).map((c) => ({
       id: c.id,
-      name: c.name,
+      name: c.name ?? '', // typed string, but it comes off the wire
+
       location: [c.city, c.state].filter(Boolean).join(', '),
       origin: 'opengolfapi' as const,
     }))
