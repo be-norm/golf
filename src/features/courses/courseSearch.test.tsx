@@ -17,6 +17,9 @@ const importMock = vi.hoisted(() => vi.fn())
 vi.mock('../../remote/courseSearch', () => ({
   searchCourses: searchMock,
   importCourseHit: importMock,
+  // pure one-liner, mirrored rather than imported (importOriginal would pull in
+  // the supabase client); the real one is pinned in courseSearch.test.ts
+  versionIds: (v: CourseVersion) => [v.id, ...v.aliasIds],
 }))
 vi.mock('../../auth/AuthProvider', () => ({ useAuth: () => ({ activeUserId: 'me-uid' }) }))
 
@@ -34,6 +37,7 @@ const version = (
   source: kind === 'api' ? undefined : 'user',
   kind,
   mine: false,
+  aliasIds: [],
   ...extra,
 })
 
@@ -63,6 +67,7 @@ const ranchoOnly: CourseVersion = {
   origin: 'opengolfapi',
   kind: 'api',
   mine: false,
+  aliasIds: [],
 }
 const rancho: CourseGroup = {
   key: 'ranchoparkgc|losangelesca',
@@ -159,6 +164,67 @@ describe('CourseSearch — one row per place (MAI-79)', () => {
     const saved = screen.getByRole('button', { name: /already in your library/ })
     expect(saved).toBeDisabled()
     expect(saved).toHaveTextContent('saved ✓')
+  })
+
+  it('recognises a copy saved under a folded-away id, instead of offering a second one', async () => {
+    // the card was imported from OpenGolfAPI, so it sits in the library under
+    // og-2; GolfCourseAPI won the fold, so the offered id is gca:1
+    const folded: CourseGroup = {
+      key: 'penmargolfcourse|veniceca',
+      name: 'Penmar Golf Course',
+      location: 'Venice, CA',
+      versions: [
+        { ...version('gca:1', 'api'), name: 'Penmar Golf Course', aliasIds: ['og-2'] },
+      ],
+    }
+    search([folded], ['og-2'])
+
+    const row = await header(/Penmar Golf Course/)
+    expect(row).toHaveTextContent('saved ✓')
+    expect(row).toBeDisabled()
+  })
+
+  it('disables every add while one is in flight, so two picks cannot overlap', async () => {
+    // one `importing` slot is shared: the first to settle would re-enable the
+    // second's row mid-flight and fire onImported twice
+    let release: (c: Course) => void = () => {}
+    importMock.mockReturnValue(new Promise<Course>((r) => (release = r)))
+    search([broadmoor])
+    await userEvent.click(await header(/Broadmoor Country Club/))
+    await userEvent.click(screen.getByRole('button', { name: /your version/ }))
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /directory version/ })).toBeDisabled(),
+    )
+    release(imported)
+  })
+
+  it('does not repaint stale results under a query cut below the search minimum', async () => {
+    // clearTimeout cancels nothing once the debounce has fired; without a
+    // sequence bump the in-flight search lands on an abandoned query
+    let release: (g: CourseGroup[]) => void = () => {}
+    searchMock.mockReturnValue(new Promise<CourseGroup[]>((r) => (release = r)))
+    render(<CourseSearch localIds={new Set()} />)
+    const input = screen.getByPlaceholderText('Search courses (online)…')
+    fireEvent.change(input, { target: { value: 'broadmoor' } })
+    await waitFor(() => expect(searchMock).toHaveBeenCalled())
+
+    fireEvent.change(input, { target: { value: 'br' } })
+    release([broadmoor])
+
+    await waitFor(() => expect(screen.queryByText(/Results/)).not.toBeInTheDocument())
+    expect(screen.queryByText(/Broadmoor/)).not.toBeInTheDocument()
+  })
+
+  it('surfaces a failed search instead of spinning on "Searching…" forever', async () => {
+    searchMock.mockRejectedValue(new Error('boom'))
+    render(<CourseSearch localIds={new Set()} />)
+    fireEvent.change(screen.getByPlaceholderText('Search courses (online)…'), {
+      target: { value: 'broadmoor' },
+    })
+
+    expect(await screen.findByText('search failed')).toBeInTheDocument()
+    expect(screen.queryByText('Searching…')).not.toBeInTheDocument()
   })
 
   it('keeps the versions open when one fails to fetch, so another can be tried', async () => {

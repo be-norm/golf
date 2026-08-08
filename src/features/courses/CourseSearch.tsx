@@ -3,6 +3,7 @@ import type { Course } from '../../engine/core/types'
 import {
   importCourseHit,
   searchCourses,
+  versionIds,
   type CourseGroup,
   type CourseVersion,
 } from '../../remote/courseSearch'
@@ -18,16 +19,37 @@ interface Props {
   placeholder?: string
 }
 
+/** When this version was last corrected, or undefined if it has no usable date.
+ *  Guarded like the ranking's `stamp`: an unparseable value would otherwise
+ *  render "NaN undefined NaN" rather than simply omitting the date. */
+function updatedOn(v: CourseVersion): string | undefined {
+  if (v.kind !== 'community' || !v.updatedAt) return undefined
+  return Number.isFinite(Date.parse(v.updatedAt)) ? formatDate(v.updatedAt) : undefined
+}
+
 /** What a version row reads out. The button's own label supersedes the source
  *  mark's, so it has to restate the kind and the date — and it names the
  *  VERSION, not the group, because that is the card being added. */
 function versionLabel(v: CourseVersion, saved: boolean): string {
   const kind = v.kind === 'api' ? 'directory version' : v.mine ? 'your version' : 'community version'
-  const dated = v.kind === 'community' && v.updatedAt ? `, updated ${formatDate(v.updatedAt)}` : ''
+  const on = updatedOn(v)
+  const dated = on ? `, updated ${on}` : ''
   return saved
     ? `${v.name} — ${kind}${dated}, already in your library`
     : `Add ${v.name} — ${kind}${dated}`
 }
+
+/** The name+town line, shared by both row shapes so they can't drift apart. */
+function ResultLine({ name, location }: { name: string; location: string }) {
+  return (
+    <span className="min-w-0 flex-1 truncate">
+      <span className="text-lg font-semibold">{name}</span>
+      {location && <span className="ml-2 text-stone-400">{location}</span>}
+    </span>
+  )
+}
+
+const ROW = 'pixel border-stone-700 bg-stone-900/70'
 
 /**
  * Course search over the shared library + both live course APIs (online only,
@@ -63,6 +85,10 @@ export function CourseSearch({ localIds, onImported, placeholder }: Props) {
     setExpanded(undefined)
     clearTimeout(debounce.current)
     if (value.trim().length < 3) {
+      // bump the sequence, don't just clear: clearTimeout cancels nothing once
+      // the debounce has already fired, and an in-flight search would resolve
+      // afterwards and repaint a full result list under a two-character query
+      requestSeq.current++
       setGroups(undefined)
       setSearching(false)
       return
@@ -70,12 +96,24 @@ export function CourseSearch({ localIds, onImported, placeholder }: Props) {
     debounce.current = setTimeout(() => {
       const seq = ++requestSeq.current
       setSearching(true)
-      void searchCourses(value, activeUserId).then((results) => {
-        if (seq !== requestSeq.current) return // a newer query superseded this one
-        setGroups(results)
-        setExpanded(undefined)
-        setSearching(false)
-      })
+      setError(undefined)
+      const current = () => seq === requestSeq.current // else a newer query won
+      void searchCourses(value, activeUserId)
+        .then((results) => {
+          if (!current()) return
+          setGroups(results)
+          setExpanded(undefined)
+          setSearching(false)
+        })
+        // searchCourses swallows each source's failure, but grouping runs after
+        // them — without a catch a throw there leaves "Searching…" up forever
+        .catch(() => {
+          if (!current()) return
+          setGroups(undefined)
+          setExpanded(undefined)
+          setSearching(false)
+          setError('search failed')
+        })
     }, 350)
   }
 
@@ -85,6 +123,7 @@ export function CourseSearch({ localIds, onImported, placeholder }: Props) {
     setError(undefined)
     try {
       const course = await importCourseHit(activeUserId, version)
+      requestSeq.current++ // don't let an in-flight search repopulate the list
       setQuery('')
       setGroups(undefined)
       setExpanded(undefined)
@@ -98,7 +137,13 @@ export function CourseSearch({ localIds, onImported, placeholder }: Props) {
     }
   }
 
-  const action = (id: string) => (localIds.has(id) ? 'saved ✓' : importing === id ? '…' : '+ add')
+  const saved = (v: CourseVersion) => versionIds(v).some((id) => localIds.has(id))
+  // every add is disabled while ANY import is in flight: two overlapping picks
+  // share one `importing` slot, so the first to settle would re-enable the
+  // second's row mid-flight and fire onImported twice
+  const disabled = (v: CourseVersion) => importing !== undefined || saved(v)
+  const action = (v: CourseVersion) =>
+    saved(v) ? 'saved ✓' : importing === v.id ? '…' : '+ add'
 
   return (
     <div>
@@ -109,12 +154,15 @@ export function CourseSearch({ localIds, onImported, placeholder }: Props) {
         className="min-h-12 w-full border-2 border-stone-700 bg-stone-900 px-4 text-lg placeholder:text-stone-500 focus:border-felt-500 focus:outline-none"
       />
 
+      {/* outside the results block: a search that fails has no results to sit
+          under, and the message is the only thing left to show */}
+      {error && <p className="mt-2 text-lg text-flag-500">{error}</p>}
+
       {groups !== undefined && (
         <div className="mt-2">
           <h3 className="font-display mb-2 text-[10px] uppercase text-stone-400">
             {searching ? 'Searching…' : `Results (${groups.length})`}
           </h3>
-          {error && <p className="mb-2 text-lg text-flag-500">{error}</p>}
           <ul className="space-y-2">
             {groups.map((g) => {
               const only = g.versions.length === 1 ? g.versions[0] : undefined
@@ -123,51 +171,47 @@ export function CourseSearch({ localIds, onImported, placeholder }: Props) {
               // without this a course already in your library reads only
               // "2 versions", and you add a SECOND version of it — the
               // duplicate problem, rebuilt inside your own library
-              const savedHere = g.versions.some((v) => localIds.has(v.id))
+              const savedHere = g.versions.some(saved)
 
               if (only) {
                 return (
                   <li key={g.key}>
                     <button
-                      disabled={importing === only.id || localIds.has(only.id)}
+                      disabled={disabled(only)}
                       onClick={() => void pick(only)}
-                      className="pixel flex w-full items-center justify-between border-stone-700 bg-stone-900/70 px-4 py-3 text-left disabled:opacity-50"
+                      className={`${ROW} flex w-full items-center justify-between px-4 py-3 text-left disabled:opacity-50`}
                     >
-                      <span className="min-w-0 truncate">
-                        <span className="text-lg font-semibold">{g.name}</span>
-                        <CourseSourceMark source={only.source} mine={only.mine} />
-                        {g.location && <span className="ml-2 text-stone-400">{g.location}</span>}
-                      </span>
-                      <span className="ml-2 shrink-0 text-lg text-felt-400">
-                        {action(only.id)}
-                      </span>
+                      <ResultLine name={g.name} location={g.location} />
+                      <CourseSourceMark source={only.source} mine={only.mine} />
+                      <span className="ml-2 shrink-0 text-lg text-felt-400">{action(only)}</span>
                     </button>
                   </li>
                 )
               }
 
               return (
-                <li key={g.key} className="pixel border-stone-700 bg-stone-900/70">
+                <li key={g.key} className={ROW}>
                   {/* two lines, unlike the single-version row: the count and
                       the saved mark on one line with the name left the town
                       four characters of room ("Indi…") on a phone */}
                   <button
                     aria-expanded={open}
-                    aria-controls={panelId}
+                    // only while it exists: the panel is unmounted when closed,
+                    // and aria-controls pointing at nothing is an ARIA error
+                    aria-controls={open ? panelId : undefined}
                     onClick={() => setExpanded(open ? undefined : g.key)}
                     className="flex w-full flex-col gap-1 px-4 py-3 text-left"
                   >
-                    <span className="w-full min-w-0 truncate">
-                      <span className="text-lg font-semibold">{g.name}</span>
-                      {g.location && <span className="ml-2 text-stone-400">{g.location}</span>}
-                    </span>
+                    <ResultLine name={g.name} location={g.location} />
                     {/* no source mark here — a group spans both kinds, and a
                         mark on the header would claim one it hasn't committed to.
                         The arrow is ↓/↑ because Press Start 2P has no ▾/▸: they
                         fall back to a glyph that renders as an invisible speck. */}
                     <span className="font-display flex w-full items-center gap-3 text-[10px] uppercase text-felt-400">
                       <span>
-                        {g.versions.length} versions {open ? '↑' : '↓'}
+                        {g.versions.length} versions{' '}
+                        {/* decorative: aria-expanded already states this */}
+                        <span aria-hidden="true">{open ? '↑' : '↓'}</span>
                       </span>
                       {savedHere && <span className="text-felt-300">saved ✓</span>}
                     </span>
@@ -177,16 +221,16 @@ export function CourseSearch({ localIds, onImported, placeholder }: Props) {
                       {g.versions.map((v) => (
                         <li key={v.id}>
                           <button
-                            disabled={importing === v.id || localIds.has(v.id)}
+                            disabled={disabled(v)}
                             onClick={() => void pick(v)}
-                            aria-label={versionLabel(v, localIds.has(v.id))}
+                            aria-label={versionLabel(v, saved(v))}
                             className="flex w-full items-center justify-between px-4 py-2.5 text-left disabled:opacity-50"
                           >
                             <span className="min-w-0 truncate">
                               <CourseSourceMark source={v.source} mine={v.mine} />
-                              {v.kind === 'community' && v.updatedAt && (
+                              {updatedOn(v) && (
                                 <span className="font-display ml-2 text-[9px] uppercase text-stone-500">
-                                  · {formatDate(v.updatedAt)}
+                                  · {updatedOn(v)}
                                 </span>
                               )}
                               {/* over-merge insurance: the group key ignores
@@ -196,9 +240,7 @@ export function CourseSearch({ localIds, onImported, placeholder }: Props) {
                                 <span className="ml-2 truncate text-stone-400">{v.name}</span>
                               )}
                             </span>
-                            <span className="ml-2 shrink-0 text-lg text-felt-400">
-                              {action(v.id)}
-                            </span>
+                            <span className="ml-2 shrink-0 text-lg text-felt-400">{action(v)}</span>
                           </button>
                         </li>
                       ))}

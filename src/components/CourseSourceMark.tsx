@@ -18,13 +18,18 @@ import type { Course } from '../engine/core/types'
  * have no hover, so meaning parked in title/aria never reaches a sighted phone
  * user (a review finding on the first attempt at this mark). The aria-label
  * carries the full phrasing for screen readers.
+ *
+ * `mine` is REQUIRED, not optional with a falsy default. The mark asserts a
+ * fact about authorship, so a caller that skips the question doesn't get a
+ * missing badge — it gets a course you typed in yourself labelled as somebody
+ * else's. Making every renderer answer it is what keeps that impossible.
  */
 export function CourseSourceMark({
   source,
   mine,
 }: {
   source: Course['source'] | undefined
-  mine?: boolean
+  mine: boolean
 }) {
   const user = source === 'user'
   const text = user ? (mine ? '✎ yours' : '✎ community') : '⛳ api'

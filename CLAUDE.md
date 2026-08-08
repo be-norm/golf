@@ -75,7 +75,9 @@ Full plan/architecture history: see `docs/` and the games catalog in `docs/games
   `standings`); `src/engine/games/<game>/` —
   one engine per game + golden fixtures; `src/engine/catalog.ts` — GameEngine registry
 - `src/db/` — Dexie schema + repos; `src/features/` — screens; `src/components/` — primitives;
-  `src/lib/` — app-layer helpers shared across features (e.g. `date.ts`, the one date format)
+  `src/lib/` — app-layer helpers shared across features (`date.ts` is the fixed, locale-independent
+  `18 Jul 2026` format shared by the share card and course versions; the round lists still use
+  `toLocaleDateString`, so this is not yet app-wide)
 - `data/courses/` — seed scorecards (bundled into app + used by Supabase seed)
 - `supabase/` — migrations + seed/import scripts
 

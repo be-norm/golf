@@ -1,6 +1,6 @@
 import type { Course } from '../engine/core/types'
 import { courseRepo } from '../db/repos'
-import { ORPHANED_AUTHOR } from '../db/ids'
+import { LOCAL_USER, ORPHANED_AUTHOR } from '../db/ids'
 import { supabase } from './supabase'
 import { buildRemoteCourse, normalizeTeeRatings, usableHoleRows, type RawTee } from './transform'
 
@@ -31,6 +31,25 @@ export interface CourseVersion extends CourseSearchHit {
   kind: 'api' | 'community'
   /** the viewer authored this version */
   mine: boolean
+  /** ids of the other hits folded into this one — the same directory card off a
+   *  different shelf. Only the winner's id is offered for import, but a caller
+   *  asking "is this already in my library?" has to check these too: a course
+   *  imported from OpenGolfAPI is stored under its OpenGolf id, and if
+   *  GolfCourseAPI wins the fold, the row would otherwise read "+ add" and
+   *  cheerfully save a second copy of a course you already have. */
+  aliasIds: string[]
+}
+
+/** The three (or four) result lists grouping consumes, in precedence order. */
+export interface CourseHitSources {
+  /** The viewer's own published versions, fetched as their OWN query. The main
+   *  library query returns rows alphabetically under a LIMIT, so "Broadmoor CC"
+   *  and "Broadmoor Country Club" sort far apart and a busy search could drop
+   *  YOUR corrected card — the one thing this feature exists to surface. */
+  owned?: CourseSearchHit[]
+  library: CourseSearchHit[]
+  golfcourseapi: CourseSearchHit[]
+  opengolfapi: CourseSearchHit[]
 }
 
 /** One place, and every version of it search found — best first (MAI-79). */
@@ -62,46 +81,26 @@ export async function searchCourses(query: string, viewerId: string): Promise<Co
   const q = query.trim()
   if (q.length < 3) return []
 
-  const [library, golf, open] = await Promise.all([
+  const [owned, library, golf, open] = await Promise.all([
+    ownedSearch(q, viewerId),
     librarySearch(q),
     golfCourseApiSearch(q),
     openGolfSearch(q),
   ])
 
-  return groupCourseHits(
-    mergeCourseHits({ library, golfcourseapi: golf, opengolfapi: open }),
-    viewerId,
-  )
-}
-
-/**
- * Flatten the three sources into one precedence-ordered list: library beats
- * GolfCourseAPI beats OpenGolfAPI, and a repeated id keeps the first.
- *
- * This used to ALSO drop any hit whose normalized name+location was already
- * taken — which quietly deleted the golfer's fork of an API course, i.e. the
- * exact version MAI-79 exists to offer. That collapse (and the result cap) now
- * lives in `groupCourseHits`, which keeps the duplicate as a VERSION of one
- * result instead of discarding it.
- */
-export function mergeCourseHits(groups: {
-  library: CourseSearchHit[]
-  golfcourseapi: CourseSearchHit[]
-  opengolfapi: CourseSearchHit[]
-}): CourseSearchHit[] {
-  const seenIds = new Set<string>()
-  const out: CourseSearchHit[] = []
-  for (const group of [groups.library, groups.golfcourseapi, groups.opengolfapi]) {
-    for (const h of group) {
-      if (seenIds.has(h.id)) continue
-      seenIds.add(h.id)
-      out.push(h)
-    }
-  }
-  return out
+  return groupCourseHits({ owned, library, golfcourseapi: golf, opengolfapi: open }, viewerId)
 }
 
 const MAX_GROUPS = 20
+/**
+ * Library-seeded groups are capped BELOW the total so the live directories
+ * always have room. The old code got this by accident — the library query took
+ * 12 and the merged list was sliced to 20, leaving 8 — and losing it silently
+ * would be worse than the bug this ticket fixes: search "club" with 20+ cached
+ * library courses and every GolfCourseAPI and OpenGolfAPI result disappears,
+ * under a header that says "Results (20)" as though nothing was cut.
+ */
+const MAX_LIBRARY_GROUPS = 12
 
 /**
  * One result per place, versions on demand (MAI-79).
@@ -113,23 +112,43 @@ const MAX_GROUPS = 20
  * of a decision — so they collapse into one group, and the versions are the
  * second, explicit choice.
  *
- * Pure, and takes the whole hit list rather than querying, so the ranking is
- * unit-testable without a network or a Supabase stub.
+ * Takes the sources rather than a flat list so precedence and the per-source
+ * budget are both visible here, and pure so all of it is unit-testable without
+ * a network or a Supabase stub.
  */
-export function groupCourseHits(hits: CourseSearchHit[], viewerId: string): CourseGroup[] {
-  // a Map preserves insertion order, which is mergeCourseHits' precedence order
-  const buckets = new Map<string, CourseSearchHit[]>()
-  for (const h of hits) {
-    const key = groupKeyFor(h)
-    const bucket = buckets.get(key)
-    if (bucket) bucket.push(h)
-    else buckets.set(key, [h])
+export function groupCourseHits(sources: CourseHitSources, viewerId: string): CourseGroup[] {
+  // precedence: your own versions, then the shared library, then the live
+  // directories (GolfCourseAPI's richer tee data ahead of OpenGolfAPI).
+  const ordered = [
+    { hits: sources.owned ?? [], budgeted: false },
+    { hits: sources.library, budgeted: true },
+    { hits: sources.golfcourseapi, budgeted: false },
+    { hits: sources.opengolfapi, budgeted: false },
+  ]
+
+  // a Map preserves insertion order, so buckets come out in precedence order
+  const buckets = new Map<string, { hits: CourseSearchHit[]; budgeted: boolean }>()
+  const seenIds = new Set<string>()
+  for (const { hits, budgeted } of ordered) {
+    for (const h of hits) {
+      if (seenIds.has(h.id)) continue // the owned query re-returns library rows
+      seenIds.add(h.id)
+      const key = groupKeyFor(h)
+      const bucket = buckets.get(key)
+      if (bucket) bucket.hits.push(h)
+      else buckets.set(key, { hits: [h], budgeted })
+    }
   }
 
   const out: CourseGroup[] = []
+  let libraryGroups = 0
   for (const [key, bucket] of buckets) {
     if (out.length === MAX_GROUPS) break
-    const versions = versionsOf(bucket, viewerId)
+    if (bucket.budgeted) {
+      if (libraryGroups === MAX_LIBRARY_GROUPS) continue
+      libraryGroups++
+    }
+    const versions = versionsOf(bucket.hits, viewerId)
     const top = versions[0]
     if (!top) continue // unreachable — a bucket exists because a hit made it
     out.push({ key, name: top.name, location: top.location, versions })
@@ -138,15 +157,18 @@ export function groupCourseHits(hits: CourseSearchHit[], viewerId: string): Cour
 }
 
 /**
- * A hit with NO location never groups — it is keyed by its own id.
+ * A hit with no location never groups — it is keyed by its own id.
  *
  * Merging two genuinely different courses is the worst outcome here, and a bare
  * name is exactly where name+location stops being evidence: every "Municipal"
- * on earth would fuse into one row. (`id:` can't collide with a normKey, which
- * is always `[a-z0-9]*|[a-z0-9]*`.)
+ * on earth would fuse into one row. The test is on the NORMALIZED location, not
+ * the raw one: `-`, `.` and `,` all survive `.trim()` but normalize away, and
+ * would slip past a raw check straight into the fusion it exists to prevent.
+ * (`id:` can't collide with a normKey, which is always `[a-z0-9]*|[a-z0-9]*`.)
  */
 function groupKeyFor(h: CourseSearchHit): string {
-  return h.location.trim() ? normKey(h.name, h.location) : `id:${h.id}`
+  const key = normKey(h.name, h.location)
+  return key.endsWith('|') ? `id:${h.id}` : key
 }
 
 function versionsOf(bucket: CourseSearchHit[], viewerId: string): CourseVersion[] {
@@ -157,16 +179,29 @@ function versionsOf(bucket: CourseSearchHit[], viewerId: string): CourseVersion[
       // createdBy must be non-empty before comparing: an API hit and a row
       // whose author deleted their account both carry undefined, and neither
       // is anybody's.
-      versions.push({ ...h, kind: 'community', mine: !!h.createdBy && h.createdBy === viewerId })
+      versions.push({
+        ...h,
+        kind: 'community',
+        mine: !!h.createdBy && h.createdBy === viewerId,
+        aliasIds: [],
+      })
     } else if (!api) {
       // every non-user hit is the same directory card off a different shelf —
       // three rows all reading "API" is the noise this ticket removes. First
       // wins, i.e. library → golfcourseapi → opengolfapi.
-      api = { ...h, kind: 'api', mine: false }
+      api = { ...h, kind: 'api', mine: false, aliasIds: [] }
+    } else {
+      // dropped from the offer, but NOT forgotten — see `aliasIds`
+      api.aliasIds.push(h.id)
     }
   }
   if (api) versions.push(api)
   return versions.sort(compareVersions)
+}
+
+/** Every id under which this version might already sit in the local library. */
+export function versionIds(v: CourseVersion): string[] {
+  return [v.id, ...v.aliasIds]
 }
 
 /**
@@ -215,42 +250,80 @@ export function golfApiName(club?: string, course?: string): string {
 
 // --- per-source searches (each best-effort → []) ----------------------------
 
+const LIBRARY_COLUMNS = 'id, name, location, source, created_by, updated_at'
+
+/**
+ * Match name OR city/state — "broadmoor", "westfield", "carmel in" all work.
+ * PostgREST parses the .or() argument as a logic tree, so a bare comma or
+ * parenthesis in the query corrupts it — typing "Carmel, IN" (the app's own
+ * City, ST display format) silently emptied the library results. Double-quoting
+ * the value (PostgREST's string escape, backslash for embedded
+ * quotes/backslashes) keeps any punctuation inert.
+ */
+function libraryFilter(q: string): string {
+  const raw = q.replace(/[%_]/g, '').replace(/[\\"]/g, '\\$&')
+  const pattern = `"%${raw}%"`
+  return `name.ilike.${pattern},location.ilike.${pattern}`
+}
+
+function toLibraryHit(c: Record<string, unknown>): CourseSearchHit {
+  return {
+    id: c.id as string,
+    name: c.name as string,
+    location: (c.location as string | null) ?? '',
+    origin: 'library' as const,
+    source: (c.source as Course['source'] | null) ?? undefined,
+    createdBy: (c.created_by as string | null) ?? undefined,
+    updatedAt: (c.updated_at as string | null) ?? undefined,
+  }
+}
+
 async function librarySearch(q: string): Promise<CourseSearchHit[]> {
   try {
-    // match name OR city/state — "broadmoor", "westfield", "carmel in" all work.
-    // PostgREST parses the .or() argument as a logic tree, so a bare comma or
-    // parenthesis in the query corrupts it — typing "Carmel, IN" (the app's
-    // own City, ST display format) silently emptied the library results.
-    // Double-quoting the value (PostgREST's string escape, backslash for
-    // embedded quotes/backslashes) keeps any punctuation inert.
-    const raw = q.replace(/[%_]/g, '').replace(/[\\"]/g, '\\$&')
-    const pattern = `"%${raw}%"`
     // Ordered, with id as the tie-break: without an ORDER BY, which of two
     // same-name rows (an API card and a golfer's fork of it, MAI-78) came back
     // first changed between searches. Both now survive as versions of one
     // result (MAI-79), but the order still decides where the LIMIT falls.
     //
     // 12 → 30 because duplicates now consume slots instead of being dropped.
-    // Known limit: rows come back alphabetically, so "Broadmoor CC" and
-    // "Broadmoor Country Club" sort far apart and a busy query can still cut
-    // your own version before grouping ever sees it — deterministically, but
-    // silently. Fixing that properly means a second owner-scoped query.
+    // The alphabetical order still means a busy query truncates arbitrarily —
+    // your OWN version is the one that must never be lost that way, and
+    // `ownedSearch` below guarantees it rather than trusting the limit.
     const { data } = await supabase
       .from('courses')
-      .select('id, name, location, source, created_by, updated_at')
-      .or(`name.ilike.${pattern},location.ilike.${pattern}`)
+      .select(LIBRARY_COLUMNS)
+      .or(libraryFilter(q))
       .order('name')
       .order('id')
       .limit(30)
-    return (data ?? []).map((c) => ({
-      id: c.id as string,
-      name: c.name as string,
-      location: (c.location as string | null) ?? '',
-      origin: 'library' as const,
-      source: (c.source as Course['source'] | null) ?? undefined,
-      createdBy: (c.created_by as string | null) ?? undefined,
-      updatedAt: (c.updated_at as string | null) ?? undefined,
-    }))
+    return (data ?? []).map(toLibraryHit)
+  } catch {
+    return []
+  }
+}
+
+/**
+ * The viewer's own published versions, as their own small query.
+ *
+ * "Given I have my own version → mine is the one offered" can't be satisfied by
+ * a limit: `librarySearch` sorts by name, so "Broadmoor CC" and "Broadmoor
+ * Country Club" land far apart and a common query can cut your corrected card
+ * before grouping ever sees it. Grouping would then present "2 versions" as the
+ * complete set with yours silently missing. Scoping a second query to
+ * `created_by` removes that failure instead of making it rarer.
+ */
+async function ownedSearch(q: string, viewerId: string): Promise<CourseSearchHit[]> {
+  if (viewerId === LOCAL_USER) return [] // a guest authors nothing on the server
+  try {
+    const { data } = await supabase
+      .from('courses')
+      .select(LIBRARY_COLUMNS)
+      .eq('created_by', viewerId)
+      .or(libraryFilter(q))
+      .order('name')
+      .order('id')
+      .limit(10)
+    return (data ?? []).map(toLibraryHit)
   } catch {
     return []
   }
