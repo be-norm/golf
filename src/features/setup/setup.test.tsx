@@ -18,13 +18,10 @@ const SAVED_AT = '2026-08-01T00:00:00.000Z'
  * ~60%-of-runs flake when the file is run on its own.
  */
 beforeEach(async () => {
-  await Promise.all([
-    db.rounds.clear(),
-    db.courses.clear(),
-    db.saved_courses.clear(),
-    db.players.clear(),
-    db.outbox.clear(),
-  ])
+  // every table, not a hand-picked list: clearing `rounds` while leaving
+  // `round_events` behind orphans each teed-off round's log and reintroduces
+  // the same leak in a form that's harder to see
+  await Promise.all(db.tables.map((t) => t.clear()))
 })
 
 /**
@@ -109,6 +106,20 @@ describe('SetupScreen — picking the course is its own step', () => {
     expect(screen.queryByRole('button', { name: /Scan scorecard/i })).not.toBeInTheDocument()
     // and it says which course these tees belong to
     expect(screen.getByText('Penmar Golf Course')).toBeInTheDocument()
+  })
+
+  it('keeps the tees and hole range when you go back and re-tap the same course', async () => {
+    // Re-tapping the already-highlighted course is navigation, not a fresh
+    // choice. Resetting there would discard a hole range chosen on a screen the
+    // user can no longer see — cause and effect two steps apart.
+    await pickPenmar()
+    await userEvent.click(screen.getByRole('button', { name: '18 (twice around)' }))
+    expect(screen.getByText(/full 18-hole handicaps/)).toBeInTheDocument()
+
+    await userEvent.click(screen.getByText('← Back'))
+    await userEvent.click(await screen.findByText('Penmar Golf Course'))
+
+    expect(await screen.findByText(/full 18-hole handicaps/)).toBeInTheDocument()
   })
 
   it('goes back to the course list to change your mind', async () => {
