@@ -19,6 +19,7 @@ import {
   type MatchState,
 } from '../../core/match'
 import { addLine, emptySettlement, formatCents, type Settlement } from '../../core/money'
+import { duplicateInstanceProblems } from '../../core/setup'
 import { standingsFromSettlement } from '../../core/standings'
 import { firstName } from '../../core/summary'
 import { teamsSchema, nonEmptyPartitionProblems } from '../../core/teams'
@@ -594,7 +595,7 @@ export const nassauEngine: GameEngine<NassauConfig> = {
   },
   configSchema: nassauConfigSchema,
   configFields: [
-    { key: 'stakeCents', kind: 'money', label: 'Stake per bet' },
+    { key: 'stakeCents', kind: 'money', label: 'Stake per bet', min: 100, step: 100 },
     { key: 'autoPress', kind: 'boolean', label: 'Auto-press', hint: 'New press at 2 down' },
     { key: 'teams', kind: 'teams', label: 'Teams (best ball · 2v2 or 2v1)' },
   ],
@@ -612,16 +613,23 @@ export const nassauEngine: GameEngine<NassauConfig> = {
     autoPress: true,
   }),
   defaultHandicap: (): HandicapSettings => ({ mode: 'net', allowancePct: 100, reference: 'offLow' }),
-  validateSetup: (config: GameConfig<NassauConfig>, players: readonly RoundPlayer[]) => {
+  validateSetup: (
+    config: GameConfig<NassauConfig>,
+    players: readonly RoundPlayer[],
+    siblings: readonly GameConfig[],
+  ) => {
+    const dupes = duplicateInstanceProblems(config, siblings, 'Nassau')
     const parsed = nassauConfigSchema.safeParse(config.config)
-    if (!parsed.success) return ['Invalid nassau configuration']
+    if (!parsed.success) return [...dupes, 'Invalid nassau configuration']
     const teams = parsed.data.teams
     if (teams === null) {
-      return players.length === 2 ? [] : ['Nassau without teams needs exactly 2 players']
+      return players.length === 2
+        ? dupes
+        : [...dupes, 'Nassau without teams needs exactly 2 players']
     }
     // teams may be uneven (2v1) — the lone side just plays for more per the
     // settlement rule; only require a real two-sided partition of everyone.
-    return nonEmptyPartitionProblems(teams, players, 'Nassau')
+    return [...nonEmptyPartitionProblems(teams, players, 'Nassau'), ...dupes]
   },
   eventKinds: {
     'nassau/press': z

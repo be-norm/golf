@@ -4,12 +4,14 @@ import { motion, AnimatePresence } from 'motion/react'
 import { eventStore } from '../../db/eventStore'
 import { roundRepo } from '../../db/repos'
 import { effectiveEvents } from '../../engine/core/replay'
-import { formatCentsSigned } from '../../engine/core/money'
-import type { GameAction, InputRequest } from '../../engine/catalog'
+import { combineSettlements, formatCentsSigned } from '../../engine/core/money'
+import type { GameAction, GameDerivation, InputRequest } from '../../engine/catalog'
+import type { Round } from '../../engine/core/types'
 import { gameLabel } from '../../engine/label'
+import { partitionByRole, shouldGroupSideBets, strokeGame } from '../../lib/gameRoles'
 import { ActionsSheet } from './ActionsSheet'
 import { Sheet } from '../../components/Sheet'
-import { GameSummary } from '../../components/GameSummary'
+import { GameSummary, SummaryParts, type SummaryPart } from '../../components/GameSummary'
 import { DetailLines } from '../../components/DetailLines'
 import { BigButton } from '../../components/BigButton'
 import { enqueuePushRound } from '../../remote/outbox'
@@ -89,8 +91,24 @@ export function ScoringScreen() {
   const currentHole = hole ?? derivedHole ?? ctx.holesPlayed[0]!
   const loop = holeLoop(round.courseSnapshot, currentHole)
   const holeIdx = ctx.holesPlayed.indexOf(currentHole)
-  // stroke dots show the first NET game's allocation (games[0] was arbitrary)
-  const primaryGame = round.games.find((g) => g.handicap.mode === 'net') ?? round.games[0]
+  // Stroke dots belong to whichever game actually allocates them, and that is
+  // one shared rule now (src/lib/gameRoles.ts) rather than three surfaces each
+  // guessing — a cheap net side bet used to capture this display just by being
+  // net, because the old rule took the first net game of any role.
+  const dotsGame = strokeGame(round)
+
+  // A round with a main game and several side bets used to put one row per game
+  // in a fixed bottom strip. Main games keep their rows; the side bets collapse
+  // into a single aggregate that expands in the standings sheet (MAI-50).
+  const { main: mainGames, side: sideGames } = partitionByRole(round.games)
+  const collapseSide = shouldGroupSideBets({ main: mainGames.length, side: sideGames.length })
+  const barGames = collapseSide ? mainGames : round.games
+  const sideBetParts = collapseSide
+    ? sideBetSummary(
+        round.players,
+        sideGames.flatMap((g) => derivations.get(g.gameId) ?? []),
+      )
+    : []
   const holeInputs = pendingInputs.filter((i) => i.hole === currentHole)
 
   // A press starts from the first unfinished hole — the tee the group is
@@ -280,7 +298,7 @@ export function ScoringScreen() {
             name={p.name}
             par={ctx.par(currentHole)}
             gross={ctx.gross.get(p.playerId)?.get(currentHole)}
-            strokes={primaryGame ? ctx.strokesFor(primaryGame.gameId, p.playerId, currentHole) : 0}
+            strokes={dotsGame ? ctx.strokesFor(dotsGame.gameId, p.playerId, currentHole) : 0}
             onScore={(gross) => setScore(p.playerId, gross)}
           />
         ))}
@@ -294,7 +312,7 @@ export function ScoringScreen() {
             </BigButton>
           ) : (
             <button className="w-full text-left" onClick={() => setStandingsOpen(true)}>
-              {round.games.map((g) => {
+              {barGames.map((g) => {
                 const d = derivations.get(g.gameId)
                 if (!d) return null
                 return (
@@ -306,6 +324,17 @@ export function ScoringScreen() {
                   </div>
                 )
               })}
+              {collapseSide && (
+                <div className="flex items-baseline justify-between gap-3 py-0.5">
+                  <span className="font-display text-[10px] uppercase text-felt-300">
+                    Side bets
+                  </span>
+                  <span className="inline-flex items-baseline gap-2">
+                    <SummaryParts parts={sideBetParts} />
+                    <span className="font-display text-[10px] text-felt-400">▶</span>
+                  </span>
+                </div>
+              )}
             </button>
           )}
         </div>
@@ -319,12 +348,21 @@ export function ScoringScreen() {
           >
             View full card ▶
           </Link>
-          {round.games.map((g) => {
+          {/* When the bar collapses the side bets, this is where they expand —
+              so the sheet groups them under a heading rather than leaving the
+              bar's "▶" pointing at an undifferentiated list. Ungrouped, the
+              order is round.games as before. */}
+          {(collapseSide ? [...mainGames, ...sideGames] : round.games).map((g, i) => {
             const d = derivations.get(g.gameId)
             if (!d) return null
             const label = gameLabel(g, round.games)
             return (
               <div key={g.gameId}>
+                {collapseSide && i === mainGames.length && (
+                  <h2 className="font-display mb-2.5 border-t border-stone-800 pt-4 text-[10px] uppercase text-stone-400">
+                    Side bets
+                  </h2>
+                )}
                 <div className="mb-2.5 flex items-baseline justify-between">
                   <h3 className="font-display flex items-baseline gap-2 text-xs uppercase text-felt-300">
                     {label}
@@ -430,6 +468,41 @@ export function ScoringScreen() {
       <RulesSheet type={rulesFor} onClose={() => setRulesFor(undefined)} />
     </main>
   )
+}
+
+/**
+ * The collapsed side-bets line: who is up and who is down across every side
+ * bet at once.
+ *
+ * This is a RUNNING AGGREGATE, which is the documented exception rather than
+ * the rule — a game's own bar row recaps the latest decided hole (see
+ * core/summary.ts). Nothing else compresses N games into one line, and the
+ * per-hole detail is one tap away in the standings sheet.
+ *
+ * Extremes only: the biggest winner and the biggest loser. Ties keep
+ * `round.players` order, so the row cannot reshuffle between re-derives while
+ * two players sit level.
+ */
+function sideBetSummary(
+  players: readonly Round['players'][number][],
+  derivations: readonly GameDerivation[],
+): SummaryPart[] {
+  const combined = combineSettlements(
+    players.map((p) => p.playerId),
+    derivations.map((d) => d.settlement),
+  )
+  const moved = players
+    .map((p) => ({ name: p.name, cents: combined[p.playerId] ?? 0 }))
+    .filter((p) => p.cents !== 0)
+  // Same wording the per-game convention uses before a hole is decided, rather
+  // than a row of "+$0"s that looks like a result.
+  if (moved.length === 0) return [{ label: '', value: 'no money yet' }]
+  const top = moved.reduce((a, b) => (b.cents > a.cents ? b : a))
+  const bottom = moved.reduce((a, b) => (b.cents < a.cents ? b : a))
+  const parts = [{ label: '', value: `${top.name} ${formatCentsSigned(top.cents)}` }]
+  // Zero-sum means a non-empty list always has both ends, but never assume it.
+  if (bottom !== top) parts.push({ label: '', value: `${bottom.name} ${formatCentsSigned(bottom.cents)}` })
+  return parts
 }
 
 function HoleArrow({

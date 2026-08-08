@@ -1,8 +1,9 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router'
 import { useLiveQuery } from 'dexie-react-hooks'
 import '../../engine/games'
-import { getEngine, listEngines } from '../../engine/catalog'
+import { getEngine, roleOf, type GameEngine } from '../../engine/catalog'
+import { partitionByRole } from '../../lib/gameRoles'
 import { courseHandicapForTee } from '../../engine/core/handicap'
 import { applyTee, doubleNine } from '../../engine/core/tees'
 import type { Course, GameConfig, RoundHoles, TeeSet } from '../../engine/core/types'
@@ -18,6 +19,8 @@ import { PlayerSearch } from '../players/PlayerSearch'
 import type { GhinPlayerHit } from '../../remote/ghinSearch'
 import { RulesSheet } from '../games/RulesSheet'
 import { GameConfigCard, type GameDraft } from './GameConfigCard'
+import { SideBetRow } from './SideBetRow'
+import { GamePickerSheet } from './GamePickerSheet'
 import { CourseSourceMark } from '../../components/CourseSourceMark'
 
 interface PlayerDraft {
@@ -58,6 +61,16 @@ export function SetupScreen() {
   const [showGhin, setShowGhin] = useState(false)
   const [games, setGames] = useState<GameDraft[]>([])
   const [rulesFor, setRulesFor] = useState<string>()
+  const [picker, setPicker] = useState<'main' | 'side'>()
+  /**
+   * Auto-open the picker ONCE, the first time step 2 is reached with nothing
+   * chosen — the empty state is otherwise a dead end behind a disabled button.
+   *
+   * A ref, and it never resets: re-opening whenever step 2 is empty would trap
+   * the user, because empty is exactly the state you are in when you dismissed
+   * the sheet to go back a step.
+   */
+  const autoOpened = useRef(false)
 
   const course = courses?.find((c) => c.id === courseId)
 
@@ -148,17 +161,85 @@ export function SetupScreen() {
     courseHandicap: computeCourseHandicap(p.handicapIndex, played, playedTee),
   }))
 
+  useEffect(() => {
+    if (step !== 2 || games.length > 0 || autoOpened.current) return
+    autoOpened.current = true
+    setPicker('main')
+  }, [step, games.length])
+
+  // A draft IS a GameConfig — same instance id, same shape — so `roleOf` and
+  // `validateSetup` can read the round being built exactly as they read a
+  // played one, with no adapter and no synthetic ids.
+  const draftGames: GameConfig[] = games
+  const { main: mainDrafts, side: sideDrafts } = partitionByRole(draftGames)
+
   const problems =
     step === 2
-      ? games.flatMap((g) => {
-          const engine = getEngine(g.type)
-          if (!engine) return []
-          return engine.validateSetup(
-            { gameId: 'draft', type: g.type, handicap: g.handicap, config: g.config },
-            draftRoundPlayers,
-          )
-        })
+      ? // DEDUPED: two drafts with identical settings each report the same
+        // duplicate string, and the list below keys on the message.
+        [
+          ...new Set(
+            games.flatMap((g) => {
+              const engine = getEngine(g.type)
+              if (!engine) return []
+              return engine.validateSetup(
+                g,
+                draftRoundPlayers,
+                draftGames.filter((s) => s.gameId !== g.gameId),
+              )
+            }),
+          ),
+        ]
       : []
+
+  /**
+   * What to STORE in `role` for a game the user just put in `section`.
+   *
+   * Only a contradiction is worth storing. `role` is presentation, and a round
+   * that stores nothing can be re-read later by a better rule, while a round
+   * that stored a guess is wrong permanently in an archive that syncs — so the
+   * bar is "does something read this differently?", not "did the user tap a
+   * button?".
+   *
+   * In a one-game round, nothing does: `primaryGame` falls through to
+   * `games[0]` either way, the pinned bar doesn't collapse a lone side bet, and
+   * the share card doesn't group one. Picking Skins under SIDE BETS on its own
+   * is therefore stored as nothing — and if that round later gains a Nassau,
+   * `roleOf` derives 'side' anyway. What DOES have a reader is Skins picked as
+   * a main game beside a Nassau: the user is saying both are main events, and
+   * `roleOf` would otherwise demote it.
+   */
+  const roleToStore = (
+    draft: GameDraft,
+    section: 'main' | 'side',
+    all: readonly GameConfig[],
+  ): 'main' | 'side' | undefined => {
+    // In a one-game round the distinction has NO reader — `primaryGame` returns
+    // that game whichever it is, the bar never collapses a lone side bet and the
+    // card never groups one. Storing a value nothing consults is the frozen
+    // guess CLAUDE.md keeps out of the archive.
+    if (all.length < 2) return undefined
+    return roleOf(draft, all) === section ? undefined : section
+  }
+
+  const addGame = (engine: GameEngine, section: 'main' | 'side') => {
+    const draft: GameDraft = {
+      gameId: newId(),
+      type: engine.type,
+      handicap: engine.defaultHandicap(),
+      config: engine.defaultConfig(draftRoundPlayers),
+    }
+    // Derived against the list the draft is JOINING, itself included — an
+    // "either" game's role is a fact about the whole round.
+    const next = [...games, draft]
+    setGames(next.map((g) => (g.gameId === draft.gameId ? { ...g, role: roleToStore(draft, section, next) } : g)))
+    setPicker(undefined)
+  }
+
+  const updateGame = (next: GameDraft) =>
+    setGames(games.map((g) => (g.gameId === next.gameId ? next : g)))
+
+  const removeGame = (gameId: string) => setGames(games.filter((g) => g.gameId !== gameId))
 
   const teeOff = async () => {
     // guard on the RESOLVED tee, not just the id: an unresolvable id would fall
@@ -190,13 +271,15 @@ export function SetupScreen() {
       }),
     )
     const gameConfigs: GameConfig[] = games.map((g) => ({
-      gameId: newId(),
+      // Minted when the game was chosen, not here: the draft has been keyed by
+      // this id all along, so validation and `roleOf` saw the same identities
+      // the round will.
+      gameId: g.gameId,
       type: g.type,
-      // `role` is deliberately NOT stamped here. Whether an "either" game is
-      // this round's main event or its side bet depends on what else is in the
-      // round, and freezing a guess into a synced archive makes it wrong
-      // permanently — `roleOf` derives it, and MAI-44 will write only what the
-      // user explicitly chooses.
+      // Absent for almost every round, and absent means "derive it" rather than
+      // "main" — only a placement `roleOf` disagrees with is stored. See
+      // `roleToStore`.
+      ...(g.role ? { role: g.role } : {}),
       handicap: g.handicap,
       config: resolveDraftPlayers(g.config, draftToReal),
     }))
@@ -428,36 +511,73 @@ export function SetupScreen() {
       )}
 
       {step === 2 && (
-        <section className="flex flex-col gap-4">
-          <h1 className="font-display text-sm uppercase text-felt-300">What's the game?</h1>
-          {listEngines().map((engine) => {
-            const active = games.find((g) => g.type === engine.type)
-            const playable =
-              players.length >= engine.meta.minPlayers && players.length <= engine.meta.maxPlayers
-            return (
-              <GameConfigCard
-                key={engine.type}
-                engine={engine}
-                playable={playable}
-                players={players}
-                draft={active}
-                onToggle={() => {
-                  if (active) setGames(games.filter((g) => g.type !== engine.type))
-                  else
-                    setGames([
-                      ...games,
-                      {
-                        type: engine.type,
-                        handicap: engine.defaultHandicap(),
-                        config: engine.defaultConfig(draftRoundPlayers),
-                      },
-                    ])
-                }}
-                onChange={(next) => setGames(games.map((g) => (g.type === engine.type ? next : g)))}
-                onRules={() => setRulesFor(engine.type)}
-              />
-            )
-          })}
+        <section className="flex flex-col gap-5">
+          <h1 className="font-display text-sm uppercase text-felt-300">What are you playing?</h1>
+
+          {/* CHOSEN ONLY. Listing every registered engine was fine at five games
+              and unusable at twenty-five; the picker is the entry point now,
+              and this screen is the answer. */}
+          <div className="flex flex-col gap-3">
+            <h2 className="font-display text-[10px] uppercase text-stone-400">Main game(s)</h2>
+            {mainDrafts.length === 0 ? (
+              <div className="pixel border-stone-700 bg-stone-900/70 px-4 py-6 text-center">
+                <p className="mb-3 text-stone-500">Nothing picked yet</p>
+                <BigButton variant="outline" onClick={() => setPicker('main')}>
+                  + Choose a game
+                </BigButton>
+              </div>
+            ) : (
+              <>
+                {mainDrafts.map((draft) => {
+                  const engine = getEngine(draft.type)
+                  if (!engine) return null
+                  return (
+                    <GameConfigCard
+                      key={draft.gameId}
+                      engine={engine}
+                      players={players}
+                      draft={draft}
+                      onChange={updateGame}
+                      onRemove={() => removeGame(draft.gameId)}
+                      onRules={() => setRulesFor(draft.type)}
+                    />
+                  )
+                })}
+                <button
+                  onClick={() => setPicker('main')}
+                  className="font-display self-center text-[10px] uppercase text-felt-400"
+                >
+                  + Add another game
+                </button>
+              </>
+            )}
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <h2 className="font-display text-[10px] uppercase text-stone-400">Side bets</h2>
+            {sideDrafts.map((draft) => {
+              const engine = getEngine(draft.type)
+              if (!engine) return null
+              return (
+                <SideBetRow
+                  key={draft.gameId}
+                  engine={engine}
+                  players={players}
+                  draft={draft}
+                  onChange={updateGame}
+                  onRemove={() => removeGame(draft.gameId)}
+                  onRules={() => setRulesFor(draft.type)}
+                />
+              )
+            })}
+            <button
+              onClick={() => setPicker('side')}
+              className="font-display self-center text-[10px] uppercase text-felt-400"
+            >
+              {sideDrafts.length === 0 ? '+ Add a side bet' : '+ More side bets'}
+            </button>
+          </div>
+
           {problems.length > 0 && (
             <ul className="rounded-xl bg-flag-600/10 p-3 text-sm text-flag-500 ring-1 ring-flag-600/40">
               {problems.map((p) => (
@@ -483,6 +603,18 @@ export function SetupScreen() {
           </BigButton>
         )}
       </div>
+
+      <GamePickerSheet
+        open={picker !== undefined}
+        section={picker ?? 'main'}
+        playerCount={players.length}
+        chosenCounts={games.reduce(
+          (counts, g) => counts.set(g.type, (counts.get(g.type) ?? 0) + 1),
+          new Map<string, number>(),
+        )}
+        onPick={(engine) => addGame(engine, picker ?? 'main')}
+        onClose={() => setPicker(undefined)}
+      />
 
       <RulesSheet type={rulesFor} onClose={() => setRulesFor(undefined)} />
     </main>

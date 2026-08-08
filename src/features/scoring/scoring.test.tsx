@@ -327,3 +327,104 @@ describe('ScoringScreen', () => {
     expect(await eventStore.list(round.id)).toHaveLength(before.length)
   })
 })
+
+/**
+ * MAI-50. The pinned bar is a fixed strip at the bottom of the scoring screen,
+ * and it used to render one row per game — five games, five rows, over a phone
+ * keyboard.
+ */
+describe('ScoringScreen — pinned bar density', () => {
+  /** A nassau main event plus `sideCount` skins side bets. */
+  async function roundWith(id: string, sideCount: number) {
+    const round = makeRound({
+      players: makePlayers([{ name: 'Ann' }, { name: 'Bob' }]),
+      holes: 'front9',
+      games: [
+        { type: 'nassau', config: { stakeCents: 500, teams: null, autoPress: false } },
+        ...Array.from({ length: sideCount }, (_, i) => ({
+          type: 'skins',
+          config: { stakeCents: 100 + i, carryover: true },
+        })),
+      ],
+    })
+    round.id = id
+    await db.rounds.put(round)
+    await eventStore.append(round.id, [
+      { type: 'score/set', playerId: 'p-ann', hole: 1, gross: 4 },
+      { type: 'score/set', playerId: 'p-bob', hole: 1, gross: 5 },
+    ])
+    return round
+  }
+
+  const show = (round: { id: string }) => {
+    const router = createMemoryRouter(routes, { initialEntries: [`/round/${round.id}`] })
+    render(<RouterProvider router={router} />)
+  }
+
+  it('collapses two or more side bets into one aggregated row', async () => {
+    show(await roundWith('round-bar-collapse', 3))
+
+    // one row for the main game, one for all the side bets
+    expect(await screen.findByText('Side bets')).toBeInTheDocument()
+    // the aggregate is money across every side bet, not any one game's recap
+    expect(screen.getByText(/Ann \+\$/)).toBeInTheDocument()
+    // and no side bet keeps a row of its own
+    expect(screen.queryByText('Skins')).not.toBeInTheDocument()
+  })
+
+  /**
+   * Nassau + one Skins is the most common two-game round there is, and
+   * collapsing there would trade the bar's latest-hole recap for no row saved.
+   */
+  it('leaves a lone side bet its own row', async () => {
+    show(await roundWith('round-bar-lone', 1))
+
+    expect(await screen.findByText('Skins')).toBeInTheDocument()
+    expect(screen.queryByText('Side bets')).not.toBeInTheDocument()
+  })
+
+  it('shows a side-bets-only round expanded, with nothing to collapse under', async () => {
+    const round = makeRound({
+      players: makePlayers([{ name: 'Ann' }, { name: 'Bob' }]),
+      holes: 'front9',
+      games: [
+        { type: 'skins', config: { stakeCents: 100, carryover: true } },
+        { type: 'skins', config: { stakeCents: 200, carryover: true } },
+      ],
+    })
+    round.id = 'round-bar-all-side'
+    await db.rounds.put(round)
+    show(round)
+
+    // roleOf makes the first "either" game the main event, so there is no
+    // all-side round to collapse — and the bar says nothing about side bets
+    expect(await screen.findByText('Skins ($1)')).toBeInTheDocument()
+    expect(screen.queryByText('Side bets')).not.toBeInTheDocument()
+  })
+
+  /**
+   * The stroke dots belong to the game the round is ABOUT. A cheap net side bet
+   * used to capture them purely by being the first net game in the array.
+   */
+  it('does not let a net side bet capture the stroke dots', async () => {
+    const round = makeRound({
+      players: makePlayers([{ name: 'Ann', ch: 0 }, { name: 'Bob', ch: 18 }]),
+      holes: 'front9',
+      games: [
+        { type: 'nassau', config: { stakeCents: 500, teams: null, autoPress: false } },
+        { type: 'skins', config: { stakeCents: 100, carryover: true } },
+      ],
+    })
+    round.id = 'round-dots'
+    // the MAIN game is gross; the side bet is net and would allocate strokes
+    round.games[0]!.handicap = { mode: 'gross', reference: 'offLow', allowancePct: 100 }
+    round.games[1]!.handicap = { mode: 'net', reference: 'offLow', allowancePct: 100 }
+    await db.rounds.put(round)
+    show(round)
+
+    // Bob is off 18, so a net game would put a stroke on every hole. The main
+    // game gives none, so the dots show none.
+    await screen.findByText('Bob')
+    expect(screen.queryByText('+1')).not.toBeInTheDocument()
+  })
+})

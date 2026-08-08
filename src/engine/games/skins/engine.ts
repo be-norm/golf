@@ -3,6 +3,7 @@ import type { GameEngine, GameDerivation } from '../../catalog'
 import type { RoundContext } from '../../core/context'
 import type { GameScopedEvent } from '../../core/events'
 import { addLine, emptySettlement, type Settlement } from '../../core/money'
+import { duplicateInstanceProblems } from '../../core/setup'
 import { standingsFromSettlement } from '../../core/standings'
 import { latestHoleSummary, summaryString } from '../../core/summary'
 import type { GameConfig, HandicapSettings, RoundPlayer, Uuid } from '../../core/types'
@@ -206,7 +207,7 @@ export const skinsEngine: GameEngine<SkinsConfig> = {
   },
   configSchema: skinsConfigSchema,
   configFields: [
-    { key: 'stakeCents', kind: 'money', label: 'Skin value' },
+    { key: 'stakeCents', kind: 'money', label: 'Skin value', min: 25, step: 25 },
     { key: 'carryover', kind: 'boolean', label: 'Carryovers', hint: 'Tied holes roll over' },
   ],
   defaultConfig: () => ({ stakeCents: 100, carryover: true }),
@@ -215,11 +216,18 @@ export const skinsEngine: GameEngine<SkinsConfig> = {
     allowancePct: 100,
     reference: 'offLow',
   }),
-  validateSetup: (config: GameConfig<SkinsConfig>, players: readonly RoundPlayer[]) => {
+  validateSetup: (
+    config: GameConfig<SkinsConfig>,
+    players: readonly RoundPlayer[],
+    siblings: readonly GameConfig[],
+  ) => {
     const problems: string[] = []
     if (players.length < 2) problems.push('Skins needs at least 2 players')
     const parsed = skinsConfigSchema.safeParse(config.config)
     if (!parsed.success) problems.push('Invalid skins configuration')
+    // Gross skins beside net skins is a real round — only settings identical
+    // in every respect are a mistap. See duplicateInstanceProblems.
+    problems.push(...duplicateInstanceProblems(config, siblings, 'Skins'))
     return problems
   },
   eventKinds: {},

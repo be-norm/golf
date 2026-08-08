@@ -333,11 +333,14 @@ function gameBlock(g: Ctx, game: SummaryCard['games'][number]): Block {
         for (const line of wrapped) {
           const x = PAD + 14 + line.indent
           if (ledger && line.label) {
-            text(g, line.label.toUpperCase(), x, cursor + LINE / 2 + 1, {
-              size: 9,
-              display: true,
-              color: C.gold,
-            })
+            // BOUNDED, like every other string this painter draws. `LABEL_W` is
+            // the column the value is right-aligned against, and the label had
+            // only ever held Nassau's F9/B9/18 — three glyphs. The grouped
+            // side-bets panel puts a GAME NAME here ("SKINS (CARRYOVERS)"),
+            // which is wider than the column and would run under the value.
+            const labelOpts: TextOpts = { size: 9, display: true, color: C.gold }
+            const room = LABEL_W - line.indent - 6
+            text(g, ellipsize(g, line.label.toUpperCase(), room, labelOpts, '...'), x, cursor + LINE / 2 + 1, labelOpts)
           }
           line.rows.forEach((row, i) => {
             text(g, row, ledger ? W - PAD - 14 : x, cursor + LINE / 2 + i * LINE, {
@@ -494,6 +497,26 @@ function scanlines(g: Ctx, height: number): void {
 
 // ── entry point ─────────────────────────────────────────────────────────────
 
+/**
+ * The device-pixel scale a card of this logical height gets painted at.
+ *
+ * Integer scale keeps the pixel grid honest. Retina matters here — the card is
+ * read on a phone — so only drop to 1× when 2× genuinely won't fit, and measure
+ * "fit" against what iOS Safari actually enforces: 8192 per side and ~16.7M
+ * pixels of area. Clamping on the legacy 4096-per-side figure instead put the
+ * cliff at 2048 logical px, which a 4-player 3-game round clears — it shipped
+ * those rounds at 480px wide.
+ *
+ * Split out and exported because it is the one part of the budget that can be
+ * tested: the heights it judges come from measuring text in a 2D context, which
+ * jsdom does not have. `W` is folded in as the fixed card width.
+ */
+export function cardScale(height: number): 1 | 2 {
+  const fits = (s: number) =>
+    W * s <= MAX_DIM && height * s <= MAX_DIM && W * s * height * s <= MAX_AREA
+  return fits(2) ? 2 : 1
+}
+
 export async function paintSummaryCard(card: SummaryCard): Promise<Blob> {
   await loadFonts()
 
@@ -513,15 +536,7 @@ export async function paintSummaryCard(card: SummaryCard): Promise<Blob> {
     PAD + blocks.reduce((h, b) => h + b.height, 0) + GAP * (blocks.length - 1) + PAD,
   )
 
-  // Integer scale keeps the pixel grid honest. Retina matters here — the card
-  // is read on a phone — so only drop to 1× when 2× genuinely won't fit, and
-  // measure "fit" against what iOS Safari actually enforces: 8192 per side and
-  // ~16.7M pixels of area. Clamping on the legacy 4096-per-side figure instead
-  // put the cliff at 2048 logical px, which a 4-player 3-game round clears —
-  // it shipped those rounds at 480px wide.
-  const fits = (s: number) =>
-    W * s <= MAX_DIM && height * s <= MAX_DIM && W * s * height * s <= MAX_AREA
-  const scale = fits(2) ? 2 : 1
+  const scale = cardScale(height)
 
   const canvas = document.createElement('canvas')
   canvas.width = W * scale

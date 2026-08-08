@@ -1,6 +1,6 @@
 import 'fake-indexeddb/auto'
-import { describe, expect, it } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { beforeEach, describe, expect, it } from 'vitest'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { createMemoryRouter, RouterProvider } from 'react-router'
 import '../../engine/games'
@@ -66,6 +66,58 @@ async function addPlayer(name: string, index: number) {
 }
 
 const cont = () => userEvent.click(screen.getByRole('button', { name: 'Continue' }))
+
+/**
+ * Step 2 lists only what has been CHOSEN, so games are added through the picker
+ * sheet. It auto-opens the first time step 2 is reached empty, which is why the
+ * older tests below can still click a game name straight after `cont()`.
+ */
+async function pickGame(name: string, section: 'main' | 'side' = 'main') {
+  if (section === 'side') {
+    await userEvent.click(screen.getByRole('button', { name: /Add a side bet|More side bets/ }))
+  } else if (screen.queryByRole('button', { name: /Choose a game|Add another game/ })) {
+    await userEvent.click(screen.getByRole('button', { name: /Choose a game|Add another game/ }))
+  }
+  // Scoped to the sheet: a chosen game shows the SAME name on the page behind
+  // it, so an unscoped query goes ambiguous the moment one is added.
+  await userEvent.click(await within(await picker()).findByText(name))
+}
+
+/** The picker sheet's content region. */
+const picker = () => screen.findByRole('region', { name: 'Game picker' })
+const pickerClosed = () =>
+  expect(screen.queryByRole('region', { name: 'Game picker' })).not.toBeInTheDocument()
+
+/** Two players and a game, from a standing start. */
+async function toStepTwo() {
+  await pickPenmar()
+  await cont()
+  await addPlayer('Bogey', 16.5)
+  await addPlayer('Scratch', 0)
+  await cont()
+}
+
+const teeOff = () => userEvent.click(screen.getByRole('button', { name: /Tee off/ }))
+
+const roundFor = async (courseId: string) =>
+  (await db.rounds.toArray()).find((r) => r.courseId === courseId)
+
+/**
+ * Every test here drives the whole wizard and tees off, and `fake-indexeddb`
+ * persists for the lifetime of the FILE — so without this, a test asserting on
+ * "the round" reads whichever one a previous test left behind.
+ *
+ * That is not hypothetical: `leaves role unstamped` used to assert
+ * `rounds.count() === 1` inside a `waitFor`, which the PREVIOUS test's round
+ * satisfied on the first poll, before this test's own write landed. It then
+ * read `toArray()[0]` — the other test's round — and passed without ever
+ * looking at what it had built. Clearing per test removes the whole class,
+ * rather than teaching each assertion to identify its own round.
+ */
+beforeEach(async () => {
+  await db.rounds.clear()
+  await db.players.clear()
+})
 
 describe('SetupScreen — 9-hole courses', () => {
   it('gives a nine HALF the index: 16.5 → HCP 8, not 15', async () => {
@@ -196,6 +248,136 @@ describe('SetupScreen — 9-hole courses', () => {
     expect(await screen.findByText('★ First tee ★')).toBeInTheDocument()
     expect(strokeRow('Bogey')).toHaveTextContent('CH 20 · 10 strokes')
     expect(strokeRow('Scratch')).toHaveTextContent('CH 0 · 0 strokes')
+  })
+})
+
+/**
+ * MAI-44. Step 2 used to render every registered engine as a full-width card,
+ * keyed by `engine.type` — fine at five games, unusable at twenty-five, and it
+ * capped a round at one instance per game.
+ */
+describe('SetupScreen — choosing games', () => {
+  it('auto-opens the picker on the first empty visit, and not again after that', async () => {
+    await toStepTwo()
+
+    // arrived empty → the sheet is already open, which is the entry point
+    expect(await picker()).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Close' }))
+    await waitFor(pickerClosed)
+    expect(screen.getByText('Nothing picked yet')).toBeInTheDocument()
+
+    // Back to step 1 and forward again — still empty, and it must STAY closed.
+    // Re-opening whenever step 2 is empty traps the user, because empty is
+    // exactly the state you are in while trying to go back.
+    await userEvent.click(screen.getByText('← Back'))
+    await userEvent.click(screen.getByRole('button', { name: 'Continue' }))
+    expect(screen.getByText('Nothing picked yet')).toBeInTheDocument()
+    await waitFor(pickerClosed)
+  })
+
+  /**
+   * The round `gameLabel`'s whole discriminator ladder exists to name, and
+   * which was unreachable from this screen until drafts got instance ids.
+   */
+  it('adds two instances of one game, configured independently', async () => {
+    await toStepTwo()
+    await pickGame('Skins')
+    await pickGame('Skins', 'side')
+
+    // make them differ, or they are a duplicate and tee-off is blocked
+    const steppers = screen.getAllByRole('button', { name: 'increase' })
+    await userEvent.click(steppers[0]!)
+
+    await teeOff()
+    await waitFor(async () => expect(await roundFor('penmar')).toBeDefined())
+    const round = (await roundFor('penmar'))!
+    expect(round.games).toHaveLength(2)
+    expect(round.games[0]!.gameId).not.toBe(round.games[1]!.gameId)
+    expect(round.games.every((g) => g.type === 'skins')).toBe(true)
+    // and they really are different games, not one config written twice
+    expect(round.games[0]!.config).not.toEqual(round.games[1]!.config)
+  })
+
+  it('blocks tee-off on two identical instances, and says so once', async () => {
+    await toStepTwo()
+    await pickGame('Skins')
+    await pickGame('Skins', 'side')
+
+    const problem = await screen.findByText(/identical settings/)
+    expect(problem).toBeInTheDocument()
+    // ONE message, not one per instance — both report it and the caller dedupes
+    expect(screen.getAllByText(/identical settings/)).toHaveLength(1)
+    expect(screen.getByRole('button', { name: /Tee off/ })).toBeDisabled()
+  })
+
+  it('tees off a side-bets-only round, storing no role for it', async () => {
+    await toStepTwo()
+    await pickGame('Skins', 'side')
+
+    await teeOff()
+    await waitFor(async () => expect(await roundFor('penmar')).toBeDefined())
+    const round = (await roundFor('penmar'))!
+    expect(round.games).toHaveLength(1)
+    // Nothing READS the distinction in a one-game round — `primaryGame` returns
+    // this game either way, the bar doesn't collapse a lone side bet and the
+    // card doesn't group one — so storing 'side' would freeze a value with no
+    // consumer into a synced archive.
+    expect(round.games[0]!.role).toBeUndefined()
+  })
+
+  /**
+   * The one placement that DOES have a reader: a main-game Skins beside a
+   * Nassau. `roleOf` would derive 'side' (Nassau can only be the main event),
+   * so the user's choice has to be recorded or it is lost.
+   */
+  it('stores role only when the chosen section contradicts roleOf', async () => {
+    await pickPenmar()
+    await cont()
+    await addPlayer('Bogey', 16.5)
+    await addPlayer('Scratch', 0)
+    await cont()
+
+    await pickGame('Nassau')
+    await pickGame('Skins')
+
+    await teeOff()
+    await waitFor(async () => expect(await roundFor('penmar')).toBeDefined())
+    const round = (await roundFor('penmar'))!
+    const nassau = round.games.find((g) => g.type === 'nassau')!
+    const skins = round.games.find((g) => g.type === 'skins')!
+    // nassau is 'main' by category, so nothing to record
+    expect(nassau.role).toBeUndefined()
+    expect(skins.role).toBe('main')
+  })
+
+  it('offers a threesome game to three players and hides the foursome ones', async () => {
+    await pickPenmar()
+    await cont()
+    await addPlayer('A', 10)
+    await addPlayer('B', 10)
+    await addPlayer('C', 10)
+    await cont()
+
+    // the "who plays whom" view is roster-aware: it answers what this group
+    // could actually play, so it filters rather than dims
+    const sheet = within(await picker())
+    await userEvent.click(sheet.getByRole('button', { name: 'By who plays whom' }))
+    // Nassau appears under BOTH its shapes (1v1 and 2v2) — `shapes` is a set
+    // precisely because that is true of it, so more than one hit is correct.
+    expect(sheet.getAllByText('Nassau').length).toBeGreaterThan(0)
+    expect(sheet.getByText('Six Point')).toBeInTheDocument()
+    expect(sheet.queryByText('Vegas')).not.toBeInTheDocument()
+    expect(sheet.queryByText('Wolf')).not.toBeInTheDocument()
+    // hidden is not absent — say what the roster filtered out
+    expect(sheet.getByText(/need a different group size/)).toBeInTheDocument()
+  })
+
+  it('keeps an unplayable game visible in the by-type view, with the reason', async () => {
+    await toStepTwo() // two players
+    const sheet = within(await picker())
+    expect(sheet.getByText('Vegas')).toBeInTheDocument()
+    // Vegas and Wolf both need exactly four, so both say so
+    expect(sheet.getAllByText('Needs 4 players').length).toBeGreaterThan(0)
   })
 })
 

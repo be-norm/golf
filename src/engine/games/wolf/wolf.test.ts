@@ -209,7 +209,7 @@ describe('wolf — golden fixture (hand-verified)', () => {
           handicap: engine.defaultHandicap(),
           config: { pointCents: 100, rotation: players.map((p) => p.playerId) },
         }
-        if (engine.validateSetup(config, players).length > 0) continue
+        if (engine.validateSetup(config, players, []).length > 0) continue
 
         // every side split this roster can produce: the wolf alone, or paired
         for (const wolfSideSize of [1, 2]) {

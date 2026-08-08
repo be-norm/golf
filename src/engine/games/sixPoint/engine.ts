@@ -4,6 +4,7 @@ import type { RoundContext } from '../../core/context'
 import type { GameScopedEvent } from '../../core/events'
 import { addLine, emptySettlement, type Settlement } from '../../core/money'
 import { rankPoints } from '../../core/points'
+import { duplicateInstanceProblems } from '../../core/setup'
 import { standingsFromSettlement } from '../../core/standings'
 import { firstName, joinNames, latestHoleSummary, summaryString } from '../../core/summary'
 import type { GameConfig, HandicapSettings, RoundPlayer, Uuid } from '../../core/types'
@@ -239,14 +240,19 @@ export const sixPointEngine: GameEngine<SixPointConfig> = {
     },
   },
   configSchema: sixPointConfigSchema,
-  configFields: [{ key: 'pointCents', kind: 'money', label: 'Per point' }],
+  configFields: [{ key: 'pointCents', kind: 'money', label: 'Per point', min: 5, step: 5 }],
   defaultConfig: () => ({ pointCents: 25 }),
   defaultHandicap: (): HandicapSettings => ({ mode: 'net', allowancePct: 100, reference: 'offLow' }),
-  validateSetup: (config: GameConfig<SixPointConfig>, players: readonly RoundPlayer[]) => {
+  validateSetup: (
+    config: GameConfig<SixPointConfig>,
+    players: readonly RoundPlayer[],
+    siblings: readonly GameConfig[],
+  ) => {
     const problems: string[] = []
     if (players.length !== 3) problems.push('Six Point is a threesome game — exactly 3 players')
     const parsed = sixPointConfigSchema.safeParse(config.config)
     if (!parsed.success) problems.push('Invalid six point configuration')
+    problems.push(...duplicateInstanceProblems(config, siblings, 'Six Point'))
     return problems
   },
   eventKinds: {},

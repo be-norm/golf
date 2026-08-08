@@ -134,7 +134,14 @@ export interface GameDerivation {
  * first-class participant-assignment field types (Vegas teams, Wolf order).
  */
 export type ConfigFieldSpec =
-  | { key: string; kind: 'money'; label: string; hint?: string }
+  /**
+   * `min`/`max`/`step` are per-field because one range cannot serve every
+   * money field: a Nassau unit moves in dollars, a Vegas point in nickels, and
+   * the setup card used to hardcode 25–10000¢ with an implicit 1¢ step for all
+   * of them — which put 400 taps between $1 and $5 (MAI-44). Optional, so a
+   * field that doesn't care keeps the sane defaults.
+   */
+  | { key: string; kind: 'money'; label: string; hint?: string; min?: number; max?: number; step?: number }
   | { key: string; kind: 'boolean'; label: string; hint?: string }
   | { key: string; kind: 'select'; label: string; options: { value: string; label: string }[] }
   | { key: string; kind: 'teams'; label: string }
@@ -289,8 +296,23 @@ export interface GameEngine<C = unknown> {
   configFields: ConfigFieldSpec[]
   defaultConfig(players: readonly RoundPlayer[]): C
   defaultHandicap(): HandicapSettings
-  /** [] = valid; otherwise human-readable problems shown in setup */
-  validateSetup(config: GameConfig<C>, players: readonly RoundPlayer[]): string[]
+  /**
+   * [] = valid; otherwise human-readable problems shown in setup.
+   *
+   * `siblings` is THE OTHER GAMES IN THE ROUND, this one excluded — setup can
+   * hold two instances of the same game (MAI-44), so "you've added Skins twice
+   * with identical settings" is only answerable with the round in view.
+   *
+   * It stays a validation channel, not a coupling: an engine may compare its
+   * own type's settings, but reading another engine — its meta, its derive —
+   * is invariant #7's one-way rule and is banned by lint. Nothing here reaches
+   * `derive`, so no sibling can ever move money.
+   */
+  validateSetup(
+    config: GameConfig<C>,
+    players: readonly RoundPlayer[],
+    siblings: readonly GameConfig[],
+  ): string[]
   /** zod schema per game/event kind this engine understands */
   eventKinds: Record<string, z.ZodType>
   /** Pure derivation from config + this game's events + the shared context. */

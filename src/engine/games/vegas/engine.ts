@@ -3,6 +3,7 @@ import type { GameEngine, GameDerivation } from '../../catalog'
 import type { RoundContext } from '../../core/context'
 import type { GameScopedEvent } from '../../core/events'
 import { addLine, emptySettlement, type Settlement } from '../../core/money'
+import { duplicateInstanceProblems } from '../../core/setup'
 import { standingsFromSettlement } from '../../core/standings'
 import { firstName, joinNames, latestHoleSummary, summaryString } from '../../core/summary'
 import { teamsSchema, teamPartitionProblems } from '../../core/teams'
@@ -267,7 +268,7 @@ export const vegasEngine: GameEngine<VegasConfig> = {
   },
   configSchema: vegasConfigSchema,
   configFields: [
-    { key: 'pointCents', kind: 'money', label: 'Per point' },
+    { key: 'pointCents', kind: 'money', label: 'Per point', min: 5, max: 500, step: 5 },
     { key: 'teams', kind: 'teams', label: 'Teams' },
     { key: 'birdieFlip', kind: 'boolean', label: 'Birdie flip', hint: 'Gross birdie flips opponents' },
     { key: 'eagleDouble', kind: 'boolean', label: 'Eagle doubles', hint: 'Eagle doubles the hole' },
@@ -282,11 +283,16 @@ export const vegasEngine: GameEngine<VegasConfig> = {
     eagleDouble: true,
   }),
   defaultHandicap: (): HandicapSettings => ({ mode: 'net', allowancePct: 100, reference: 'offLow' }),
-  validateSetup: (config: GameConfig<VegasConfig>, players: readonly RoundPlayer[]) => {
-    if (players.length !== 4) return ['Vegas needs exactly 4 players']
+  validateSetup: (
+    config: GameConfig<VegasConfig>,
+    players: readonly RoundPlayer[],
+    siblings: readonly GameConfig[],
+  ) => {
+    const dupes = duplicateInstanceProblems(config, siblings, 'Vegas')
+    if (players.length !== 4) return [...dupes, 'Vegas needs exactly 4 players']
     const parsed = vegasConfigSchema.safeParse(config.config)
-    if (!parsed.success) return ['Invalid vegas configuration']
-    return teamPartitionProblems(parsed.data.teams, players, 'Vegas')
+    if (!parsed.success) return [...dupes, 'Invalid vegas configuration']
+    return [...teamPartitionProblems(parsed.data.teams, players, 'Vegas'), ...dupes]
   },
   eventKinds: {},
   derive,

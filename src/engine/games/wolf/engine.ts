@@ -4,6 +4,7 @@ import type { RoundContext } from '../../core/context'
 import type { GameScopedEvent } from '../../core/events'
 import { emptySettlement, type Settlement } from '../../core/money'
 import { sideStake } from '../../core/match'
+import { duplicateInstanceProblems } from '../../core/setup'
 import { standingsFromSettlement } from '../../core/standings'
 import { latestHoleSummary, summaryString } from '../../core/summary'
 import { isPlayerPermutation } from '../../core/teams'
@@ -352,7 +353,7 @@ export const wolfEngine: GameEngine<WolfConfig> = {
   },
   configSchema: wolfConfigSchema,
   configFields: [
-    { key: 'pointCents', kind: 'money', label: 'Per hole', hint: "Each player's stake; lone doubles it, blind triples" },
+    { key: 'pointCents', kind: 'money', label: 'Per hole', min: 25, step: 25, hint: "Each player's stake; lone doubles it, blind triples" },
     { key: 'rotation', kind: 'rotation', label: 'Wolf order' },
   ],
   defaultConfig: (players) => ({
@@ -360,13 +361,21 @@ export const wolfEngine: GameEngine<WolfConfig> = {
     rotation: players.map((p) => p.playerId),
   }),
   defaultHandicap: (): HandicapSettings => ({ mode: 'net', allowancePct: 100, reference: 'offLow' }),
-  validateSetup: (config: GameConfig<WolfConfig>, players: readonly RoundPlayer[]) => {
-    if (players.length !== 4) return ['Wolf needs exactly 4 players']
+  validateSetup: (
+    config: GameConfig<WolfConfig>,
+    players: readonly RoundPlayer[],
+    siblings: readonly GameConfig[],
+  ) => {
+    // Reported alongside whatever else is wrong rather than behind it: a
+    // duplicate is independent of the roster, and hiding it until the roster is
+    // fixed makes the user solve one problem to discover the next.
+    const dupes = duplicateInstanceProblems(config, siblings, 'Wolf')
+    if (players.length !== 4) return [...dupes, 'Wolf needs exactly 4 players']
     const parsed = wolfConfigSchema.safeParse(config.config)
-    if (!parsed.success) return ['Invalid wolf configuration']
+    if (!parsed.success) return [...dupes, 'Invalid wolf configuration']
     if (!isPlayerPermutation(parsed.data.rotation, players))
-      return ['Wolf order must include every player exactly once']
-    return []
+      return [...dupes, 'Wolf order must include every player exactly once']
+    return dupes
   },
   eventKinds: {
     'wolf/pick': z.object({
