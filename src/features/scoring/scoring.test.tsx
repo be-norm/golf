@@ -1,6 +1,6 @@
 import 'fake-indexeddb/auto'
 import { describe, expect, it } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { createMemoryRouter, RouterProvider } from 'react-router'
 import '../../engine/games'
@@ -325,6 +325,170 @@ describe('ScoringScreen', () => {
     const before = await eventStore.list(round.id)
     await userEvent.click(row)
     expect(await eventStore.list(round.id)).toHaveLength(before.length)
+  })
+})
+
+/**
+ * MAI-46 — the award channel, on the screen the scorekeeper is holding.
+ *
+ * The grid's whole reason for existing is the two gates it does NOT have. The
+ * press affordance is frontier-gated and disappears once every hole is scored,
+ * which is correct for a press and fatal for a greenie you remembered five
+ * holes later — so the two tests that matter most here are the direct
+ * contrasts with the press tests above.
+ */
+describe('ScoringScreen — award grid', () => {
+  /** Front nine of the default card: pars 4 4 5 3 4 4 3 5 4 → par 3s on 4 and 7. */
+  async function ctpRound(id: string, scoredHoles: number[] = []) {
+    const round = makeRound({
+      players: makePlayers([{ name: 'Ann' }, { name: 'Bob' }]),
+      holes: 'front9',
+      games: [{ type: 'ctp', config: { stakeCents: 200 } }],
+    })
+    round.id = id
+    await db.rounds.put(round)
+    for (const hole of scoredHoles) {
+      await eventStore.append(round.id, [
+        { type: 'score/set', playerId: 'p-ann', hole, gross: 4 },
+        { type: 'score/set', playerId: 'p-bob', hole, gross: 5 },
+      ])
+    }
+    return round
+  }
+
+  const showHole = (round: { id: string }, hole: number) => {
+    const router = createMemoryRouter(routes, {
+      initialEntries: [`/round/${round.id}?hole=${hole}`],
+    })
+    render(<RouterProvider router={router} />)
+  }
+
+  const cell = (name: string) =>
+    screen.findByRole('button', { name: `Closest to the pin — ${name}` })
+
+  it('offers a cell per player on a par 3, and nothing on a par 4', async () => {
+    const round = await ctpRound('round-award-par3')
+    showHole(round, 4)
+
+    expect(await cell('Ann')).toHaveAttribute('aria-pressed', 'false')
+    expect(await cell('Bob')).toBeInTheDocument()
+    // the game names its own section, so a round with two award games can tell
+    // whose greenie is whose. Scoped to the region, because the pinned bar
+    // carries the same label — an unscoped query matches both and would pass
+    // with the heading deleted.
+    const grid = within(screen.getByRole('region', { name: 'Awards' }))
+    expect(grid.getByText('Closest to the Pin')).toBeInTheDocument()
+    expect(grid.getByText('Closest to the pin')).toBeInTheDocument()
+  })
+
+  it('says nothing at all on a hole with no awards to give', async () => {
+    const round = await ctpRound('round-award-par4')
+    showHole(round, 5)
+
+    await screen.findByText('Hole')
+    expect(screen.queryByRole('region', { name: 'Awards' })).not.toBeInTheDocument()
+  })
+
+  it('one tap appends exactly one award event, naming the hole', async () => {
+    const round = await ctpRound('round-award-tap')
+    showHole(round, 7)
+
+    await userEvent.click(await cell('Bob'))
+    await waitFor(async () => {
+      expect(await eventStore.list(round.id)).toHaveLength(1)
+    })
+    const events = await eventStore.list(round.id)
+    expect(events[0]).toMatchObject({
+      type: 'game/event',
+      kind: 'ctp/award',
+      // `hole` in the PAYLOAD, not just in the UI: buildHoleLedger places a
+      // game event in its prefix replay by reading it, and an award is the one
+      // thing recorded long after the hole it names
+      data: { hole: 7, playerId: 'p-bob' },
+    })
+  })
+
+  /**
+   * THE CONTRAST WITH `no press offer while looking at a hole the group has
+   * already played`. Same situation — the group is on the 3rd tee, the
+   * scorekeeper has paged back — and the opposite, correct answer.
+   */
+  it('still offers awards on a hole behind the frontier', async () => {
+    // holes 1–3 in, so hole 4 is the frontier; page back to the par 3 on… no,
+    // hole 4 IS the par 3, so score through it and page back to it
+    const round = await ctpRound('round-award-behind', [1, 2, 3, 4, 5])
+    showHole(round, 4)
+
+    const bob = await cell('Bob')
+    expect(bob).toBeEnabled()
+    // and there is no press-style affordance withdrawing it
+    await userEvent.click(bob)
+    await waitFor(async () => {
+      expect((await eventStore.list(round.id)).some((e) => e.type === 'game/event')).toBe(true)
+    })
+  })
+
+  /**
+   * THE CONTRAST WITH the `offersActions && onFrontier && !allScored` gate: a
+   * mistapped KP has to stay fixable after the last putt drops and before
+   * anyone taps Finish.
+   */
+  it('still offers awards once every hole is scored', async () => {
+    const round = await ctpRound('round-award-all-scored', [1, 2, 3, 4, 5, 6, 7, 8, 9])
+    showHole(round, 7)
+
+    // the bar has already flipped to Finish, and the grid is still live
+    expect(await screen.findByRole('button', { name: /Finish round/ })).toBeInTheDocument()
+    expect(await cell('Ann')).toBeEnabled()
+  })
+
+  it('tapping the lit cell takes the award back', async () => {
+    const round = await ctpRound('round-award-undo')
+    showHole(round, 4)
+
+    await userEvent.click(await cell('Ann'))
+    await waitFor(async () => {
+      expect(await eventStore.list(round.id)).toHaveLength(1)
+    })
+
+    const lit = await cell('Ann')
+    expect(lit).toHaveAttribute('aria-pressed', 'true')
+    await userEvent.click(lit)
+
+    await waitFor(async () => {
+      expect(await eventStore.list(round.id)).toHaveLength(2)
+    })
+    const events = await eventStore.list(round.id)
+    expect(events[1]).toMatchObject({ type: 'meta/retract', targetEventId: events[0]!.id })
+    await waitFor(async () => {
+      expect(await cell('Ann')).toHaveAttribute('aria-pressed', 'false')
+    })
+  })
+
+  /**
+   * The cell survives its own tap, so a fast double-tap lands twice before the
+   * re-derive. The append-only log outlives the round in every export and
+   * archive — one compensation event, not two. (Same race, same guard, as the
+   * press row; fired synchronously because that IS the race.)
+   */
+  it('two taps landing in the same frame retract once, not twice', async () => {
+    const round = await ctpRound('round-award-undo-twice')
+    showHole(round, 4)
+
+    await userEvent.click(await cell('Bob'))
+    await waitFor(async () => {
+      expect(await eventStore.list(round.id)).toHaveLength(1)
+    })
+
+    const lit = await cell('Bob')
+    fireEvent.click(lit)
+    fireEvent.click(lit)
+
+    await waitFor(async () => {
+      expect(await eventStore.list(round.id)).toHaveLength(2)
+    })
+    const events = await eventStore.list(round.id)
+    expect(events.filter((e) => e.type === 'meta/retract')).toHaveLength(1)
   })
 })
 
