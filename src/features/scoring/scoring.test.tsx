@@ -234,6 +234,41 @@ describe('ScoringScreen', () => {
     expect(screen.queryByRole('button', { name: /Press F9/ })).not.toBeInTheDocument()
   })
 
+  /**
+   * Two Nassaus at different stakes is a supported round (MAI-44 —
+   * `duplicateInstanceProblems` blocks only IDENTICAL settings), and both speak
+   * the same vocabulary. Counting declared copies rather than offering games
+   * read that as two voices and fell back to the neutral "Actions", losing the
+   * empty state that answers "why can't I press?".
+   */
+  it('keeps one game’s vocabulary when two instances of it are both offering', async () => {
+    const round = makeRound({
+      players: makePlayers([{ name: 'Ann' }, { name: 'Bob' }]),
+      games: [
+        { type: 'nassau', config: { stakeCents: 500, teams: null, autoPress: false } },
+        { type: 'nassau', config: { stakeCents: 1000, teams: null, autoPress: false } },
+      ],
+    })
+    round.id = 'round-two-nassaus'
+    for (const g of round.games) g.handicap = { mode: 'gross', reference: 'offLow', allowancePct: 100 }
+    await db.rounds.put(round)
+    await eventStore.append(round.id, [
+      { type: 'score/set', playerId: 'p-ann', hole: 1, gross: 4 },
+      { type: 'score/set', playerId: 'p-bob', hole: 1, gross: 5 },
+    ])
+    const router = createMemoryRouter(routes, { initialEntries: [`/round/${round.id}`] })
+    render(<RouterProvider router={router} />)
+
+    // still "press options", not "actions options"
+    const button = await screen.findByRole('button', { name: /press options/ })
+    await userEvent.click(button)
+    // …and the sheet still answers in Nassau's words. Both bets are down, so
+    // four rows render — which is also what would collide on React keys if the
+    // flat list keyed on `id` alone.
+    expect(await screen.findByText('Press from hole 2')).toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: /Press F9/ })).toHaveLength(2)
+  })
+
   it('no press offer while looking at a hole the group has already played', async () => {
     // holes 1–2 are in, so the group is on the 3rd tee — but the scorekeeper
     // has paged back to hole 1 to check a score. Nothing to press from here.
@@ -503,6 +538,27 @@ describe('ScoringScreen — award grid', () => {
    * archive — one compensation event, not two. (Same race, same guard, as the
    * press row; fired synchronously because that IS the race.)
    */
+  /**
+   * The take half of the same race. An award cell survives its own tap — unlike
+   * an actions row, whose sheet closes — so two taps land before the re-derive.
+   * The log is append-only and syncs, so the duplicate would outlive the round
+   * in every export, and the first award game to COUNT its events rather than
+   * treat them as a set would double-pay on a fumbled tap.
+   */
+  it('two taps landing in the same frame award once, not twice', async () => {
+    const round = await ctpRound('round-award-take-twice')
+    showHole(round, 4)
+
+    const untaken = await cell('Ann')
+    fireEvent.click(untaken)
+    fireEvent.click(untaken)
+
+    await waitFor(async () => {
+      expect(await litCell('Ann')).toBeInTheDocument()
+    })
+    expect(await eventStore.list(round.id)).toHaveLength(1)
+  })
+
   it('two taps landing in the same frame retract once, not twice', async () => {
     const round = await ctpRound('round-award-undo-twice')
     showHole(round, 4)

@@ -60,13 +60,21 @@ function derive(
   const eligible = (hole: number) => ctx.par(hole) === 3
   const eligibleHoles = ctx.holesPlayed.filter(eligible)
 
-  // THE WHOLE CARD, not this hole. `ctx.finalized` goes true the moment play
-  // moves on, so "no award yet" would read as "unclaimed" on the bar and in
-  // notes while the group is two holes down the fairway and fully intends to
-  // record it at the turn — which is the exact workflow the award channel
-  // exists to allow (MAI-46). Same proxy Skins uses to kill its carry: the
-  // card is played out, so nothing is coming.
-  const cardPlayedOut = ctx.holesPlayed.every((h) => ctx.finalized(h))
+  // A CTP IS UNCLAIMED EXACTLY WHEN IT CAN NO LONGER BE CLAIMED, which is when
+  // the round is over — the same instant the award grid stops being tappable.
+  //
+  // Not `finalized`, which goes true the moment play moves on: "no award yet"
+  // would then read as "unclaimed" on the bar and in notes while the group is
+  // two holes down the fairway and fully intends to record it at the turn,
+  // which is the exact workflow the award channel exists to allow (MAI-46).
+  //
+  // Nor "every hole finalized", the proxy Skins uses to kill its carry. That is
+  // right for Skins — a carry dies when no hole is left to WIN it, and a hole
+  // missing a score still settles among the scores posted — and wrong here for
+  // a reason worth stating: one player picking up on the par 3 leaves that hole
+  // finalized-but-incomplete, so the proxy fires while the round is live and
+  // the cell is still lit for the taking. Same bug as the first, one layer down.
+  const roundOver = ctx.completed
 
   const settlement: Settlement = emptySettlement(playerIds)
   const wonByPlayer = new Map<Uuid, number>(playerIds.map((id) => [id, 0]))
@@ -86,7 +94,7 @@ function derive(
     // corrupt or edited log; treat it as no award rather than paying a ghost.
     const winnerId = raw !== undefined && playerIds.includes(raw) ? raw : undefined
     if (winnerId === undefined) {
-      holeResults.push({ hole, kind: cardPlayedOut ? 'unclaimed' : 'pending' })
+      holeResults.push({ hole, kind: roundOver ? 'unclaimed' : 'pending' })
       continue
     }
     wonByPlayer.set(winnerId, (wonByPlayer.get(winnerId) ?? 0) + 1)

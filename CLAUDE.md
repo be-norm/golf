@@ -287,13 +287,16 @@ change, use a 6-digit code (`{{ .Token }}` + `verifyOtp`) rather than a link.
   are the direct contrasts with the press tests in the same file. `GameAction`
   and `Award` share their write half (`GameEventOffer`) — they differ in WHEN
   they may be tapped, never in what a tap does.
-- **An award game says nothing about a hole until nothing more is coming.**
-  `ctx.finalized(hole)` goes true the moment play moves on, so an award game
-  that called an unawarded hole "unclaimed" there would report dead money while
-  the group is two holes down the fairway and fully intends to record it at the
-  turn — which is the workflow the channel exists for. CTP waits for the whole
-  card (`ctx.holesPlayed.every(ctx.finalized)`, the same proxy Skins uses to
-  kill its carry) and skips any hole `ctx.anyScored` says nobody played.
+- **An award is unclaimed exactly when it can no longer be claimed** — i.e. when
+  `ctx.completed` says the round is over, the same instant the grid stops being
+  tappable. Neither weaker test works, and both were tried: `ctx.finalized(hole)`
+  goes true the moment play moves on, so an unawarded hole would report dead
+  money while the group is two holes down the fairway intending to record it at
+  the turn; and "every hole finalized" (the proxy Skins uses to kill its carry,
+  which is right for Skins because a hole missing a score still settles among
+  the scores posted) fires the moment one player picks up on the par 3, while
+  the round is live and the cell is still lit. An award game also skips any hole
+  `ctx.anyScored` says nobody played (MAI-38).
 - **The share card is painted, not screenshotted.** `Share` on the settle screen
   produces a PNG drawn by hand onto a canvas (`paintSummaryCard.ts`), never a
   DOM capture — rasterising the live screen means `foreignObject`, and so means

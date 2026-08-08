@@ -51,6 +51,7 @@ describe('ctp — golden fixtures (hand-verified)', () => {
     const log = new EventLog()
     scoreHoles(round, log, [1, 2, 3, 4, 5, 6, 7, 8, 9])
     award(log, 4, 'p-b')
+    log.append({ type: 'round/completed' })
     const ctp = ctpOf(round, log)
 
     expect(ctp.settlement.perPlayerCents).toEqual({
@@ -88,9 +89,9 @@ describe('ctp — golden fixtures (hand-verified)', () => {
    * it dead there would put "nobody inside" on the pinned bar and a note in the
    * settle panel while the group is still on the course and fully intends to
    * record it at the turn — which is the exact workflow the award channel was
-   * built to allow. Nothing is dead until the card is played out.
+   * built to allow.
    */
-  it('F2: an unawarded par 3 stays silent while the card is still live', () => {
+  it('F2: an unawarded par 3 stays silent while the round is still live', () => {
     const round = ctpRound()
     const log = new EventLog()
     // holes 1–8 scored: hole 7 IS finalized (play moved to 8), hole 9 is not
@@ -107,9 +108,41 @@ describe('ctp — golden fixtures (hand-verified)', () => {
     // and the bar recaps hole 4, the only hole that has actually decided
     expect(ctp.summaryParts).toEqual([{ label: 'H4', value: 'B closest' }])
 
-    // …then the last hole lands and the same log declares it
+    // …then the group finishes, and the same log declares it
     scoreHoles(round, log, [9])
+    log.append({ type: 'round/completed' })
     expect(ctpOf(round, log).notes).toHaveLength(1)
+  })
+
+  /**
+   * F2b — THE SAME BUG ONE LAYER DOWN, and the reason this asks `ctx.completed`
+   * rather than "every hole is finalized".
+   *
+   * D picks up on the par 3 at hole 7, so that hole is finalized (play moved on)
+   * but never complete. Every OTHER hole is finalized too once hole 9 is scored
+   * out — so "the card is played out" is satisfied while the round is still
+   * live, the scoring screen is still showing game rows, and the award cell for
+   * hole 7 is still lit for the taking. Picking up is a thing this engine
+   * explicitly supports: a winner who then picked up still won the tee shot.
+   */
+  it('F2b: a player picking up does not kill the CTP on that hole', () => {
+    const round = ctpRound()
+    const log = new EventLog()
+    scoreHoles(round, log, [1, 2, 3, 4, 5, 6])
+    // hole 7: A, B and C post, D picks up
+    for (const name of ['A', 'B', 'C']) {
+      log.append({ type: 'score/set', playerId: `p-${name.toLowerCase()}`, hole: 7, gross: 3 })
+    }
+    scoreHoles(round, log, [8, 9])
+
+    const ctp = ctpOf(round, log)
+    // every hole is finalized, and hole 7 is STILL enterable
+    expect(round.players.every((p) => ctp.awards!(7).some((c) => c.playerId === p.playerId))).toBe(true)
+    expect(ctp.holeResults).toEqual([
+      { hole: 4, kind: 'pending' },
+      { hole: 7, kind: 'pending' },
+    ])
+    expect(ctp.notes).toBeUndefined()
   })
 
   /**
@@ -166,6 +199,7 @@ describe('ctp — golden fixtures (hand-verified)', () => {
     scoreHoles(round, log, [1, 2, 3, 4, 5, 6, 7, 8, 9])
     const first = award(log, 4, 'p-b')
     const second = award(log, 4, 'p-d')
+    log.append({ type: 'round/completed' })
 
     const lit = ctpOf(round, log)
       .awards!(4)
@@ -188,6 +222,7 @@ describe('ctp — golden fixtures (hand-verified)', () => {
     const log = new EventLog()
     scoreHoles(round, log, [1, 2, 3, 4, 5, 6, 7, 8, 9])
     award(log, 4, 'p-nobody')
+    log.append({ type: 'round/completed' })
     const ctp = ctpOf(round, log)
 
     expect(ctp.holeResults[0]).toEqual({ hole: 4, kind: 'unclaimed' })

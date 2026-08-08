@@ -51,8 +51,10 @@ export function ScoringScreen() {
   const [standingsOpen, setStandingsOpen] = useState(false)
   const [rulesFor, setRulesFor] = useState<string>()
   const [actionsOpen, setActionsOpen] = useState(false)
-  // event ids already sent for retraction — see `undoAction`
+  // event ids already sent for retraction — see `giveBack`
   const undoneRef = useRef<Set<string>>(new Set())
+  // offer ids with an append in flight — see `take`
+  const takingRef = useRef<Set<string>>(new Set())
 
   // Initial hole, captured ONCE when the view first loads: ?hole= deep link
   // (scorecard tap), else first not-fully-scored hole, else the last hole.
@@ -91,20 +93,27 @@ export function ScoringScreen() {
     () => (view ? [...view.derivations.values()].some((d) => d.availableActions) : false),
     [view],
   )
-  // The vocabulary belongs to whichever game is actually offering (MAI-47).
-  // Exactly one → its own words, which is every round that exists today and is
-  // what makes Nassau render identically. Several games offering at once →
-  // neutral wording, because "⚡ Press" over a list holding a hammer throw
-  // would be worse than saying nothing specific. A game that offers actions
-  // without declaring copy is a bug catalog.test.ts fails on, but the fallback
-  // has to be safe rather than crash a scorekeeper mid-round.
+  // The vocabulary belongs to the games actually OFFERING (MAI-47): if they all
+  // speak the same one, the affordance speaks it too; otherwise it says nothing
+  // specific, because "⚡ Press" over a list holding a hammer throw is worse
+  // than neutral wording.
+  //
+  // The test is over every offering game, not over the copies that survive a
+  // filter, and both halves of that matter. Counting only DECLARED copies made
+  // two Nassaus — a supported round since MAI-44, since `duplicateInstanceProblems`
+  // blocks only identical settings — read as "two voices" and fall back to
+  // "Actions", losing the empty state that answers "why can't I press?". And
+  // it made Nassau beside a game that declares NOTHING read as one voice, so
+  // Nassau's verb and blurb rendered over the other game's actions — precisely
+  // the failure MAI-47 exists to prevent. Reference equality is the right test:
+  // `meta.actions` is one object per engine, so two instances of a game share it.
   const actionCopy = useMemo(() => {
     if (!view) return DEFAULT_ACTION_COPY
-    const declared = view.round.games
+    const voices = view.round.games
       .filter((g) => view.derivations.get(g.gameId)?.availableActions)
       .map((g) => getEngine(g.type)?.meta.actions)
-      .filter((c): c is GameActionCopy => c !== undefined)
-    return declared.length === 1 ? declared[0]! : DEFAULT_ACTION_COPY
+    const first = voices[0]
+    return first && voices.every((c) => c === first) ? first : DEFAULT_ACTION_COPY
   }, [view])
   const recommendsAction = actions.some((a) => a.recommended)
   // the badge counts what's still on OFFER — a press already running is in the
@@ -214,10 +223,24 @@ export function ScoringScreen() {
   // one game event lands; give it back and its events are retracted. An award
   // cell and a press row differ in WHEN they may be tapped, never in what a tap
   // does — so they must not differ in the code that does it either.
+  // Guarded for the same reason `giveBack` is, and it took a review to see it:
+  // an award CELL survives its own tap (unlike an actions row, whose sheet
+  // closes), so two taps in one frame both fire before the re-derive and append
+  // the same event twice. CTP would shrug — last write wins, and both ids land
+  // in `undoEventIds` — but the log is append-only and syncs, so the duplicate
+  // outlives the round in every export, and the first award game to COUNT its
+  // events rather than treat them as a set would double-pay on a fumbled tap.
+  //
+  // Keyed on the in-flight append rather than a permanent set, because taking
+  // an award back and re-taking it is legitimate and reuses the same offer id.
   const take = (offer: GameEventOffer) => {
-    void eventStore.append(round.id, [
-      { type: 'game/event', gameId: offer.gameId, kind: offer.eventKind, data: offer.data },
-    ])
+    if (takingRef.current.has(offer.id)) return
+    takingRef.current.add(offer.id)
+    void eventStore
+      .append(round.id, [
+        { type: 'game/event', gameId: offer.gameId, kind: offer.eventKind, data: offer.data },
+      ])
+      .finally(() => takingRef.current.delete(offer.id))
   }
 
   // Undo is a compensation event, never a delete (invariant #2). The actions

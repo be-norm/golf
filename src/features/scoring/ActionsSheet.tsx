@@ -63,7 +63,11 @@ export function ActionsSheet({
               // but inert — the rules started it, so it isn't theirs to undo
               const undoable = a.taken && (a.undoEventIds?.length ?? 0) > 0
               return (
-                <li key={a.id}>
+                // Composed with the game, because this list is FLAT across
+                // games while `GameEventOffer.id` is only ever unique within
+                // one: two Nassaus at different stakes are a supported round
+                // (MAI-44) and both mint `nassau-press-front-3`.
+                <li key={`${a.gameId}:${a.id}`}>
                   <button
                     onClick={() => (a.taken ? onUndo(a) : onTake(a))}
                     disabled={a.taken && !undoable}

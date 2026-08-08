@@ -28,7 +28,14 @@ export type { StandingLine }
  * and that difference lives on the screens, not here.
  */
 export interface GameEventOffer {
-  /** stable id — the same offer across re-derives keeps the same id */
+  /**
+   * Stable id — the same offer across re-derives keeps the same id.
+   *
+   * Unique WITHIN this game, not across the round: an engine cannot see its
+   * siblings, and a round can hold two instances of one game (MAI-44), so two
+   * Nassaus both mint `nassau-press-front-3`. Any consumer flattening offers
+   * from several games into one keyed list must compose with `gameId`.
+   */
   id: string
   gameId: Uuid
   eventKind: string
