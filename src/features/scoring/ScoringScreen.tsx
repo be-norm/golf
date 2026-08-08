@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router'
 import { motion, AnimatePresence } from 'motion/react'
 import { eventStore } from '../../db/eventStore'
@@ -14,6 +14,7 @@ import type {
   GameEventOffer,
   InputRequest,
 } from '../../engine/catalog'
+import type { EventDraft } from '../../engine/core/events'
 import type { GameConfig, Round } from '../../engine/core/types'
 import { gameLabel } from '../../engine/label'
 import { partitionByRole, shouldGroupSideBets, strokeGame } from '../../lib/gameRoles'
@@ -53,8 +54,18 @@ export function ScoringScreen() {
   const [actionsOpen, setActionsOpen] = useState(false)
   // event ids already sent for retraction — see `giveBack`
   const undoneRef = useRef<Set<string>>(new Set())
-  // offer ids with an append in flight — see `take`
+  // offers whose event has been sent but not yet re-derived — see `emitOnce`
   const takingRef = useRef<Set<string>>(new Set())
+  // A new derivation IS the release signal: once it has COMMITTED, the controls
+  // on screen reflect what was sent, so a further tap is a further intent
+  // rather than a stale duplicate. An effect rather than a render-phase check
+  // both because refs must not be touched during render and because after the
+  // commit is the honest moment — that is when the cell actually reads
+  // `taken`. Clearing wholesale is deliberate: anything still in here is by
+  // definition already visible in the derivation that just landed.
+  useEffect(() => {
+    takingRef.current.clear()
+  }, [view])
 
   // Initial hole, captured ONCE when the view first loads: ?hole= deep link
   // (scorecard tap), else first not-fully-scored hole, else the last hole.
@@ -205,42 +216,58 @@ export function ScoringScreen() {
     if (last) void eventStore.append(round.id, [{ type: 'meta/retract', targetEventId: last.id }])
   }
 
+  /**
+   * ONE TAP, ONE EVENT — for every control that emits a game event and then
+   * SURVIVES ITS OWN TAP, which is all of them except the actions row (whose
+   * sheet closes underneath it). An award cell, an input chip: both stay
+   * mounted until a re-derive replaces them, so two taps inside one frame both
+   * fire against stale props and append the same event twice. Replay shrugs —
+   * every reducer here is last-write-wins — but the log is append-only and
+   * syncs, so the duplicate outlives the round in every export and archive, and
+   * the first game to COUNT its events rather than treat them as a set would
+   * double-pay on a fumbled tap.
+   *
+   * KEYED WITH THE GAME. `GameEventOffer.id` and `InputRequest.id` are unique
+   * only WITHIN a game — an engine cannot see its siblings — and a round can
+   * hold two instances of one game (MAI-44), so two CTPs both mint
+   * `ctp-4-p-ann`. A bare id makes the second game's tap vanish silently.
+   *
+   * RELEASED BY THE RE-DERIVE, not by the append. The two are not the same
+   * instant: the append resolves first and the cell only flips to `taken` once
+   * Dexie's live query re-reads, so releasing on the promise leaves open
+   * exactly the window this exists to close. A failed append releases
+   * immediately, since no re-derive is coming to do it.
+   */
+  const emitOnce = (gameId: string, offerId: string, draft: EventDraft) => {
+    const key = `${gameId}:${offerId}`
+    if (takingRef.current.has(key)) return
+    takingRef.current.add(key)
+    void eventStore.append(round.id, [draft]).catch(() => takingRef.current.delete(key))
+  }
+
   // An option's own `data` rides UNDER `{ hole, choice }`, never over it: those
   // two are the channel's contract, and an option disagreeing with the prompt
   // it was rendered beneath is a bug rather than a feature (MAI-46).
   const answerInput = (input: InputRequest, option: InputRequest['options'][number]) => {
-    void eventStore.append(round.id, [
-      {
-        type: 'game/event',
-        gameId: input.gameId,
-        kind: input.eventKind,
-        data: { ...option.data, hole: input.hole, choice: option.value },
-      },
-    ])
+    emitOnce(input.gameId, input.id, {
+      type: 'game/event',
+      gameId: input.gameId,
+      kind: input.eventKind,
+      data: { ...option.data, hole: input.hole, choice: option.value },
+    })
   }
 
   // The write half both optional channels share (GameEventOffer): take it and
   // one game event lands; give it back and its events are retracted. An award
   // cell and a press row differ in WHEN they may be tapped, never in what a tap
   // does — so they must not differ in the code that does it either.
-  // Guarded for the same reason `giveBack` is, and it took a review to see it:
-  // an award CELL survives its own tap (unlike an actions row, whose sheet
-  // closes), so two taps in one frame both fire before the re-derive and append
-  // the same event twice. CTP would shrug — last write wins, and both ids land
-  // in `undoEventIds` — but the log is append-only and syncs, so the duplicate
-  // outlives the round in every export, and the first award game to COUNT its
-  // events rather than treat them as a set would double-pay on a fumbled tap.
-  //
-  // Keyed on the in-flight append rather than a permanent set, because taking
-  // an award back and re-taking it is legitimate and reuses the same offer id.
   const take = (offer: GameEventOffer) => {
-    if (takingRef.current.has(offer.id)) return
-    takingRef.current.add(offer.id)
-    void eventStore
-      .append(round.id, [
-        { type: 'game/event', gameId: offer.gameId, kind: offer.eventKind, data: offer.data },
-      ])
-      .finally(() => takingRef.current.delete(offer.id))
+    emitOnce(offer.gameId, offer.id, {
+      type: 'game/event',
+      gameId: offer.gameId,
+      kind: offer.eventKind,
+      data: offer.data,
+    })
   }
 
   // Undo is a compensation event, never a delete (invariant #2). The actions

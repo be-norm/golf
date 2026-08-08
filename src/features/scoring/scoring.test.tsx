@@ -559,6 +559,57 @@ describe('ScoringScreen — award grid', () => {
     expect(await eventStore.list(round.id)).toHaveLength(1)
   })
 
+  /**
+   * The guard has to be keyed WITH THE GAME. `Award.id` is unique only within
+   * one game — an engine cannot see its siblings — so two CTPs both mint
+   * `ctp-4-p-ann`, and a bare-id guard makes the second game's tap vanish with
+   * no feedback at all.
+   */
+  it('guards each game separately when two of them offer the same cell', async () => {
+    const round = makeRound({
+      players: makePlayers([{ name: 'Ann' }, { name: 'Bob' }]),
+      holes: 'front9',
+      games: [
+        { type: 'ctp', config: { stakeCents: 200 } },
+        { type: 'ctp', config: { stakeCents: 500 } },
+      ],
+    })
+    round.id = 'round-award-two-guards'
+    await db.rounds.put(round)
+    showHole(round, 4)
+
+    // one cell per game, both named for Ann, tapped in the same frame
+    const anns = await screen.findAllByRole('button', { name: 'Closest to the pin — Ann' })
+    expect(anns).toHaveLength(2)
+    fireEvent.click(anns[0]!)
+    fireEvent.click(anns[1]!)
+
+    await waitFor(async () => {
+      expect(await eventStore.list(round.id)).toHaveLength(2)
+    })
+    const events = await eventStore.list(round.id)
+    expect(new Set(events.map((e) => (e as { gameId: string }).gameId)).size).toBe(2)
+  })
+
+  /** …and the guard must not wedge: giving an award back and taking it again
+   *  reuses the same offer id, and has to keep working. */
+  it('lets the same cell be taken again after it is given back', async () => {
+    const round = await ctpRound('round-award-retake')
+    showHole(round, 4)
+
+    await userEvent.click(await cell('Ann'))
+    await userEvent.click(await litCell('Ann'))
+    await waitFor(async () => {
+      expect(await eventStore.list(round.id)).toHaveLength(2) // award + retract
+    })
+    await userEvent.click(await cell('Ann'))
+
+    await waitFor(async () => {
+      expect(await litCell('Ann')).toBeInTheDocument()
+    })
+    expect(await eventStore.list(round.id)).toHaveLength(3)
+  })
+
   it('two taps landing in the same frame retract once, not twice', async () => {
     const round = await ctpRound('round-award-undo-twice')
     showHole(round, 4)
@@ -577,6 +628,42 @@ describe('ScoringScreen — award grid', () => {
     })
     const events = await eventStore.list(round.id)
     expect(events.filter((e) => e.type === 'meta/retract')).toHaveLength(1)
+  })
+})
+
+/**
+ * The blocking channel survives its own tap for the same reason the award cell
+ * does — the chip stays mounted until a re-derive removes it — so it needs the
+ * same guard. Wolf's reducer is last-write-wins, so no money moves wrongly
+ * today; the duplicate would just outlive the round in every export.
+ */
+describe('ScoringScreen — input chips', () => {
+  it('two taps landing in the same frame answer once, not twice', async () => {
+    const round = makeRound({
+      players: makePlayers([{ name: 'Ann' }, { name: 'Bob' }, { name: 'Cal' }, { name: 'Dee' }]),
+      holes: 'front9',
+      games: [
+        {
+          type: 'wolf',
+          config: { pointCents: 100, rotation: ['p-ann', 'p-bob', 'p-cal', 'p-dee'] },
+        },
+      ],
+    })
+    round.id = 'round-input-twice'
+    await db.rounds.put(round)
+    const router = createMemoryRouter(routes, { initialEntries: [`/round/${round.id}`] })
+    render(<RouterProvider router={router} />)
+
+    const lone = await screen.findByRole('button', { name: /Lone Wolf/ })
+    fireEvent.click(lone)
+    fireEvent.click(lone)
+
+    await waitFor(async () => {
+      expect(await eventStore.list(round.id)).toHaveLength(1)
+    })
+    // settle: a second identical pick would land here if the guard were absent
+    await screen.findByText(/Ann/)
+    expect(await eventStore.list(round.id)).toHaveLength(1)
   })
 })
 
