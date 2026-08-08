@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router'
 import { useLiveQuery } from 'dexie-react-hooks'
 import '../../engine/games'
 import { getEngine, roleOf, type GameEngine } from '../../engine/catalog'
+import { gameLabel } from '../../engine/label'
 import { courseHandicapForTee } from '../../engine/core/handicap'
 import { applyTee, doubleNine } from '../../engine/core/tees'
 import type { Course, GameConfig, RoundHoles, TeeSet } from '../../engine/core/types'
@@ -196,50 +197,42 @@ export function SetupScreen() {
       : []
 
   /**
-   * What to STORE in `role` for a game the user just put in `section`.
+   * Recompute every draft's stored `role`, so that `roleOf` reproduces the
+   * sections the user actually picked. Run on every add and remove, because an
+   * "either" game's role is a fact about the WHOLE round and the round just
+   * changed.
    *
-   * Only a contradiction is worth storing. `role` is presentation, and a round
-   * that stores nothing can be re-read later by a better rule, while a round
-   * that stored a guess is wrong permanently in an archive that syncs — so the
-   * bar is "does something read this differently?", not "did the user tap a
-   * button?".
+   * `role` is an OVERRIDE, so the aim is to store the FEWEST of them: a round
+   * that stores nothing can be re-read by a better rule later, while a stored
+   * guess is wrong permanently in an archive that syncs. Under two games we
+   * store nothing at all — `primaryGame` returns the only game whichever role
+   * it holds, the bar never collapses a lone side bet and the card never groups
+   * one, so the value would have no reader.
    *
-   * In a one-game round, nothing does: `primaryGame` falls through to
-   * `games[0]` either way, the pinned bar doesn't collapse a lone side bet, and
-   * the share card doesn't group one. Picking Skins under SIDE BETS on its own
-   * is therefore stored as nothing — and if that round later gains a Nassau,
-   * `roleOf` derives 'side' anyway. What DOES have a reader is Skins picked as
-   * a main game beside a Nassau: the user is saying both are main events, and
-   * `roleOf` would otherwise demote it.
-   */
-  /**
-   * Recompute every draft's stored `role` — run on every add and remove,
-   * because an "either" game's role is a fact about the WHOLE round and the
-   * round just changed. Stamping only the game being added left an earlier
-   * Skins displayed as a main game while the round it teed off derived it as a
-   * side bet.
+   * THE MINIMISATION IS CIRCULAR, which is the whole difficulty. Stamping one
+   * game changes what its siblings derive: `roleOf` skips explicitly-roled
+   * games when it looks for the first unclaimed "either" game. Deriving every
+   * draft against the role-STRIPPED set therefore silently broke the sibling —
+   * two Skins both picked as side bets stamped only the first, and the second
+   * then became the round's MAIN game, capturing the stroke dots, the
+   * scorecard's underlines and the share card's stroke note.
    *
-   * Two rules, both about whether anything READS the answer:
-   *
-   * - Under two games, nothing does. `primaryGame` returns the only game
-   *   whichever role it holds, the bar never collapses a lone side bet, and the
-   *   share card never groups one. A stamp there is a value with no consumer —
-   *   the frozen guess CLAUDE.md keeps out of a synced archive.
-   * - Otherwise, store it only where `roleOf` would answer differently from the
-   *   section the user chose. `role` is an OVERRIDE, and an override that
-   *   agrees with the rule is just noise a better rule can never re-read.
-   *
-   * Derived against the drafts with their roles STRIPPED, or this is a fixpoint
-   * of itself: `roleOf` returns an explicit `role` before consulting anything,
-   * so a stamped game would always look like it agreed.
+   * So: decide in order against the roles decided so far, then CHECK the
+   * result actually reproduces every section. If it doesn't, store all of them
+   * — trivially consistent, since an explicit role short-circuits `roleOf`.
    */
   const reconcileRoles = (drafts: GameDraft[]): GameDraft[] => {
-    const bare = drafts.map((d) => ({ ...d, role: undefined }))
-    return drafts.map((draft, i) => ({
-      ...draft,
-      role:
-        bare.length < 2 || roleOf(bare[i]!, bare) === draft.section ? undefined : draft.section,
-    }))
+    if (drafts.length < 2) return drafts.map((d) => ({ ...d, role: undefined }))
+    const out: GameDraft[] = drafts.map((d) => ({ ...d, role: undefined }))
+    out.forEach((draft, i) => {
+      out[i] = {
+        ...draft,
+        role: roleOf(draft, out) === draft.section ? undefined : draft.section,
+      }
+    })
+    return out.every((g) => roleOf(g, out) === g.section)
+      ? out
+      : drafts.map((d) => ({ ...d, role: d.section }))
   }
 
   const addGame = (engine: GameEngine, section: 'main' | 'side') => {
@@ -301,7 +294,7 @@ export function SetupScreen() {
       type: g.type,
       // Absent for almost every round, and absent means "derive it" rather than
       // "main" — only a placement `roleOf` disagrees with is stored. See
-      // `roleToStore`.
+      // `reconcileRoles`.
       ...(g.role ? { role: g.role } : {}),
       handicap: g.handicap,
       config: resolveDraftPlayers(g.config, draftToReal),
@@ -558,6 +551,7 @@ export function SetupScreen() {
                     <GameConfigCard
                       key={draft.gameId}
                       engine={engine}
+                      label={gameLabel(draft, draftGames)}
                       players={players}
                       draft={draft}
                       onChange={updateGame}
@@ -585,6 +579,7 @@ export function SetupScreen() {
                 <SideBetRow
                   key={draft.gameId}
                   engine={engine}
+                  label={gameLabel(draft, draftGames)}
                   players={players}
                   draft={draft}
                   onChange={updateGame}

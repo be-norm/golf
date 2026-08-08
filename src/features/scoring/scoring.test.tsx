@@ -368,8 +368,12 @@ describe('ScoringScreen — pinned bar density', () => {
     expect(await screen.findByText('Side bets')).toBeInTheDocument()
     // the aggregate is money across every side bet, not any one game's recap
     expect(screen.getByText(/Ann \+\$/)).toBeInTheDocument()
-    // and no side bet keeps a row of its own
-    expect(screen.queryByText('Skins')).not.toBeInTheDocument()
+    // And no side bet keeps a row of its own. Matched as a PATTERN: the three
+    // instances differ by stake, so `gameLabel` renders them "Skins ($1)",
+    // "Skins ($1.01)", "Skins ($1.02)" and the bare string "Skins" is never in
+    // the DOM either way — an assertion that would pass with the collapse
+    // deleted.
+    expect(screen.queryAllByText(/^Skins \(/)).toHaveLength(0)
   })
 
   /**
@@ -422,9 +426,30 @@ describe('ScoringScreen — pinned bar density', () => {
     await db.rounds.put(round)
     show(round)
 
-    // Bob is off 18, so a net game would put a stroke on every hole. The main
-    // game gives none, so the dots show none.
+    // Bob is off 18, so the NET side bet would put a stroke on every hole. The
+    // main game is gross and gives none, so no row reports any.
+    //
+    // Asserted on ScoreRow's `${strokes} strokes` aria-label, because the
+    // visible mark for a received stroke is "■" — an earlier version of this
+    // test looked for "+1", which ScoreRow only ever renders for a NEGATIVE
+    // stroke count, and so passed under the old first-net-game rule too.
     await screen.findByText('Bob')
-    expect(screen.queryByText('+1')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText(/\d+ strokes/)).not.toBeInTheDocument()
+  })
+
+  /** The positive control for the test above: the query DOES find strokes. */
+  it('shows the dots when the main game is the net one', async () => {
+    const round = makeRound({
+      players: makePlayers([{ name: 'Ann', ch: 0 }, { name: 'Bob', ch: 18 }]),
+      holes: 'front9',
+      games: [{ type: 'nassau', config: { stakeCents: 500, teams: null, autoPress: false } }],
+    })
+    round.id = 'round-dots-net'
+    round.games[0]!.handicap = { mode: 'net', reference: 'offLow', allowancePct: 100 }
+    await db.rounds.put(round)
+    show(round)
+
+    await screen.findByText('Bob')
+    expect(screen.getByLabelText(/\d+ strokes/)).toBeInTheDocument()
   })
 })

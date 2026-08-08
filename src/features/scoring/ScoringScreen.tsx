@@ -6,7 +6,7 @@ import { roundRepo } from '../../db/repos'
 import { effectiveEvents } from '../../engine/core/replay'
 import { combineSettlements, formatCentsSigned } from '../../engine/core/money'
 import type { GameAction, GameDerivation, InputRequest } from '../../engine/catalog'
-import type { Round } from '../../engine/core/types'
+import type { GameConfig, Round } from '../../engine/core/types'
 import { gameLabel } from '../../engine/label'
 import { partitionByRole, shouldGroupSideBets, strokeGame } from '../../lib/gameRoles'
 import { ActionsSheet } from './ActionsSheet'
@@ -100,9 +100,19 @@ export function ScoringScreen() {
   // A round with a main game and several side bets used to put one row per game
   // in a fixed bottom strip. Main games keep their rows; the side bets collapse
   // into a single aggregate that expands in the standings sheet (MAI-50).
-  const { main: mainGames, side: sideGames } = partitionByRole(round.games)
+  // Roles come from the WHOLE round — an inert game is still a game the group
+  // agreed to play, and its category still decides whether an "either" game is
+  // the side bet. The COUNTS, though, are of what actually renders: a game
+  // whose engine isn't registered, or whose config its engine rejects, gets no
+  // derivation and no row (deriveRound), and counting it would collapse a lone
+  // survivor under a "Side bets" heading — or, if the inert one is the main
+  // game, leave the bar showing side bets and nothing else.
+  const { main, side } = partitionByRole(round.games)
+  const shown = (games: readonly GameConfig[]) => games.filter((g) => derivations.has(g.gameId))
+  const mainGames = shown(main)
+  const sideGames = shown(side)
   const collapseSide = shouldGroupSideBets({ main: mainGames.length, side: sideGames.length })
-  const barGames = collapseSide ? mainGames : round.games
+  const barGames = collapseSide ? mainGames : shown(round.games)
   const sideBetParts = collapseSide
     ? sideBetSummary(
         round.players,
@@ -352,7 +362,10 @@ export function ScoringScreen() {
               so the sheet groups them under a heading rather than leaving the
               bar's "▶" pointing at an undifferentiated list. Ungrouped, the
               order is round.games as before. */}
-          {(collapseSide ? [...mainGames, ...sideGames] : round.games).map((g, i) => {
+          {/* Both halves hold only games that HAVE a derivation, so the index
+              below is always the first side bet actually drawn — the heading
+              can't be attached to a row that returns null. */}
+          {(collapseSide ? [...mainGames, ...sideGames] : shown(round.games)).map((g, i) => {
             const d = derivations.get(g.gameId)
             if (!d) return null
             const label = gameLabel(g, round.games)

@@ -17,7 +17,11 @@ export function DetailLines({ lines, valueClass = 'text-stone-200' }: { lines: L
           key={i}
           className={`flex items-baseline justify-between gap-2 ${line.depth ? 'pl-4' : ''}`}
         >
-          <span className="font-display shrink-0 text-[9px] uppercase text-coin-400">
+          {/* BOUNDED, for the same reason the painter bounds it: this label
+              held Nassau's F9/B9/18 until the grouped side-bets panel started
+              putting a game NAME here. Left unbounded it squeezes the money
+              value or pushes the row past the panel edge on a phone. */}
+          <span className="font-display max-w-[45%] shrink-0 truncate text-[9px] uppercase text-coin-400">
             {line.label}
           </span>
           <span className={`text-lg tabular-nums ${valueClass}`}>{line.value}</span>

@@ -232,10 +232,15 @@ function derive(
   }
 }
 
+/** The one name for this game — `meta.name` and every message that has to
+ *  say it. label.ts is the single source of a game's name (MAI-42), so a
+ *  second literal in `validateSetup` would drift the moment this is renamed. */
+const VEGAS_NAME = 'Vegas'
+
 export const vegasEngine: GameEngine<VegasConfig> = {
   type: 'vegas',
   meta: {
-    name: 'Vegas',
+    name: VEGAS_NAME,
     blurb: 'Pair up. Team scores combine into one number — birdies flip the other side.',
     minPlayers: 4,
     maxPlayers: 4,
@@ -288,11 +293,11 @@ export const vegasEngine: GameEngine<VegasConfig> = {
     players: readonly RoundPlayer[],
     siblings: readonly GameConfig[],
   ) => {
-    const dupes = duplicateInstanceProblems(config, siblings, 'Vegas')
-    if (players.length !== 4) return [...dupes, 'Vegas needs exactly 4 players']
+    const dupes = duplicateInstanceProblems(config, siblings, VEGAS_NAME)
+    if (players.length !== 4) return [...dupes, `${VEGAS_NAME} needs exactly 4 players`]
     const parsed = vegasConfigSchema.safeParse(config.config)
     if (!parsed.success) return [...dupes, 'Invalid vegas configuration']
-    return [...teamPartitionProblems(parsed.data.teams, players, 'Vegas'), ...dupes]
+    return [...teamPartitionProblems(parsed.data.teams, players, VEGAS_NAME), ...dupes]
   },
   eventKinds: {},
   derive,

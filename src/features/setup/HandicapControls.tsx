@@ -54,6 +54,7 @@ export function HandicapControls({
             min={50}
             max={100}
             step={5}
+            label="allowance"
             onChange={(v) => onChange({ ...handicap, allowancePct: v })}
             format={(v) => `${v}%`}
           />

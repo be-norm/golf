@@ -312,10 +312,15 @@ function derive(
   return { standings, summary, summaryParts, holeSummary, requiredInputs, settlement }
 }
 
+/** The one name for this game — `meta.name` and every message that has to
+ *  say it. label.ts is the single source of a game's name (MAI-42), so a
+ *  second literal in `validateSetup` would drift the moment this is renamed. */
+const WOLF_NAME = 'Wolf'
+
 export const wolfEngine: GameEngine<WolfConfig> = {
   type: 'wolf',
   meta: {
-    name: 'Wolf',
+    name: WOLF_NAME,
     blurb: 'Rotating Wolf picks a partner off the tee — or goes lone for double.',
     minPlayers: 4,
     maxPlayers: 4,
@@ -369,12 +374,12 @@ export const wolfEngine: GameEngine<WolfConfig> = {
     // Reported alongside whatever else is wrong rather than behind it: a
     // duplicate is independent of the roster, and hiding it until the roster is
     // fixed makes the user solve one problem to discover the next.
-    const dupes = duplicateInstanceProblems(config, siblings, 'Wolf')
-    if (players.length !== 4) return [...dupes, 'Wolf needs exactly 4 players']
+    const dupes = duplicateInstanceProblems(config, siblings, WOLF_NAME)
+    if (players.length !== 4) return [...dupes, `${WOLF_NAME} needs exactly 4 players`]
     const parsed = wolfConfigSchema.safeParse(config.config)
     if (!parsed.success) return [...dupes, 'Invalid wolf configuration']
     if (!isPlayerPermutation(parsed.data.rotation, players))
-      return [...dupes, 'Wolf order must include every player exactly once']
+      return [...dupes, `${WOLF_NAME} order must include every player exactly once`]
     return dupes
   },
   eventKinds: {

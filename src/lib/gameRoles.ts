@@ -25,8 +25,13 @@ import type { GameConfig, Round } from '../engine/core/types'
  */
 export function primaryGame(round: Round): GameConfig | undefined {
   const isMain = (g: GameConfig) => roleOf(g, round.games) === 'main'
+  // `handicap?`, not `handicap.` — a round pulled from the archive is applied
+  // with a bare cast rather than through `importSchema` (remote/sync.ts), so a
+  // game written by another build can arrive without one. `label.ts` guards the
+  // same deref for the same reason: an unguarded read throws inside a render
+  // and takes the whole screen down instead of degrading.
   return (
-    round.games.find((g) => isMain(g) && g.handicap.mode === 'net') ??
+    round.games.find((g) => isMain(g) && g.handicap?.mode === 'net') ??
     round.games.find(isMain) ??
     round.games[0]
   )
@@ -44,7 +49,7 @@ export function primaryGame(round: Round): GameConfig | undefined {
  */
 export function strokeGame(round: Round): GameConfig | undefined {
   const game = primaryGame(round)
-  return game?.handicap.mode === 'net' ? game : undefined
+  return game?.handicap?.mode === 'net' ? game : undefined
 }
 
 export interface RolePartition {

@@ -204,6 +204,10 @@ export function buildSummaryCard(
   // 2× retina budget is finite (MAI-50). Grouping happens HERE, in the model,
   // so the settle screen and the painter cannot end up disagreeing about it;
   // both just render whatever panels they are handed.
+  // Built ONCE, then partitioned — the ungrouped branch is every round with
+  // fewer than two side bets, i.e. almost all of them, so rebuilding the panels
+  // there repeated `gameLabel` and every line format for nothing.
+  const order = new Map(round.games.map((g, i) => [g.gameId, i]))
   const { main, side } = partitionByRole(round.games)
   const mainPanels = main.flatMap(panelFor)
   const sidePanels = side.flatMap(panelFor)
@@ -214,7 +218,9 @@ export function buildSummaryCard(
     ? [...mainPanels, groupSideBets(sidePanels)]
     : // Ungrouped, panels keep `round.games` order rather than main-then-side.
       // Re-sorting a two-game card would be a visible change nobody asked for.
-      round.games.flatMap(panelFor)
+      [...mainPanels, ...sidePanels].sort(
+        (a, b) => (order.get(a.gameId) ?? 0) - (order.get(b.gameId) ?? 0),
+      )
 
   // Underlines mark handicap strokes, which are a per-game allocation — pick the
   // game that actually allocates them and say which one, per the "explain WHY"

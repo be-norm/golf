@@ -48,6 +48,7 @@ export function ConfigField({
             min={min}
             max={max}
             step={field.step ?? 25}
+            label={field.label}
             onChange={(v) => onChange(v)}
             format={(v) => formatCents(v)}
           />

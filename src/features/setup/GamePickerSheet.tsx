@@ -56,6 +56,22 @@ export function GamePickerSheet({
   const [groupBy, setGroupBy] = useState<GroupBy>('family')
   const [query, setQuery] = useState('')
 
+  // `Sheet` unmounts its CHILDREN, not this component, so state outlives a
+  // close. A search left over from the main picker silently empties the side
+  // one — the side list is short, so "wolf" leaves it reading "Nothing
+  // matches". The grouping choice deliberately survives: it is a view
+  // preference, and a stale one still shows every game.
+  //
+  // Render-phase adjustment rather than an effect (react.dev, "storing info
+  // from previous renders" — the same pattern ScoringScreen uses for its
+  // initial hole). Remounting on a key would reset it too, but the sheet would
+  // lose its exit animation on the way out.
+  const [lastOpen, setLastOpen] = useState(open)
+  if (open !== lastOpen) {
+    setLastOpen(open)
+    if (open) setQuery('')
+  }
+
   // `meta.category` is ELIGIBILITY — 'either' games (Skins) offer in both
   // sections, and which one they end up in is `roleOf`'s answer, not this
   // sheet's. Presentation only, either way: nothing here reaches a settlement.

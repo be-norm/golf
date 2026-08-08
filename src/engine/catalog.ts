@@ -157,8 +157,10 @@ export type GameCategory = 'main' | 'side' | 'either'
 
 /**
  * THE role of a game in a round. Every display rule is to read it through
- * here rather than re-deriving the default — MAI-44's picker and density rules
- * are the first consumers; today only its tests call it.
+ * here rather than re-deriving the default. Its consumers are
+ * `src/lib/gameRoles.ts` (the one primary-game rule, and the main/side split
+ * behind the pinned bar's collapse and the share card's grouping) and setup,
+ * which uses it to decide what — if anything — to store.
  *
  * It takes the whole round because 'either' CANNOT be answered from the engine
  * alone. Skins beside a Nassau is the side bet; Skins on its own is the main
@@ -167,10 +169,13 @@ export type GameCategory = 'main' | 'side' | 'either'
  * default blind to that would call both games in a Skins+Nassau round the main
  * event.
  *
- * Which is also why setup does not STAMP this. `role` is presentation-only, so
- * a round that stores nothing can be re-read by a better rule later; a round
- * that stored a guess is wrong permanently, in an archive that syncs. Only an
- * explicit user choice gets written (MAI-44), and only that short-circuits here.
+ * Which is also why setup stamps this as RARELY as it can. `role` is
+ * presentation-only, so a round that stores nothing can be re-read by a better
+ * rule later, while a round that stored a guess is wrong permanently in an
+ * archive that syncs. Setup writes one only where the section the user picked
+ * into contradicts what this function derives, and only in a round holding more
+ * than one game — below that nothing reads the difference at all. See
+ * `reconcileRoles` (SetupScreen.tsx).
  */
 export function roleOf(game: GameConfig, allGames: readonly GameConfig[]): 'main' | 'side' {
   // An explicit choice wins — but only if it is one of the two things it can

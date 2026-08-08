@@ -8,6 +8,7 @@ import type { Course } from '../../engine/core/types'
 import { db } from '../../db/schema'
 import { LOCAL_USER } from '../../db/ids'
 import { routes } from '../../app/routes'
+import { roleOf } from '../../engine/catalog'
 
 const SAVED_AT = '2026-08-01T00:00:00.000Z'
 
@@ -284,9 +285,9 @@ describe('SetupScreen — choosing games', () => {
     await pickGame('Skins')
     await pickGame('Skins', 'side')
 
-    // make them differ, or they are a duplicate and tee-off is blocked
-    const steppers = screen.getAllByRole('button', { name: 'increase' })
-    await userEvent.click(steppers[0]!)
+    // make them differ, or they are a duplicate and tee-off is blocked. Only
+    // the main card's stake is mounted — the side row is collapsed.
+    await userEvent.click(screen.getByRole('button', { name: 'increase Skin value' }))
 
     await teeOff()
     await waitFor(async () => expect(await roundFor('penmar')).toBeDefined())
@@ -296,6 +297,36 @@ describe('SetupScreen — choosing games', () => {
     expect(round.games.every((g) => g.type === 'skins')).toBe(true)
     // and they really are different games, not one config written twice
     expect(round.games[0]!.config).not.toEqual(round.games[1]!.config)
+  })
+
+  /**
+   * The teed-off round must DERIVE the sections the user picked, for every
+   * game — not just the one that was added last.
+   *
+   * Deriving each draft against the role-stripped set got this wrong in the
+   * most ordinary way there is: two side bets and no main game. It stamped the
+   * first Skins 'side', which made `roleOf` skip it when hunting for the first
+   * unclaimed "either" game — so the SECOND one silently became the round's
+   * main event, and took the stroke dots, the scorecard underlines and the
+   * share card's stroke note with it.
+   */
+  it('derives every section it was given, not just the last game added', async () => {
+    await toStepTwo()
+    await pickGame('Skins', 'side')
+    await pickGame('Skins', 'side')
+    // a side-bet row is collapsed until tapped, so open one to reach its stake
+    // and make the two differ (identical settings block tee-off)
+    await userEvent.click(screen.getAllByRole('button', { expanded: false })[0]!)
+    await userEvent.click(screen.getByRole('button', { name: 'increase Skin value' }))
+
+    await teeOff()
+    await waitFor(async () => expect(await roundFor('penmar')).toBeDefined())
+    const round = (await roundFor('penmar'))!
+    expect(round.games).toHaveLength(2)
+    // both were picked as side bets, so both must READ as side bets
+    for (const game of round.games) {
+      expect(roleOf(game, round.games)).toBe('side')
+    }
   })
 
   it('blocks tee-off on two identical instances, and says so once', async () => {

@@ -12,6 +12,8 @@ import type { GameDraft } from './GameConfigCard'
 
 interface Props {
   engine: GameEngine
+  /** `gameLabel(draft, allDrafts)` — see GameConfigCard's `label`. */
+  label: string
   players: FieldPlayer[]
   draft: GameDraft
   onChange: (draft: GameDraft) => void
@@ -32,7 +34,7 @@ interface Props {
  * components the main card uses, not compact variants of them. A side bet is an
  * ordinary peer game (invariant #7), so its editor cannot be a lesser one.
  */
-export function SideBetRow({ engine, players, draft, onChange, onRemove, onRules }: Props) {
+export function SideBetRow({ engine, label, players, draft, onChange, onRemove, onRules }: Props) {
   const [open, setOpen] = useState(false)
   const config = (draft.config ?? {}) as Record<string, unknown>
   const setConfigValue = (key: string, value: unknown) =>
@@ -44,7 +46,7 @@ export function SideBetRow({ engine, players, draft, onChange, onRemove, onRules
     <div className="pixel border-felt-700 bg-felt-900/40">
       <div className="flex items-center gap-2 px-3 py-2.5">
         <button
-          aria-label={`remove ${engine.meta.name}`}
+          aria-label={`remove ${label}`}
           onClick={onRemove}
           className="shrink-0 px-1 text-stone-500"
         >
@@ -55,7 +57,7 @@ export function SideBetRow({ engine, players, draft, onChange, onRemove, onRules
           aria-expanded={open}
           onClick={() => setOpen((v) => !v)}
         >
-          <span className="min-w-0 truncate font-medium">{engine.meta.name}</span>
+          <span className="min-w-0 truncate font-medium">{label}</span>
           <span className="flex shrink-0 items-center gap-2">
             {stake && <span className="tabular-nums text-stone-300">{stake}</span>}
             {/* ▶ rotated, rather than a second glyph: the pixel display font
@@ -92,7 +94,7 @@ export function SideBetRow({ engine, players, draft, onChange, onRemove, onRules
             onChange={(handicap) => onChange({ ...draft, handicap })}
           />
           <button
-            aria-label={`${engine.meta.name} rules`}
+            aria-label={`${label} rules`}
             onClick={onRules}
             className="font-display text-[10px] uppercase text-felt-400"
           >
