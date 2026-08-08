@@ -42,6 +42,15 @@ export function AwardGrid({ awards, playerIds, gameName, onTake, onUndo }: Award
   const order = (cells: Award[]) =>
     [...cells].sort((x, y) => playerIds.indexOf(x.playerId) - playerIds.indexOf(y.playerId))
 
+  // The game heading exists to DISAMBIGUATE, so it appears only when there is
+  // something to disambiguate. One award game's rows already say what they are
+  // ("Greenie", "Sandie"), and CTP is the degenerate case that makes this
+  // visible rather than merely tidy: its only row is named after the game, so
+  // an unconditional heading stacks "CLOSEST TO THE PIN" directly on top of
+  // "CLOSEST TO THE PIN". Two award games running at once get their headings
+  // back, which is the case the heading was written for.
+  const showGameNames = byGame.size > 1
+
   return (
     // Named region: the pinned bar below carries the same game labels, so this
     // is what lets a reader (and a test) tell "the CTP row" from "the CTP grid".
@@ -51,7 +60,9 @@ export function AwardGrid({ awards, playerIds, gameName, onTake, onUndo }: Award
     >
       {[...byGame].map(([gameId, rows]) => (
         <div key={gameId} className="space-y-3">
-          <h2 className="font-display text-[10px] uppercase text-felt-300">{gameName(gameId)}</h2>
+          {showGameNames && (
+            <h2 className="font-display text-[10px] uppercase text-felt-300">{gameName(gameId)}</h2>
+          )}
           {[...rows].map(([group, cells]) => (
             <div key={group}>
               <p className="font-display mb-1.5 text-[10px] uppercase text-stone-400">{group}</p>

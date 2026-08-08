@@ -385,13 +385,34 @@ describe('ScoringScreen — award grid', () => {
 
     expect(await cell('Ann')).toHaveAttribute('aria-pressed', 'false')
     expect(await cell('Bob')).toBeInTheDocument()
-    // the game names its own section, so a round with two award games can tell
-    // whose greenie is whose. Scoped to the region, because the pinned bar
-    // carries the same label — an unscoped query matches both and would pass
-    // with the heading deleted.
     const grid = within(screen.getByRole('region', { name: 'Awards' }))
-    expect(grid.getByText('Closest to the Pin')).toBeInTheDocument()
     expect(grid.getByText('Closest to the pin')).toBeInTheDocument()
+    // ONE award game names no game. The heading disambiguates, and there is
+    // nothing here to disambiguate — CTP's only row is named after the game, so
+    // an unconditional heading stacked "Closest to the Pin" straight on top of
+    // "Closest to the pin". Caught by running it, not by a test.
+    expect(grid.queryByText('Closest to the Pin')).not.toBeInTheDocument()
+  })
+
+  /** …and the case the heading WAS written for: two games handing out awards on
+   *  the same hole, where "whose greenie is this?" is a real question. */
+  it('names each game once two of them are giving things out on the same hole', async () => {
+    const round = makeRound({
+      players: makePlayers([{ name: 'Ann' }, { name: 'Bob' }]),
+      holes: 'front9',
+      games: [
+        { type: 'ctp', config: { stakeCents: 200 } },
+        { type: 'ctp', config: { stakeCents: 500 } },
+      ],
+    })
+    round.id = 'round-award-two-games'
+    await db.rounds.put(round)
+    showHole(round, 4)
+
+    const grid = within(await screen.findByRole('region', { name: 'Awards' }))
+    // gameLabel discriminates two instances by stake, so both headings render
+    expect(grid.getByText('Closest to the Pin ($2)')).toBeInTheDocument()
+    expect(grid.getByText('Closest to the Pin ($5)')).toBeInTheDocument()
   })
 
   it('says nothing at all on a hole with no awards to give', async () => {
