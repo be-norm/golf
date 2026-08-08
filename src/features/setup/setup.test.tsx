@@ -314,6 +314,22 @@ describe('SetupScreen — 9-hole courses', () => {
  * capped a round at one instance per game.
  */
 describe('SetupScreen — choosing games', () => {
+  /**
+   * MAI-79 renumbered the steps (course/tees/players/games), so the effect that
+   * opens the picker had to move with them. Keyed on the old bare `2` it would
+   * fire on the PLAYERS step — a screen with no games section to open onto.
+   */
+  it('does not open the picker before the games step', async () => {
+    await pickPenmar()
+    await cont() // → players
+    expect(screen.queryByRole('region', { name: 'Game picker' })).not.toBeInTheDocument()
+    await addPlayer('Bogey', 16.5)
+    await addPlayer('Scratch', 0)
+    expect(screen.queryByRole('region', { name: 'Game picker' })).not.toBeInTheDocument()
+    await cont() // → games
+    expect(await picker()).toBeInTheDocument()
+  })
+
   it('auto-opens the picker on the first empty visit, and not again after that', async () => {
     await toStepTwo()
 
