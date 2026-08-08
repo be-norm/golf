@@ -25,12 +25,17 @@ const draft = (i: number, type: string, section: 'main' | 'side'): GameDraft => 
 })
 
 /**
- * Two types is enough to cover the rule: `roleOf` branches on `meta.category`,
- * and the interesting one is 'either' (skins), whose answer depends on what
- * else is in the round. 'main' (nassau) is the thing that can claim the main
- * event away from it. No shipped engine is category 'side'.
+ * ONE TYPE PER CATEGORY, which is what makes the sweep total: `roleOf` branches
+ * on `meta.category`, so the alphabet has to spell all three of them.
+ *
+ * The interesting one is 'either' (skins), whose answer depends on what else is
+ * in the round; 'main' (nassau) is what can claim the main event away from it;
+ * and 'side' (ctp) is the branch that was UNREACHABLE until CTP shipped — the
+ * one game that can never be the main event no matter what the user picked, so
+ * it is the only type whose section the reconciliation can be asked to honour
+ * and must refuse to.
  */
-const TYPES = ['skins', 'nassau'] as const
+const TYPES = ['skins', 'nassau', 'ctp'] as const
 const SECTIONS = ['main', 'side'] as const
 
 /** Every arrangement of `n` games: type × section, independently, in order. */
@@ -46,12 +51,12 @@ function arrangements(n: number): GameDraft[][] {
 describe('reconcileRoles', () => {
   /**
    * THE invariant, over every arrangement of two and three games: whatever gets
-   * stored, the round must derive back the sections the user picked. 4² + 4³ =
-   * 80 arrangements, which is cheap and total.
+   * stored, the round must derive back the sections the user picked. 6² + 6³ =
+   * 252 arrangements, which is cheap and total.
    */
   it('makes the round derive the sections the user picked, for every arrangement', () => {
     const cases = [...arrangements(2), ...arrangements(3)]
-    expect(cases).toHaveLength(80)
+    expect(cases).toHaveLength(252)
     for (const drafts of cases) {
       const out = reconcileRoles(drafts)
       const shape = drafts.map((d) => `${d.type}:${d.section}`).join(' + ')

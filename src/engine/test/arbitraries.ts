@@ -131,6 +131,37 @@ const wolfFuzz: GameFuzz = {
 }
 
 /**
+ * The award channel's property coverage (MAI-46), and the only one there is:
+ * `ctp/award` is the first game event that carries a PLAYER rather than a
+ * choice, and the first that a scorekeeper is expected to enter long after the
+ * hole it names. Zero-sum, replay determinism and retraction equivalence all
+ * have to survive that.
+ *
+ * One seed per hole: 0–3 award it to that player, 4 leave it unawarded, 5 award
+ * it to a player who ISN'T in the round. The last is the important one — an
+ * award naming a ghost must move no money rather than paying nobody a stake the
+ * others still lose (which would be zero-sum's first real counterexample).
+ * The seeded hole is deliberately NOT filtered to par 3s: an award on a par 4
+ * is inert, and the fuzz should keep proving it.
+ */
+const ctpFuzz: GameFuzz = {
+  type: 'ctp',
+  eligible: (n) => n >= 2,
+  arbitrary: () =>
+    fc
+      .array(fc.integer({ min: 0, max: 5 }), { minLength: 18, maxLength: 18 })
+      .map((seeds) => (ids: readonly Uuid[]) => ({
+        config: { stakeCents: 200 },
+        events: (hole: number, idx: number) => {
+          const seed = seeds[idx]!
+          if (seed === 4) return []
+          const playerId = seed === 5 ? 'p-nobody' : (ids[seed % ids.length] ?? ids[0]!)
+          return [{ kind: 'ctp/award', data: { hole, playerId } }]
+        },
+      })),
+}
+
+/**
  * Order matters: it decides the order games sit in `round.games`, and so which
  * `gameId` each one gets. Keep new entries appended.
  */
@@ -140,6 +171,7 @@ export const GAME_FUZZ: readonly GameFuzz[] = [
   sixPointFuzz,
   vegasFuzz,
   wolfFuzz,
+  ctpFuzz,
 ]
 
 const PLAYER_NAMES = ['A', 'B', 'C', 'D'] as const
