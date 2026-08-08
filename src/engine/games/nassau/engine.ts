@@ -553,6 +553,11 @@ export const nassauEngine: GameEngine<NassauConfig> = {
     blurb: 'Three match-play bets: front nine, back nine, overall. Press when down.',
     minPlayers: 2,
     maxPlayers: 4,
+    category: 'main',
+    family: 'match',
+    // BOTH, declared as a set — the case that ruled a single-value team axis
+    // out of `meta` entirely: teams: null is 1v1, teams: {...} is 2v2 or 2v1.
+    shapes: ['headToHead', 'teams'],
     rules: {
       tagline: 'Three bets in one round: the front nine, the back nine, and the overall.',
       howToPlay: [

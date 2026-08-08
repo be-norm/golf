@@ -248,6 +248,10 @@ export const wolfEngine: GameEngine<WolfConfig> = {
     blurb: 'Rotating Wolf picks a partner off the tee — or goes lone for double.',
     minPlayers: 4,
     maxPlayers: 4,
+    category: 'main',
+    family: 'points',
+    // the wolf picks a new partner every hole — sides never persist
+    shapes: ['partners'],
     rules: {
       tagline: 'A rotating captain picks a partner off the tee — or goes it alone for more.',
       howToPlay: [

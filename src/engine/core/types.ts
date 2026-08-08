@@ -128,6 +128,23 @@ export interface GameConfig<C = unknown> {
   /** instance id — two skins games could coexist in one round */
   gameId: Uuid
   type: string
+  /**
+   * Whether THIS round treats the game as its main event or a side bet.
+   *
+   * An EXPLICIT override, written only when a user chooses (MAI-44). Setup
+   * writes nothing: whether an "either" game is this round's main event or its
+   * side bet depends on what else is in the round, and freezing a guess into a
+   * synced archive makes it permanently wrong.
+   *
+   * So ABSENT IS THE NORMAL CASE, and absent does NOT mean 'main' — it means
+   * "derive it". Read it through `roleOf(game, round.games)` (catalog.ts),
+   * never as `game.role ?? 'main'`, which would call a side bet running under a
+   * Nassau the round's main event.
+   *
+   * PRESENTATION ONLY: `deriveRound` never reads it, so neither its absence nor
+   * a junk value out of an imported file can change what anybody is owed.
+   */
+  role?: 'main' | 'side'
   handicap: HandicapSettings
   config: C
 }

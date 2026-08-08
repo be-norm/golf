@@ -4,7 +4,8 @@ import { z } from 'zod'
 import '../games/index'
 import { deriveRound, registerEngine, type GameEngine } from '../catalog'
 import { addLine, assertZeroSum, emptySettlement } from './money'
-import { arbitraryRoundAndEvents, GUARD_ENGINE_TYPE, type GameFuzz } from '../test/arbitraries'
+import { arbitraryRoundAndEvents, type GameFuzz } from '../test/arbitraries'
+import { GUARD_ENGINE_TYPE } from '../test/harness'
 
 /**
  * Is the alarm wired to anything?
@@ -29,6 +30,9 @@ const brokenEngine: GameEngine<{ stakeCents: number }> = {
     blurb: 'Test-only engine that pays a player from nowhere.',
     minPlayers: 2,
     maxPlayers: 4,
+    category: 'main',
+    family: 'pot',
+    shapes: ['solo'],
     rules: {
       tagline: 'Deliberately not zero-sum, so the property suite has something to catch.',
       howToPlay: ['Exists only inside replay.guard.test.ts.'],

@@ -14,7 +14,7 @@ export function DiagnosticsScreen() {
   // storage, logs and import/export only.
   const { activeUserId } = useAuth()
   const fileRef = useRef<HTMLInputElement>(null)
-  const [importError, setImportError] = useState(false)
+  const [importError, setImportError] = useState<string>()
   const [entries, setEntries] = useState<DiagnosticEntry[]>(() => readErrorLog())
   const [storage, setStorage] = useState<string>()
   const [persisted, setPersisted] = useState<boolean>()
@@ -95,13 +95,19 @@ export function DiagnosticsScreen() {
               .text()
               .then((text) => importRound(text, activeUserId))
               .then((round) => {
-                setImportError(false)
+                setImportError(undefined)
                 // a signed-in import of a completed round should sync too
                 if (activeUserId !== LOCAL_USER && round.status === 'completed') {
                   void enqueuePushRound(activeUserId, round)
                 }
               })
-              .catch(() => setImportError(true))
+              // Say WHY. A well-formed export that carries two games with the
+              // same gameId is refused on purpose (exportRound.ts), and telling
+              // its owner "that isn't a golf round export" sends them back to
+              // retry the identical file instead of repairing it.
+              .catch((err: unknown) =>
+                setImportError(err instanceof Error ? err.message : String(err)),
+              )
             e.target.value = ''
           }}
         />
@@ -109,8 +115,11 @@ export function DiagnosticsScreen() {
           Import round from file
         </BigButton>
         <p className="mt-2 text-sm text-stone-500">Restore a round from an exported .json file.</p>
-        {importError && (
-          <p className="mt-2 text-sm text-flag-500">That file isn't a golf round export.</p>
+        {importError !== undefined && (
+          <p className="mt-2 text-sm text-flag-500">
+            Couldn&apos;t import that file.
+            <span className="mt-1 block break-words text-xs text-stone-500">{importError}</span>
+          </p>
         )}
       </section>
 

@@ -192,6 +192,11 @@ export function SetupScreen() {
     const gameConfigs: GameConfig[] = games.map((g) => ({
       gameId: newId(),
       type: g.type,
+      // `role` is deliberately NOT stamped here. Whether an "either" game is
+      // this round's main event or its side bet depends on what else is in the
+      // round, and freezing a guess into a synced archive makes it wrong
+      // permanently — `roleOf` derives it, and MAI-44 will write only what the
+      // user explicitly chooses.
       handicap: g.handicap,
       config: resolveDraftPlayers(g.config, draftToReal),
     }))

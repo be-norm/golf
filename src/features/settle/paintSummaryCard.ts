@@ -107,11 +107,22 @@ function panel(g: Ctx, y: number, h: number, border: string, fill: string): void
   g.strokeRect(PAD + 1, y + 1, INNER - 2, h - 2)
 }
 
-function ellipsize(g: Ctx, s: string, max: number, o: TextOpts): string {
+/**
+ * `marker` defaults to the ellipsis character, which every caller here draws in
+ * the BODY font. The display font (Press Start 2P) has only ever been given
+ * plain ASCII, so a display-font caller passes '...' rather than risk a glyph
+ * the pixel face lacks falling back to the system one mid-string.
+ */
+function ellipsize(g: Ctx, s: string, max: number, o: TextOpts, marker = '…'): string {
   if (width(g, s, o) <= max) return s
   let cut = s
-  while (cut.length > 1 && width(g, `${cut}…`, o) > max) cut = cut.slice(0, -1)
-  return `${cut}…`
+  // `> 0`, not `> 1`: stopping at one glyph returned "X..." however wide that
+  // was, so the result could exceed the `max` it had just been measured
+  // against — and the panel title's width is what positions the allowance
+  // chip, so an over-budget title drew the chip outside the panel. The display
+  // font's marker is three glyphs, which made the overshoot easy to reach.
+  while (cut.length > 0 && width(g, `${cut}${marker}`, o) > max) cut = cut.slice(0, -1)
+  return cut.length > 0 ? `${cut}${marker}` : ''
 }
 
 /**
@@ -296,13 +307,23 @@ function gameBlock(g: Ctx, game: SummaryCard['games'][number]): Block {
     draw(g, y) {
       panel(g, y, height, C.borderStone, C.panelStone)
       const titleOpts: TextOpts = { size: 12, display: true, color: C.green }
-      text(g, game.name.toUpperCase(), PAD + 14, y + 24, titleOpts)
+      // BOUNDED, like every other string this painter draws. The title used to
+      // be a curated `meta.name`; it is now assembled (gameLabel appends a
+      // discriminator built from engine-authored config labels), so its length
+      // is no longer ours to assume. Room reserved on the right for the
+      // allowance chip, which is positioned off the title's measured width —
+      // an unbounded title pushed that chip off the panel entirely.
+      const chipOpts: TextOpts = { size: 11, display: true, color: C.faint }
+      // MEASURED, like every other reservation in this painter — a guessed 56px
+      // is ~4 glyphs at this size, and `allowancePct` is a plain number, so an
+      // 87.5% allowance renders 5 and runs past the panel edge. Reserved only
+      // when a chip is actually drawn: it is absent on every gross game and
+      // every 100% net game, i.e. most panels.
+      const chipRoom = game.allowance ? width(g, game.allowance, chipOpts) + 8 : 0
+      const title = ellipsize(g, game.name.toUpperCase(), INNER - 28 - chipRoom, titleOpts, '...')
+      text(g, title, PAD + 14, y + 24, titleOpts)
       if (game.allowance) {
-        text(g, game.allowance, PAD + 22 + width(g, game.name.toUpperCase(), titleOpts), y + 24, {
-          size: 11,
-          display: true,
-          color: C.faint,
-        })
+        text(g, game.allowance, PAD + 22 + width(g, title, titleOpts), y + 24, chipOpts)
       }
       let cursor = y + 40
       if (wrapped.length === 0) {
@@ -443,7 +464,12 @@ function footerBlock(card: SummaryCard): Block {
     height,
     draw(g, y) {
       if (card.strokeNote) {
-        text(g, card.strokeNote, W / 2, y + 10, { size: 16, color: C.ghost, align: 'center' })
+        // BOUNDED for the same reason the panel title is: this string now ends
+        // in `gameLabel`, so its tail is assembled from engine-authored config
+        // labels rather than being copy we control. Centered text that outgrows
+        // the canvas is clipped at BOTH edges on the image people share.
+        const noteOpts: TextOpts = { size: 16, color: C.ghost, align: 'center' }
+        text(g, ellipsize(g, card.strokeNote, INNER, noteOpts), W / 2, y + 10, noteOpts)
       }
       text(g, 'golf.mainspring.fyi', W / 2, y + noteH + 10, {
         size: 9,

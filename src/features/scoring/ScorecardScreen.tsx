@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
 import { buildHoleLedger } from '../../engine/ledger'
+import { gameLabel } from '../../engine/label'
 import { formatCentsSigned } from '../../engine/core/money'
 import { GameSummary } from '../../components/GameSummary'
 import { useRound } from './useRound'
@@ -155,7 +156,7 @@ export function ScorecardScreen() {
                       : 'border-2 border-stone-700 bg-stone-800 text-stone-400'
                   }`}
                 >
-                  {g.type}
+                  {gameLabel(g, round.games)}
                 </button>
               ))}
             </div>
@@ -164,7 +165,7 @@ export function ScorecardScreen() {
           {activeDerivation && (
             <p className="mb-3 flex flex-wrap items-baseline gap-x-2">
               <span className="font-display text-[10px] uppercase text-felt-300">
-                {activeGame!.type}
+                {gameLabel(activeGame!, round.games)}
               </span>
               <GameSummary derivation={activeDerivation} />
             </p>

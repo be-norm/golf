@@ -11,6 +11,20 @@ import type {
 
 /** Deterministic test-only builders — no clocks, no randomness. */
 
+/**
+ * Engine types that tests register into the module-global registry (there is no
+ * `unregisterEngine`). Registry-iterating guards in `catalog.test.ts` skip
+ * these BY NAME, so those guards do not silently depend on vitest isolating
+ * modules per file — which is a config default, not a guarantee.
+ */
+export const GUARD_ENGINE_TYPE = 'broken'
+/** the engine label.test.ts registers to prove an unpaintable label is refused */
+export const LABEL_PROBE_ENGINE_TYPE = 'fancy'
+export const TEST_ONLY_ENGINE_TYPES: readonly string[] = [
+  GUARD_ENGINE_TYPE,
+  LABEL_PROBE_ENGINE_TYPE,
+]
+
 const FIXED_AT = '2026-07-18T12:00:00.000Z'
 
 export function makeCourse(pars: number[], strokeIndexes: number[]): Course {
@@ -39,7 +53,13 @@ export interface MakeRoundOpts {
   course?: Course
   players: RoundPlayer[]
   holes?: RoundHoles
-  games: Array<Pick<GameConfig, 'type' | 'config'> & { gameId?: Uuid; handicap?: HandicapSettings }>
+  games: Array<
+    Pick<GameConfig, 'type' | 'config'> & {
+      gameId?: Uuid
+      handicap?: HandicapSettings
+      role?: GameConfig['role']
+    }
+  >
 }
 
 export function makeRound(opts: MakeRoundOpts): Round {
@@ -57,6 +77,10 @@ export function makeRound(opts: MakeRoundOpts): Round {
     holes: opts.holes ?? 'full18',
     players: opts.players,
     games: opts.games.map((g, i) => ({
+      // spread FIRST so a field added to GameConfig (role, and whatever comes
+      // next) reaches the round instead of being silently dropped by a builder
+      // that enumerates fields — a test asserting on it would just see undefined
+      ...g,
       gameId: g.gameId ?? `game-${i + 1}`,
       type: g.type,
       handicap: g.handicap ?? { mode: 'gross', allowancePct: 100, reference: 'absolute' },

@@ -118,6 +118,28 @@ describe('SetupScreen — 9-hole courses', () => {
     expect((await db.courses.get('penmar'))!.holeCount).toBe(9)
   })
 
+  /**
+   * Setup writes NO `role`. Whether an "either" game is this round's main event
+   * or its side bet depends on what else is in the round, so a per-game guess
+   * frozen here would be permanently wrong in a synced archive — `roleOf`
+   * derives it instead (see catalog.test.ts for the rule itself).
+   */
+  it('leaves role unstamped, for roleOf to derive', async () => {
+    await pickPenmar()
+    await cont()
+    await addPlayer('Bogey', 16.5)
+    await addPlayer('Scratch', 0)
+    await cont()
+
+    await userEvent.click(await screen.findByText('Skins'))
+    await userEvent.click(screen.getByRole('button', { name: /Tee off/ }))
+
+    await waitFor(async () => expect(await db.rounds.count()).toBe(1))
+    const round = (await db.rounds.toArray())[0]!
+    expect(round.games).toHaveLength(1)
+    expect(round.games[0]!.role).toBeUndefined()
+  })
+
   it('resets the hole range when switching from a nine to an eighteen', async () => {
     await db.courses.bulkPut([penmar, eighteen])
     await db.saved_courses.bulkPut([

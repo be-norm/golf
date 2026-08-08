@@ -98,7 +98,9 @@ describe('buildSummaryCard', () => {
       expect.arrayContaining(['F9', 'B9', '18']),
     )
     expect(nassau.lines.every((l) => l.value.length > 0)).toBe(true)
-    expect(c.strokeNote).toBe('underline = handicap stroke (Nassau)')
+    // framed with a colon, not parentheses: once a round can hold two of a
+    // type the label carries its own — "(Skins (net))" reads as a typo
+    expect(c.strokeNote).toBe('underline = handicap stroke: Nassau')
   })
 
   it('carries a Nassau close through to the settle screen and the share card', () => {

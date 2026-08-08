@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
 import '../../engine/games'
 import { getEngine, type GameEngine } from '../../engine/catalog'
+import { gameLabel } from '../../engine/label'
 import { formatCents } from '../../engine/core/money'
 import type { GameConfig, HandicapSettings } from '../../engine/core/types'
 import { roundRepo } from '../../db/repos'
@@ -179,6 +180,7 @@ export function RoundStartScreen() {
         {round.games.map((game: GameConfig) => {
           const engine = getEngine(game.type)
           if (!engine) return null
+          const label = gameLabel(game, round.games)
           const config = (game.config ?? {}) as Record<string, unknown>
           const chips = configChips(engine, config)
           const isNet = game.handicap.mode === 'net'
@@ -195,9 +197,9 @@ export function RoundStartScreen() {
           return (
             <div key={game.gameId} className="pixel border-felt-500 bg-felt-900/60 p-4">
               <div className="flex items-baseline justify-between">
-                <h2 className="font-display text-sm uppercase text-felt-300">{engine.meta.name}</h2>
+                <h2 className="font-display text-sm uppercase text-felt-300">{label}</h2>
                 <button
-                  aria-label={`${engine.meta.name} rules`}
+                  aria-label={`${label} rules`}
                   onClick={() => setRulesFor(game.type)}
                   className="font-display text-[10px] uppercase text-felt-400"
                 >

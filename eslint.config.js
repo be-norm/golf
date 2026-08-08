@@ -3,6 +3,32 @@ import tseslint from 'typescript-eslint'
 import reactHooks from 'eslint-plugin-react-hooks'
 import prettier from 'eslint-config-prettier'
 
+/**
+ * Invariant #1's denylist, hoisted because TWO config blocks need it.
+ *
+ * ESLint flat config REPLACES a rule's options when a later block redefines it
+ * — it does not merge them. A second block setting `no-restricted-imports` for
+ * a subset of these files therefore switches this list OFF for that subset,
+ * silently, with a green lint. That is exactly what happened when the registry
+ * ban below was first added as its own block: engine purity stopped being
+ * enforced for every game engine, and only a review caught it. Both blocks now
+ * spread this array.
+ */
+const ENGINE_PURITY_PATTERNS = [
+  {
+    group: ['react', 'react-*', 'motion', 'motion/*'],
+    message: 'engine must stay React/UI-free',
+  },
+  {
+    group: ['dexie', 'dexie-*', '@supabase/*'],
+    message: 'engine must stay persistence/network-free',
+  },
+  {
+    group: ['**/db/*', '**/features/*', '**/components/*', '**/pwa/*', '**/remote/*', '**/app/*'],
+    message: 'engine cannot import from app layers',
+  },
+]
+
 export default tseslint.config(
   // supabase/functions/** is Deno (its own runtime + globals), linted by the
   // Supabase/Deno toolchain, not by the Vite app's TS/React ESLint config.
@@ -25,25 +51,7 @@ export default tseslint.config(
     // that looks enforced and isn't. Nothing under src/** non-test imports it.
     ignores: ['src/engine/**/*.test.ts', 'src/engine/test/**'],
     rules: {
-      'no-restricted-imports': [
-        'error',
-        {
-          patterns: [
-            {
-              group: ['react', 'react-*', 'motion', 'motion/*'],
-              message: 'engine must stay React/UI-free',
-            },
-            {
-              group: ['dexie', 'dexie-*', '@supabase/*'],
-              message: 'engine must stay persistence/network-free',
-            },
-            {
-              group: ['**/db/*', '**/features/*', '**/components/*', '**/pwa/*', '**/remote/*', '**/app/*'],
-              message: 'engine cannot import from app layers',
-            },
-          ],
-        },
-      ],
+      'no-restricted-imports': ['error', { patterns: ENGINE_PURITY_PATTERNS }],
       'no-restricted-globals': [
         'error',
         { name: 'window', message: 'engine must stay DOM-free' },
@@ -52,6 +60,80 @@ export default tseslint.config(
         { name: 'localStorage', message: 'engine must stay DOM-free' },
         { name: 'indexedDB', message: 'engine must stay DOM-free' },
         { name: 'fetch', message: 'engine must stay network-free' },
+      ],
+    },
+  },
+  {
+    // MAI-43, invariant #7: taxonomy is presentation, and an engine must not
+    // settle money by it. `role` is guarded by a test (catalog.test.ts derives
+    // every engine three ways), but `meta.category`/`family`/`shapes` live on
+    // the engine singleton, so no fixture can vary them. An engine can only
+    // reach its own meta through the registry, and none does — so banning the
+    // registry inside game engines turns "we reviewed it" into a build error.
+    files: ['src/engine/games/**/*.ts'],
+    // index.ts IS the registration barrel — importing every engine is its job
+    ignores: ['src/engine/games/**/*.test.ts', 'src/engine/games/index.ts'],
+    rules: {
+      // NOTE the spread: this block replaces invariant #1's options for these
+      // files, so it has to carry them.
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            ...ENGINE_PURITY_PATTERNS,
+            {
+              // by PATTERN, not a single '../../catalog' literal: an engine one
+              // directory deeper would spell it '../../../catalog' and escape
+              // `ledger` re-exports deriveRound's whole power (buildHoleLedger
+              // derives every game in the round) and `label` calls getEngine on
+              // the caller's behalf, so naming only the catalog left two ways
+              // to the same place.
+              group: ['**/catalog', '**/ledger', '**/label'],
+              // every export that hands an engine another engine's meta or
+              // derivation: `roleOf` reads meta.category itself, and
+              // `deriveRound` re-derives every other game in the round
+              importNames: [
+                'getEngine',
+                'listEngines',
+                'roleOf',
+                'deriveRound',
+                'buildHoleLedger',
+                'gameLabel',
+              ],
+              message:
+                'an engine must not read the registry — taxonomy (meta.category/family/shapes) is presentation and must never reach a settlement (CLAUDE.md invariant #7)',
+            },
+            {
+              // The registry is not the only door. An engine reaching another
+              // engine's singleton directly reads its meta just as well, and
+              // gets cross-derivation besides — so "engines NEVER read each
+              // other" needs its own ban, or the claim is only about one route.
+              // Matched on the SPECIFIER, so these are relative shapes rather
+              // than '**/games/...' — an engine writes '../nassau/engine',
+              // which contains no 'games' segment at all.
+              //
+              // '../*/*' is any sibling game directory; the '../../*/*' pair
+              // catches a game nested one level deeper, with core and the
+              // catalog negated back in because those ARE the legal imports at
+              // that shape. Any module in another game's folder counts, not
+              // just one literally named `engine`.
+              // REGEX, not globs: these match the SPECIFIER, and glob negation
+              // ('!../../core/*') does not un-match here — it left every real
+              // engine's `../../core/money` import failing. Two shapes:
+              //
+              //   ../<game>/...      a sibling game, from games/<game>/*.ts
+              //   ../../<game>/...   the same, from one directory deeper,
+              //                      with core/ and catalog negated back in
+              //                      because those ARE legal at that shape
+              //
+              // Any module inside another game's folder counts, not just one
+              // literally named `engine`.
+              regex: '^\\.\\./(?!\\.\\./)([^/]+/|index$)|^\\.\\./\\.\\./(?!\\.\\./)(?!core/|catalog$)([^/]+/|index$)',
+              message:
+                'engines never read each other — a game is a pure function of (config, its own events, RoundContext); overlays contribute to RoundContext instead (CLAUDE.md invariant #7)',
+            },
+          ],
+        },
       ],
     },
   },

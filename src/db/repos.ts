@@ -21,7 +21,7 @@ import { notifyOutboxWrite } from './outboxSignal'
  * Legacy cards predate `createdBy`. `source:'user'` USUALLY meant "authored on
  * this device" — except that main's editor rewrote every edited card to
  * 'user', including API imports. A card genuinely authored here got its id
- * from `newId()` (UUIDv7, invariant #7), so a provider id (`gca:9`, a v4
+ * from `newId()` (UUIDv7, invariant #8), so a provider id (`gca:9`, a v4
  * uuid) cannot be ours and forks instead of pushing onto a shared row RLS
  * refuses. Residual: a pre-branch EDIT of another golfer's library course
  * keeps their v7 uuid and still misreads as yours — that push dies quietly in
