@@ -7,15 +7,23 @@ import {
   type CourseGroup,
   type CourseVersion,
 } from '../../remote/courseSearch'
+import { courseRepo } from '../../db/repos'
 import { useAuth } from '../../auth/AuthProvider'
 import { CourseSourceMark } from '../../components/CourseSourceMark'
 import { formatDate } from '../../lib/date'
 
 interface Props {
-  /** ids already in the local library — shown as saved, not re-importable */
+  /** ids already in the local library */
   localIds: ReadonlySet<string>
-  /** called after a version is fetched + cached locally */
-  onImported?: (course: Course) => void
+  /**
+   * What picking a version is FOR. On the courses screen you are stocking a
+   * library, so a card already in it is done — "saved ✓", nothing to do. On
+   * setup you are choosing where you're about to play, so every version is
+   * actionable: an unsaved one is fetched first, a saved one is simply chosen.
+   */
+  intent?: 'add' | 'play'
+  /** the picked course, fetched if it wasn't already local */
+  onPicked?: (course: Course) => void
   placeholder?: string
 }
 
@@ -28,13 +36,18 @@ function updatedOn(v: CourseVersion): string | undefined {
 
 /** What a version row reads out. The button's own label supersedes the source
  *  mark's, so it has to restate the kind and the date — and it names the
- *  VERSION, not the group, because that is the card being added. */
-function versionLabel(v: CourseVersion, saved: boolean, on: string | undefined): string {
+ *  VERSION, not the group, because that is the card being picked. */
+function versionLabel(
+  v: CourseVersion,
+  saved: boolean,
+  on: string | undefined,
+  intent: 'add' | 'play',
+): string {
   const kind = v.kind === 'api' ? 'directory version' : v.mine ? 'your version' : 'community version'
   const dated = on ? `, updated ${on}` : ''
-  return saved
-    ? `${v.name} — ${kind}${dated}, already in your library`
-    : `Add ${v.name} — ${kind}${dated}`
+  const what = `${v.name} — ${kind}${dated}`
+  if (intent === 'play') return `Play ${what}`
+  return saved ? `${what}, already in your library` : `Add ${what}`
 }
 
 /** The name+town line, shared by both row shapes so they can't drift apart. */
@@ -61,7 +74,7 @@ const ROW = 'pixel border-stone-700 bg-stone-900/70'
  * old one-tap add; making everyone confirm a choice they don't have would tax
  * every ordinary search to serve the rare duplicate.
  */
-export function CourseSearch({ localIds, onImported, placeholder }: Props) {
+export function CourseSearch({ localIds, intent = 'add', onPicked, placeholder }: Props) {
   const { activeUserId } = useAuth()
   const [query, setQuery] = useState('')
   const [groups, setGroups] = useState<CourseGroup[]>()
@@ -118,12 +131,25 @@ export function CourseSearch({ localIds, onImported, placeholder }: Props) {
     }, 350)
   }
 
-  // a CourseVersion IS a CourseSearchHit, so it imports with nothing to unwrap
+  // A version can already be in the library under a folded-away id, so the
+  // check is over all of them, and it's derived once per row rather than by
+  // each of the things that need it.
+  const savedAs = (v: CourseVersion) => versionIds(v).find((id) => localIds.has(id))
+
   const pick = async (version: CourseVersion) => {
     setImporting(version.id)
     setError(undefined)
     try {
-      const course = await importCourseHit(activeUserId, version)
+      // Already local? Take the cached card. Re-importing would spend a network
+      // round trip to arrive at the copy we're holding — and on setup, where a
+      // saved course is still perfectly playable, that trip is the whole cost
+      // of choosing it. A CourseVersion IS a CourseSearchHit, so the import
+      // path needs nothing unwrapped.
+      const local = savedAs(version)
+      const course = local
+        ? await courseRepo.get(local)
+        : await importCourseHit(activeUserId, version)
+      if (!course) throw new Error('course not found')
       // both halves matter: the bump discards a search already in flight, and
       // the clear kills one still queued behind the debounce. Without the
       // clear, typing then picking repaints a full result list 350 ms later,
@@ -134,7 +160,7 @@ export function CourseSearch({ localIds, onImported, placeholder }: Props) {
       setGroups(undefined)
       setExpanded(undefined)
       setSearching(false)
-      onImported?.(course)
+      onPicked?.(course)
     } catch (e) {
       // keep the results and the open panel: the point of showing versions is
       // that another one can be tried when the first fails to fetch
@@ -144,19 +170,18 @@ export function CourseSearch({ localIds, onImported, placeholder }: Props) {
     }
   }
 
-  // A version can already be in the library under a folded-away id, so the
-  // check is over all of them, and it's derived once per row rather than by
-  // each of the three things that need it.
-  const saved = (v: CourseVersion) => versionIds(v).some((id) => localIds.has(id))
   const rowState = (v: CourseVersion) => {
-    const here = saved(v)
+    const here = savedAs(v) !== undefined
+    // Stocking a library, a card already in it is finished business. Choosing
+    // where to play, it is the most likely pick on the screen.
+    const done = here && intent === 'add'
     return {
       here,
-      // every add is disabled while ANY import is in flight: two overlapping
+      // every pick is disabled while ANY import is in flight: two overlapping
       // picks share one `importing` slot, so the first to settle would
-      // re-enable the second's row mid-flight and fire onImported twice
-      disabled: importing !== undefined || here,
-      action: here ? 'saved ✓' : importing === v.id ? '…' : '+ add',
+      // re-enable the second's row mid-flight and fire onPicked twice
+      disabled: importing !== undefined || done,
+      action: done ? 'saved ✓' : importing === v.id ? '…' : intent === 'play' ? '▶ play' : '+ add',
     }
   }
 
@@ -204,7 +229,7 @@ export function CourseSearch({ localIds, onImported, placeholder }: Props) {
               // without this a course already in your library reads only
               // "2 versions", and you add a SECOND version of it — the
               // duplicate problem, rebuilt inside your own library
-              const savedHere = g.versions.some(saved)
+              const savedHere = g.versions.some((v) => savedAs(v) !== undefined)
 
               return (
                 <li key={g.key} className={ROW}>
@@ -243,7 +268,7 @@ export function CourseSearch({ localIds, onImported, placeholder }: Props) {
                           <button
                             disabled={state.disabled}
                             onClick={() => void pick(v)}
-                            aria-label={versionLabel(v, state.here, on)}
+                            aria-label={versionLabel(v, state.here, on, intent)}
                             className="flex w-full items-center justify-between px-4 py-2.5 text-left disabled:opacity-50"
                           >
                             <span className="min-w-0 truncate">

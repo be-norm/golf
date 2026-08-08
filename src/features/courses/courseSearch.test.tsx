@@ -22,6 +22,9 @@ vi.mock('../../remote/courseSearch', () => ({
   versionIds: (v: CourseVersion) => [v.id, ...v.aliasIds],
 }))
 vi.mock('../../auth/AuthProvider', () => ({ useAuth: () => ({ activeUserId: 'me-uid' }) }))
+// only `get` is reached from here — picking a card already in the library
+const getMock = vi.hoisted(() => vi.fn())
+vi.mock('../../db/repos', () => ({ courseRepo: { get: getMock } }))
 
 import { CourseSearch } from './CourseSearch'
 
@@ -77,10 +80,12 @@ const rancho: CourseGroup = {
 }
 
 const imported = { id: 'v-theirs', name: 'Broadmoor Country Club' } as Course
+/** the cached card `courseRepo.get` hands back for an already-saved version */
+const localCourse = { id: 'og-7', name: 'Rancho Park GC' } as Course
 
-function search(groups: CourseGroup[], localIds: string[] = [], onImported?: (c: Course) => void) {
+function search(groups: CourseGroup[], localIds: string[] = [], onPicked?: (c: Course) => void) {
   searchMock.mockResolvedValue(groups)
-  render(<CourseSearch localIds={new Set(localIds)} onImported={onImported} />)
+  render(<CourseSearch localIds={new Set(localIds)} onPicked={onPicked} />)
   // one change event, not per-keystroke typing — the 350 ms debounce then runs once
   fireEvent.change(screen.getByPlaceholderText('Search courses (online)…'), {
     target: { value: 'broadmoor' },
@@ -92,7 +97,9 @@ const header = (name: RegExp) => screen.findByRole('button', { name })
 beforeEach(() => {
   searchMock.mockReset()
   importMock.mockReset()
+  getMock.mockReset()
   importMock.mockResolvedValue(imported)
+  getMock.mockResolvedValue(localCourse)
 })
 
 describe('CourseSearch — one row per place (MAI-79)', () => {
@@ -134,13 +141,13 @@ describe('CourseSearch — one row per place (MAI-79)', () => {
   })
 
   it('imports the version the golfer chose, not the top-ranked one', async () => {
-    const onImported = vi.fn()
-    search([broadmoor], [], onImported)
+    const onPicked = vi.fn()
+    search([broadmoor], [], onPicked)
     await userEvent.click(await header(/Broadmoor Country Club/))
     await userEvent.click(screen.getByRole('button', { name: /community version, updated 3 Jun 2026/ }))
 
     await waitFor(() => expect(importMock).toHaveBeenCalledWith('me-uid', THEIRS))
-    expect(onImported).toHaveBeenCalledWith(imported)
+    expect(onPicked).toHaveBeenCalledWith(imported)
   })
 
   it('adds a single-version result on the first tap, with no disclosure', async () => {
@@ -214,6 +221,45 @@ describe('CourseSearch — one row per place (MAI-79)', () => {
 
     await waitFor(() => expect(screen.queryByText(/Results/)).not.toBeInTheDocument())
     expect(screen.queryByText(/Broadmoor/)).not.toBeInTheDocument()
+  })
+
+  it('says "play", not "add", when the search is for choosing where to play', async () => {
+    searchMock.mockResolvedValue([rancho])
+    render(<CourseSearch localIds={new Set()} intent="play" />)
+    fireEvent.change(screen.getByPlaceholderText('Search courses (online)…'), {
+      target: { value: 'rancho' },
+    })
+
+    const row = await header(/Rancho Park GC/)
+    expect(row).toHaveTextContent('▶ play')
+    expect(row).not.toHaveTextContent('add')
+  })
+
+  it('keeps a course you already have playable, without a second fetch', async () => {
+    // "saved ✓" is the end of the story when you're stocking a library. When
+    // you're picking where to play it is the likeliest choice on the screen —
+    // greying it out would send you hunting for the course you already own.
+    const onPicked = vi.fn()
+    searchMock.mockResolvedValue([rancho])
+    render(<CourseSearch localIds={new Set(['og-7'])} intent="play" onPicked={onPicked} />)
+    fireEvent.change(screen.getByPlaceholderText('Search courses (online)…'), {
+      target: { value: 'rancho' },
+    })
+
+    const row = await header(/Rancho Park GC/)
+    expect(row).toHaveTextContent('▶ play')
+    expect(row).toBeEnabled()
+
+    await userEvent.click(row)
+    await waitFor(() => expect(onPicked).toHaveBeenCalledWith(localCourse))
+    expect(importMock).not.toHaveBeenCalled() // the card was already here
+  })
+
+  it('still finishes at "saved ✓" when the search is for stocking the library', async () => {
+    search([rancho], ['og-7'])
+    const row = await header(/Rancho Park GC/)
+    expect(row).toHaveTextContent('saved ✓')
+    expect(row).toBeDisabled()
   })
 
   it('clears a failure banner when the query drops below the search minimum', async () => {

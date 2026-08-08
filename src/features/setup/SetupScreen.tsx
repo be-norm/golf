@@ -245,8 +245,9 @@ export function SetupScreen() {
           <h1 className="font-display text-sm uppercase text-felt-300">Where are you playing?</h1>
           <CourseSearch
             localIds={new Set(courses?.map((c) => c.id))}
+            intent="play"
             placeholder="Search any course…"
-            onImported={(c) => selectCourse(c)}
+            onPicked={(c) => selectCourse(c)}
           />
           <div className="space-y-2">
             {courses?.map((c: Course) => (
