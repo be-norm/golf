@@ -70,6 +70,10 @@ export function SetupScreen() {
     setCourseId(c.id)
     setTeeSetId(c.teeSets[0]?.id)
     setHoles(c.holeCount === 9 ? 'front9' : 'full18')
+    // …and move on. Tees and holes belong to the course you just chose, so
+    // asking for them beneath a list of every OTHER course invited the reader
+    // to think the list was still the question.
+    setStep(1)
   }
 
   const holeOptions: [RoundHoles, string][] =
@@ -140,7 +144,13 @@ export function SetupScreen() {
   }
 
   const canContinue =
-    step === 0 ? !!course && !!teeSetId : step === 1 ? players.length >= 2 : games.length >= 1
+    step === 0
+      ? !!course
+      : step === 1
+        ? !!course && !!teeSetId
+        : step === 2
+          ? players.length >= 2
+          : games.length >= 1
 
   const draftRoundPlayers = players.map((p) => ({
     playerId: p.draftId,
@@ -149,7 +159,7 @@ export function SetupScreen() {
   }))
 
   const problems =
-    step === 2
+    step === 3
       ? games.flatMap((g) => {
           const engine = getEngine(g.type)
           if (!engine) return []
@@ -230,7 +240,7 @@ export function SetupScreen() {
           ← Back
         </button>
         <div className="flex gap-1.5">
-          {[0, 1, 2].map((s) => (
+          {[0, 1, 2, 3].map((s) => (
             <div
               key={s}
               className={`h-1.5 w-8 rounded-full ${s <= step ? 'bg-felt-500' : 'bg-stone-800'}`}
@@ -270,6 +280,31 @@ export function SetupScreen() {
           <Link to="/courses" className="text-sm text-felt-400">
             Manage courses →
           </Link>
+        </section>
+      )}
+
+      {/* Tees and holes are questions ABOUT the chosen course, so they get the
+          screen to themselves. Sharing step 0 with the course list meant
+          choosing a tee while every other course sat above it still looking
+          like the live question — and Back is how you change your mind. */}
+      {step === 1 && (
+        <section className="flex flex-col gap-4">
+          <div>
+            <h1 className="font-display text-sm uppercase text-felt-300">How are you playing it?</h1>
+            {course ? (
+              <p className="mt-2 text-lg font-semibold">
+                {course.name}
+                {course.location && (
+                  <span className="ml-2 text-sm font-normal text-stone-400">{course.location}</span>
+                )}
+              </p>
+            ) : (
+              // the library is a live query, so the pick can vanish mid-flow
+              <p className="mt-2 text-sm text-stone-500">
+                That course has left your library — go back and pick another.
+              </p>
+            )}
+          </div>
 
           {course && (
             <>
@@ -318,7 +353,7 @@ export function SetupScreen() {
         </section>
       )}
 
-      {step === 1 && (
+      {step === 2 && (
         <section className="flex flex-col gap-4">
           <h1 className="font-display text-sm uppercase text-felt-300">Who's playing?</h1>
           <form
@@ -427,7 +462,7 @@ export function SetupScreen() {
         </section>
       )}
 
-      {step === 2 && (
+      {step === 3 && (
         <section className="flex flex-col gap-4">
           <h1 className="font-display text-sm uppercase text-felt-300">What's the game?</h1>
           {listEngines().map((engine) => {
@@ -469,7 +504,7 @@ export function SetupScreen() {
       )}
 
       <div className="mt-auto pb-2">
-        {step < 2 ? (
+        {step < 3 ? (
           <BigButton className="w-full" disabled={!canContinue} onClick={() => setStep(step + 1)}>
             Continue
           </BigButton>

@@ -1,5 +1,5 @@
 import 'fake-indexeddb/auto'
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { createMemoryRouter, RouterProvider } from 'react-router'
@@ -10,6 +10,22 @@ import { LOCAL_USER } from '../../db/ids'
 import { routes } from '../../app/routes'
 
 const SAVED_AT = '2026-08-01T00:00:00.000Z'
+
+/**
+ * fake-indexeddb is one store for the whole FILE, and several of these tests
+ * tee off. Without this the rounds pile up and any test asserting "exactly one
+ * round" fails depending on which of its neighbours got there first — a real
+ * ~60%-of-runs flake when the file is run on its own.
+ */
+beforeEach(async () => {
+  await Promise.all([
+    db.rounds.clear(),
+    db.courses.clear(),
+    db.saved_courses.clear(),
+    db.players.clear(),
+    db.outbox.clear(),
+  ])
+})
 
 /**
  * Penmar exactly as OpenGolfAPI serves it: 9 holes, par 33, slope 103, and NO
@@ -45,7 +61,8 @@ const eighteen: Course = {
   revision: 0,
 }
 
-/** Step 0: land on setup and pick Penmar (which auto-selects its only tee). */
+/** Land on setup and pick Penmar. Picking a course auto-selects its first tee
+ *  and moves to the tee/holes step, so this leaves us on step 1. */
 async function pickPenmar() {
   await db.courses.put(penmar)
   // the picker lists the SIGNED-IN USER's library, so a seeded card needs
@@ -66,6 +83,44 @@ async function addPlayer(name: string, index: number) {
 }
 
 const cont = () => userEvent.click(screen.getByRole('button', { name: 'Continue' }))
+
+describe('SetupScreen — picking the course is its own step', () => {
+  it('leaves the course list behind once a course is chosen', async () => {
+    // Choosing tees underneath a list of every OTHER course read as though the
+    // list were still the question being asked.
+    await db.courses.bulkPut([penmar, eighteen])
+    await db.saved_courses.bulkPut([
+      { userId: LOCAL_USER, courseId: penmar.id, updatedAt: SAVED_AT },
+      { userId: LOCAL_USER, courseId: eighteen.id, updatedAt: SAVED_AT },
+    ])
+    const router = createMemoryRouter(routes, { initialEntries: ['/setup'] })
+    render(<RouterProvider router={router} />)
+
+    // step 0 — every course, and no tees
+    expect(await screen.findByText('Wood Wind')).toBeInTheDocument()
+    expect(screen.queryByText('Tees')).not.toBeInTheDocument()
+
+    await userEvent.click(screen.getByText('Penmar Golf Course'))
+
+    // step 1 — the chosen course, its tees, and none of the others
+    expect(await screen.findByText('Tees')).toBeInTheDocument()
+    expect(screen.getByText('Holes')).toBeInTheDocument()
+    expect(screen.queryByText('Wood Wind')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Scan scorecard/i })).not.toBeInTheDocument()
+    // and it says which course these tees belong to
+    expect(screen.getByText('Penmar Golf Course')).toBeInTheDocument()
+  })
+
+  it('goes back to the course list to change your mind', async () => {
+    await pickPenmar()
+    expect(await screen.findByText('Tees')).toBeInTheDocument()
+
+    await userEvent.click(screen.getByText('← Back'))
+
+    expect(await screen.findByText('Where are you playing?')).toBeInTheDocument()
+    expect(screen.queryByText('Tees')).not.toBeInTheDocument()
+  })
+})
 
 describe('SetupScreen — 9-hole courses', () => {
   it('gives a nine HALF the index: 16.5 → HCP 8, not 15', async () => {
@@ -149,10 +204,13 @@ describe('SetupScreen — 9-hole courses', () => {
     const router = createMemoryRouter(routes, { initialEntries: ['/setup'] })
     render(<RouterProvider router={router} />)
 
-    // pick the nine (defaults to its 9-hole range), then switch to the eighteen
+    // pick the nine (defaults to its 9-hole range), then go back and switch to
+    // the eighteen — changing your mind is what Back is for now that the course
+    // list isn't sharing a screen with the tees
     await userEvent.click(await screen.findByText('Penmar Golf Course'))
+    await userEvent.click(screen.getByText('← Back'))
     await userEvent.click(screen.getByText('Wood Wind'))
-    await cont() // course → players
+    await cont() // tees/holes → players
 
     // the eighteen must default to the full round, not inherit the nine's front9
     await addPlayer('Bogey', 10.4)
@@ -161,11 +219,10 @@ describe('SetupScreen — 9-hole courses', () => {
     await userEvent.click(await screen.findByText('Skins'))
     await userEvent.click(screen.getByRole('button', { name: /Tee off/ }))
 
-    // (other tests in this file also tee off, so key on this round's course)
-    const forEighteen = async () =>
-      (await db.rounds.toArray()).find((r) => r.courseId === 'eighteen')
-    await waitFor(async () => expect(await forEighteen()).toBeDefined())
-    expect((await forEighteen())!.holes).toBe('full18')
+    await waitFor(async () => expect(await db.rounds.count()).toBe(1))
+    const round = (await db.rounds.toArray())[0]!
+    expect(round.courseId).toBe('eighteen')
+    expect(round.holes).toBe('full18')
   })
 
   it('halves the strokes when only the front 9 of an 18-hole course is played', async () => {
@@ -179,7 +236,7 @@ describe('SetupScreen — 9-hole courses', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Front 9' }))
     expect(screen.getByText(/plays off half their course handicap/)).toBeInTheDocument()
 
-    await cont() // course → players
+    await cont() // tees/holes → players
     // rating 70 / slope 120 / par 72: index 21 → CH round(20.30)=20 (the FULL
     // 18-hole handicap); index 2 → CH 0, the low.
     await addPlayer('Bogey', 21)
