@@ -310,6 +310,21 @@ describe('SetupScreen — choosing games', () => {
     expect(screen.getByRole('button', { name: /Tee off/ })).toBeDisabled()
   })
 
+  /**
+   * Layout follows the button you pressed, not `roleOf`. A lone Skins IS the
+   * round's main event by derivation — which is true, and still reads as the
+   * screen ignoring you when you just tapped "+ Add a side bet".
+   */
+  it('keeps a game in the section it was picked into', async () => {
+    await toStepTwo()
+    await pickGame('Skins', 'side')
+
+    expect(screen.getByText('Nothing picked yet')).toBeInTheDocument()
+    // it sits under SIDE BETS, as a compact row rather than a full card
+    expect(screen.getByRole('button', { name: 'remove Skins' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /More side bets/ })).toBeInTheDocument()
+  })
+
   it('tees off a side-bets-only round, storing no role for it', async () => {
     await toStepTwo()
     await pickGame('Skins', 'side')

@@ -3,7 +3,6 @@ import { Link, useNavigate } from 'react-router'
 import { useLiveQuery } from 'dexie-react-hooks'
 import '../../engine/games'
 import { getEngine, roleOf, type GameEngine } from '../../engine/catalog'
-import { partitionByRole } from '../../lib/gameRoles'
 import { courseHandicapForTee } from '../../engine/core/handicap'
 import { applyTee, doubleNine } from '../../engine/core/tees'
 import type { Course, GameConfig, RoundHoles, TeeSet } from '../../engine/core/types'
@@ -171,7 +170,11 @@ export function SetupScreen() {
   // `validateSetup` can read the round being built exactly as they read a
   // played one, with no adapter and no synthetic ids.
   const draftGames: GameConfig[] = games
-  const { main: mainDrafts, side: sideDrafts } = partitionByRole(draftGames)
+  // Laid out by the section the USER picked into, not by `roleOf`. The two
+  // agree wherever the difference matters (see `reconcileRoles`); where they
+  // don't, the screen owes the user the answer they gave it.
+  const mainDrafts = games.filter((g) => g.section === 'main')
+  const sideDrafts = games.filter((g) => g.section === 'side')
 
   const problems =
     step === 2
@@ -209,37 +212,57 @@ export function SetupScreen() {
    * a main game beside a Nassau: the user is saying both are main events, and
    * `roleOf` would otherwise demote it.
    */
-  const roleToStore = (
-    draft: GameDraft,
-    section: 'main' | 'side',
-    all: readonly GameConfig[],
-  ): 'main' | 'side' | undefined => {
-    // In a one-game round the distinction has NO reader — `primaryGame` returns
-    // that game whichever it is, the bar never collapses a lone side bet and the
-    // card never groups one. Storing a value nothing consults is the frozen
-    // guess CLAUDE.md keeps out of the archive.
-    if (all.length < 2) return undefined
-    return roleOf(draft, all) === section ? undefined : section
+  /**
+   * Recompute every draft's stored `role` — run on every add and remove,
+   * because an "either" game's role is a fact about the WHOLE round and the
+   * round just changed. Stamping only the game being added left an earlier
+   * Skins displayed as a main game while the round it teed off derived it as a
+   * side bet.
+   *
+   * Two rules, both about whether anything READS the answer:
+   *
+   * - Under two games, nothing does. `primaryGame` returns the only game
+   *   whichever role it holds, the bar never collapses a lone side bet, and the
+   *   share card never groups one. A stamp there is a value with no consumer —
+   *   the frozen guess CLAUDE.md keeps out of a synced archive.
+   * - Otherwise, store it only where `roleOf` would answer differently from the
+   *   section the user chose. `role` is an OVERRIDE, and an override that
+   *   agrees with the rule is just noise a better rule can never re-read.
+   *
+   * Derived against the drafts with their roles STRIPPED, or this is a fixpoint
+   * of itself: `roleOf` returns an explicit `role` before consulting anything,
+   * so a stamped game would always look like it agreed.
+   */
+  const reconcileRoles = (drafts: GameDraft[]): GameDraft[] => {
+    const bare = drafts.map((d) => ({ ...d, role: undefined }))
+    return drafts.map((draft, i) => ({
+      ...draft,
+      role:
+        bare.length < 2 || roleOf(bare[i]!, bare) === draft.section ? undefined : draft.section,
+    }))
   }
 
   const addGame = (engine: GameEngine, section: 'main' | 'side') => {
-    const draft: GameDraft = {
-      gameId: newId(),
-      type: engine.type,
-      handicap: engine.defaultHandicap(),
-      config: engine.defaultConfig(draftRoundPlayers),
-    }
-    // Derived against the list the draft is JOINING, itself included — an
-    // "either" game's role is a fact about the whole round.
-    const next = [...games, draft]
-    setGames(next.map((g) => (g.gameId === draft.gameId ? { ...g, role: roleToStore(draft, section, next) } : g)))
+    setGames(
+      reconcileRoles([
+        ...games,
+        {
+          gameId: newId(),
+          type: engine.type,
+          section,
+          handicap: engine.defaultHandicap(),
+          config: engine.defaultConfig(draftRoundPlayers),
+        },
+      ]),
+    )
     setPicker(undefined)
   }
 
   const updateGame = (next: GameDraft) =>
     setGames(games.map((g) => (g.gameId === next.gameId ? next : g)))
 
-  const removeGame = (gameId: string) => setGames(games.filter((g) => g.gameId !== gameId))
+  const removeGame = (gameId: string) =>
+    setGames(reconcileRoles(games.filter((g) => g.gameId !== gameId)))
 
   const teeOff = async () => {
     // guard on the RESOLVED tee, not just the id: an unresolvable id would fall

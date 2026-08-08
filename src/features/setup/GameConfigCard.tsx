@@ -19,8 +19,19 @@ export interface GameDraft {
   handicap: HandicapSettings
   config: unknown
   /**
-   * Written ONLY when the user's chosen section contradicts what `roleOf`
-   * derives. See SetupScreen's `roleToStore`.
+   * Which section the user picked this game into. SETUP-ONLY — it never
+   * reaches the round.
+   *
+   * It is what step 2 lays the game out by, so tapping "+ Add a side bet" can
+   * never drop the game under MAIN GAME(S). Deriving the layout from `roleOf`
+   * instead did exactly that for a lone Skins, which is true (one game IS the
+   * round's main event) and still reads as the screen ignoring you.
+   */
+  section: 'main' | 'side'
+  /**
+   * Written ONLY when `section` contradicts what `roleOf` would derive, and
+   * only in a round where something reads the difference. See
+   * SetupScreen's `reconcileRoles`.
    */
   role?: 'main' | 'side'
 }
