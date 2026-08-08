@@ -267,7 +267,13 @@ export function matchWonLabel(match: MatchState, sides: MatchSides): string | nu
  * this keeps an uneven 2v1 zero-sum and mirrors Wolf's lone-wolf math. With
  * ≤4 players the only uneven split is a lone side, so it stays integer.
  */
-export function sideStake(stakeCents: number, sides: MatchSides, side: MatchSide): number {
+export function sideStake(
+  stakeCents: number,
+  // only the rosters — Wolf settles its holes with this rule and has no side
+  // names to print (MatchSides satisfies it structurally, so Nassau is unchanged)
+  sides: { a: readonly Uuid[]; b: readonly Uuid[] },
+  side: MatchSide,
+): number {
   const self = sides[side]
   const other = sides[side === 'a' ? 'b' : 'a']
   return self.length === 1 ? stakeCents * other.length : stakeCents

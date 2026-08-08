@@ -3,14 +3,14 @@ import type { GameEngine, GameDerivation, InputRequest } from '../../catalog'
 import type { RoundContext } from '../../core/context'
 import type { GameScopedEvent } from '../../core/events'
 import { emptySettlement, type Settlement } from '../../core/money'
-import { pointsToMoney } from '../../core/points'
+import { sideStake } from '../../core/match'
 import { standingsFromSettlement } from '../../core/standings'
 import { latestHoleSummary, summaryString } from '../../core/summary'
 import { isPlayerPermutation } from '../../core/teams'
 import type { GameConfig, HandicapSettings, RoundPlayer, Uuid } from '../../core/types'
 
 export const wolfConfigSchema = z.object({
-  /** cents per point; money settles on pairwise point differences */
+  /** the hole's value to each player; a point IS a stake (see HOLE_UNITS) */
   pointCents: z.number().int().positive(),
   /** wolf order: rotation[0] is the wolf on the first hole played */
   rotation: z.array(z.string()),
@@ -19,19 +19,28 @@ export const wolfConfigSchema = z.object({
 export type WolfConfig = z.infer<typeof wolfConfigSchema>
 
 /**
- * MVP point table (documented in docs/games-catalog.md — tables vary by group):
- * wolf+partner win 2 each · non-wolf pair win 3 each · lone wolf win 4 ·
- * lone loss 1 to each opponent · blind wolf win 6 · blind loss 2 to each opponent.
+ * WHAT ONE OPPONENT IS WORTH on a hole. Every player has this much on the line;
+ * going lone doubles the hole and blind triples it, for everyone. That is the
+ * risk premium, and the only thing these three numbers say.
+ *
+ * A POINT HERE IS A STAKE, NOT A SCORE. The map this engine records per hole is
+ * the signed SWING — what each player won or lost — so money is simply
+ * `swing × pointCents` and "$1 a point" means a $1 hole. It used to be a
+ * traditional non-negative Wolf score settled on the gaps between players, and
+ * the two conventions disagreed: a lone WIN was awarded to one player (and so
+ * tripled by the gap formula) while a lone LOSS was spread across three (and so
+ * wasn't). Lone paid +$12/−$3 against partnering's +$4/−$6 — triple the upside
+ * and half the downside, which made going lone the answer roughly always and
+ * collapsed the decision the game is built on (MAI-83).
+ *
  * Ties halve the hole. After the rotation runs out (holes 17–18, or the 9th
- * hole of a nine), the player with the fewest points is the wolf.
+ * hole of a nine), the player with the fewest points is the wolf — still the
+ * trailing player now that the totals can go negative.
  */
-const POINTS = {
-  partnerWin: 2,
-  opponentsWin: 3,
-  loneWin: 4,
-  loneLossEach: 1,
-  blindWin: 6,
-  blindLossEach: 2,
+const HOLE_UNITS = {
+  partnered: 1,
+  lone: 2,
+  blind: 3,
 }
 
 export type WolfPick =
@@ -43,7 +52,7 @@ export interface WolfHoleResult {
   hole: number
   wolfId: Uuid
   pick: WolfPick | null
-  /** points awarded this hole, by player */
+  /** the signed SWING this hole, by player — sums to zero (see HOLE_UNITS) */
   points: Map<Uuid, number> | null
   outcome: 'wolfWin' | 'packWin' | 'halved' | 'pending'
 }
@@ -117,48 +126,59 @@ function derive(
 
     const points = new Map<Uuid, number>(playerIds.map((id) => [id, 0]))
     let outcome: WolfHoleResult['outcome']
-    if (wolfBest < packBest) {
-      outcome = 'wolfWin'
-      if (pick.kind === 'partner') {
-        for (const id of wolfSide) points.set(id, POINTS.partnerWin)
-      } else {
-        points.set(wolfId, pick.kind === 'blind' ? POINTS.blindWin : POINTS.loneWin)
-      }
-    } else if (packBest < wolfBest) {
-      outcome = 'packWin'
-      if (pick.kind === 'partner') {
-        for (const id of packSide) points.set(id, POINTS.opponentsWin)
-      } else {
-        const each = pick.kind === 'blind' ? POINTS.blindLossEach : POINTS.loneLossEach
-        for (const id of packSide) points.set(id, each)
-      }
-    } else {
+    if (wolfBest === packBest) {
       outcome = 'halved'
+    } else {
+      outcome = wolfBest < packBest ? 'wolfWin' : 'packWin'
+      const units =
+        pick.kind === 'blind'
+          ? HOLE_UNITS.blind
+          : pick.kind === 'lone'
+            ? HOLE_UNITS.lone
+            : HOLE_UNITS.partnered
+      // `sideStake` is the rule, not a table: an OUTNUMBERED player settles the
+      // hole against EACH opponent, evenly-matched sides settle it once. That
+      // is the same primitive Nassau uses for its 2-v-1, and taking it from
+      // there is what keeps this zero-sum BY CONSTRUCTION for any split —
+      // hardcoding "+6/−2" would balance only at exactly four players, and the
+      // catalog already anticipates 3- and 5-player Wolf.
+      const sides = { a: wolfSide, b: packSide }
+      const sign = outcome === 'wolfWin' ? 1 : -1
+      const wolfShare = sideStake(units, sides, 'a')
+      const packShare = sideStake(units, sides, 'b')
+      for (const id of wolfSide) points.set(id, sign * wolfShare)
+      for (const id of packSide) points.set(id, -sign * packShare)
     }
 
     for (const [id, p] of points) totals.set(id, totals.get(id)! + p)
     holeResults.push({ hole, wolfId, pick, points, outcome })
   })
 
-  // Pairwise settlement: money_i = pointCents × (n·points_i − Σpoints). Zero-sum
-  // by construction — the shared formula in core/points.ts, which Stableford,
-  // Quota and Nines settle by too.
+  // A point IS a stake here, so money is the swing at face value — no gap
+  // formula between the points and the dollars, which is what let the two drift
+  // apart before (MAI-83). Zero-sum follows from each hole's swing summing to
+  // zero, which `sideStake` guarantees above and `wolf.test.ts` pins directly.
   const settlement: Settlement = emptySettlement(playerIds)
-  settlement.perPlayerCents = pointsToMoney(playerIds, totals, pointCents)
+  for (const id of playerIds) {
+    settlement.perPlayerCents[id] = pointCents * (totals.get(id) ?? 0)
+  }
+  // Totals are signed now, so they are written signed: "+6 pts" / "−12 pts".
+  // An unsigned "-12 pts" beside "-$12" reads like the minus belongs to the
+  // money alone.
+  const ptsLabel = (id: Uuid) => {
+    const t = totals.get(id) ?? 0
+    return `${t > 0 ? '+' : ''}${t} pt${Math.abs(t) === 1 ? '' : 's'}`
+  }
   // Itemised per PLAYER rather than per transaction, which is why a player
-  // sitting on the average still gets a $0 row — the known MAI-75 violation of
+  // sitting level still gets a $0 row — the known MAI-75 violation of
   // "settlement.lines is money that MOVED", asserted by its own self-retiring
   // test in replay.test.ts rather than left as a silent exception.
   settlement.lines = playerIds.map((id) => ({
-    label: `${nameOf.get(id)} — ${totals.get(id)} pts`,
+    label: `${nameOf.get(id)} — ${ptsLabel(id)}`,
     perPlayerCents: { [id]: settlement.perPlayerCents[id]! },
   }))
 
-  const standings = standingsFromSettlement(
-    players,
-    settlement,
-    (p) => `${totals.get(p.playerId)} pts`,
-  )
+  const standings = standingsFromSettlement(players, settlement, (p) => ptsLabel(p.playerId))
 
   // Bar recaps the latest decided hole — "H4 · Ben lone +4" / "Ben & Rob +2".
   const pickTag = (r: WolfHoleResult): string =>
@@ -262,17 +282,18 @@ export const wolfEngine: GameEngine<WolfConfig> = {
         "Missing a score? A side's best ball counts whoever posted.",
       ],
       scoring: [
-        'Wolf & partner win: 2 points each. The other pair win: 3 points each — beating the side that had the pick pays better.',
-        'Lone Wolf wins: 4 points. Lone Wolf loses: each of the other three takes 1.',
-        'Blind Wolf wins: 6 points. Blind Wolf loses: each of the others takes 2.',
-        'Money settles on point differences at the per-point stake — the gap between you and each player changes hands.',
+        'Every hole is worth the stake to each player: win your side of it and you collect, lose it and you pay. A point is a stake, so $1 a point means a $1 hole.',
+        'Going Lone Wolf DOUBLES the hole and Blind Wolf TRIPLES it — for everyone, not just the wolf.',
+        'The wolf alone plays that stake against EACH of the other three. At $1 a hole: a lone win pays the wolf $6 and costs each opponent $2, and a lone loss is the exact mirror. Blind is $9 and $3.',
+        'With a partner it is two against two, so a won hole is worth one stake to each of the four players.',
+        'A tie halves the hole — nobody scores. Points can go negative, and the lowest total takes the wolf when the rotation runs out.',
       ],
       terms: [
         { term: 'Wolf', def: "The hole's captain: tees last, watches the drives, makes the pick." },
-        { term: 'Lone Wolf', def: 'The Wolf declining all partners to play 1 v 3 at double reward.' },
+        { term: 'Lone Wolf', def: 'The Wolf declining all partners to play 1 v 3 for double the hole — against each opponent, so a win pays six stakes and a loss costs six.' },
         {
           term: 'Blind Wolf',
-          def: 'Going lone before anyone has hit — triple reward, maximum swagger.',
+          def: 'Going lone before anyone has hit — triple the hole, maximum swagger. Nine stakes either way in a foursome.',
         },
         { term: 'The pack', def: 'Everyone not on the Wolf side of a hole.' },
         { term: 'Best ball', def: "A side's lowest net score — the only one that counts." },

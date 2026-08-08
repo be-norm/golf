@@ -8,6 +8,14 @@ import type { Uuid } from './types'
  * Aces & Deuces, Defender. `pointsToMoney` settles any game that keeps a
  * running point total, which is those plus Stableford and Quota (they award
  * points off a table, with no ranking step) (MAI-49).
+ *
+ * `pointsToMoney` currently has NO production caller. Wolf was the one, and it
+ * moved off: its "points" turned out to be per-hole stakes rather than a score
+ * to be differenced, so settling them through a gap formula multiplied them
+ * (MAI-83). The helper is right for the games named above — they genuinely
+ * accumulate non-negative scores and settle on the spread — and is kept, tested,
+ * waiting for the first of them. Before reaching for it, check that the game's
+ * points are a SCORE and not already the money.
  */
 
 /**
