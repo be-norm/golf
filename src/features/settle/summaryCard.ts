@@ -187,7 +187,7 @@ export function buildSummaryCard(
         gameId: g.gameId,
         name: gameLabel(g, round.games),
         allowance:
-          g.handicap.mode === 'net' && g.handicap.allowancePct !== 100
+          g.handicap?.mode === 'net' && g.handicap.allowancePct !== 100
             ? `${g.handicap.allowancePct}%`
             : undefined,
         kind: ledger ? ('ledger' as const) : ('lines' as const),

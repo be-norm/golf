@@ -86,11 +86,13 @@ export function SideBetRow({ engine, label, players, draft, onChange, onRemove, 
               field={field}
               value={config[field.key]}
               players={players}
+              gameName={label}
               onChange={(v) => setConfigValue(field.key, v)}
             />
           ))}
           <HandicapControls
             handicap={draft.handicap}
+            gameName={label}
             onChange={(handicap) => onChange({ ...draft, handicap })}
           />
           <button

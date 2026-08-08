@@ -22,11 +22,19 @@ export function ConfigField({
   field,
   value,
   players,
+  gameName,
   onChange,
 }: {
   field: ConfigFieldSpec
   value: unknown
   players: FieldPlayer[]
+  /**
+   * `gameLabel` for the game this field belongs to. Two instances of one game
+   * can sit in the same section — that is what this screen was rebuilt for —
+   * and without it a screen reader hears two controls both called "increase
+   * Skin value" with nothing to tell them apart.
+   */
+  gameName?: string
   onChange: (value: unknown) => void
 }) {
   switch (field.kind) {
@@ -48,7 +56,7 @@ export function ConfigField({
             min={min}
             max={max}
             step={field.step ?? 25}
-            label={field.label}
+            label={gameName ? `${field.label} — ${gameName}` : field.label}
             onChange={(v) => onChange(v)}
             format={(v) => formatCents(v)}
           />

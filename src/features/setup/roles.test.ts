@@ -81,6 +81,34 @@ describe('reconcileRoles', () => {
     expect(out.map((g) => g.role)).toEqual([undefined, undefined])
   })
 
+  /**
+   * The repair stamps only what still disagrees. A blanket "if it doesn't hold,
+   * store everything" fallback got the same round DERIVING correctly while
+   * freezing a third override nothing needed — and every stored role is
+   * permanent in an archive that syncs.
+   */
+  it('stamps only what still disagrees, not everything', () => {
+    const out = reconcileRoles([
+      draft(0, 'skins', 'main'),
+      draft(1, 'skins', 'main'),
+      draft(2, 'skins', 'side'),
+    ])
+    expect(sectionsHold(out)).toBe(true)
+    expect(out.map((g) => g.role)).toEqual(['main', 'main', undefined])
+  })
+
+  /** Whatever it stores, dropping any one of them must break the round. */
+  it('stores no override it could have left out', () => {
+    for (const drafts of [...arrangements(2), ...arrangements(3)]) {
+      const out = reconcileRoles(drafts)
+      out.forEach((game, i) => {
+        if (game.role === undefined) return
+        const without = out.map((g, j) => (i === j ? { ...g, role: undefined } : g))
+        expect(sectionsHold(without), `${game.type}:${game.section} @${i}`).toBe(false)
+      })
+    }
+  })
+
   it('stores one override for a skins promoted alongside a nassau', () => {
     const out = reconcileRoles([draft(0, 'nassau', 'main'), draft(1, 'skins', 'main')])
     expect(sectionsHold(out)).toBe(true)

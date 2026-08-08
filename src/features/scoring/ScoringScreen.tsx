@@ -379,7 +379,7 @@ export function ScoringScreen() {
                 <div className="mb-2.5 flex items-baseline justify-between">
                   <h3 className="font-display flex items-baseline gap-2 text-xs uppercase text-felt-300">
                     {label}
-                    {g.handicap.mode === 'net' && g.handicap.allowancePct !== 100 && (
+                    {g.handicap?.mode === 'net' && g.handicap.allowancePct !== 100 && (
                       <span className="text-[10px] text-stone-400">{g.handicap.allowancePct}%</span>
                     )}
                   </h3>

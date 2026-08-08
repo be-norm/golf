@@ -287,7 +287,7 @@ describe('SetupScreen — choosing games', () => {
 
     // make them differ, or they are a duplicate and tee-off is blocked. Only
     // the main card's stake is mounted — the side row is collapsed.
-    await userEvent.click(screen.getByRole('button', { name: 'increase Skin value' }))
+    await userEvent.click(screen.getByRole('button', { name: /^increase Skin value/ }))
 
     await teeOff()
     await waitFor(async () => expect(await roundFor('penmar')).toBeDefined())
@@ -317,7 +317,7 @@ describe('SetupScreen — choosing games', () => {
     // a side-bet row is collapsed until tapped, so open one to reach its stake
     // and make the two differ (identical settings block tee-off)
     await userEvent.click(screen.getAllByRole('button', { expanded: false })[0]!)
-    await userEvent.click(screen.getByRole('button', { name: 'increase Skin value' }))
+    await userEvent.click(screen.getByRole('button', { name: /^increase Skin value/ }))
 
     await teeOff()
     await waitFor(async () => expect(await roundFor('penmar')).toBeDefined())

@@ -23,10 +23,22 @@ import type { GameDraft } from './GameConfigCard'
  * underlines and the share card's stroke note.
  *
  * A naive fixpoint doesn't work either: those same two drafts oscillate, each
- * pass handing the stamp to the other. So: decide in order against the roles
- * decided so far, then CHECK the result actually reproduces every section. If
- * it doesn't, store all of them — trivially consistent, since an explicit role
- * short-circuits `roleOf`, and still rare enough to be worth the attempt.
+ * pass handing the stamp to the other. So it runs in three stages:
+ *
+ * 1. decide in order, against the roles decided so far;
+ * 2. REPAIR — stamp whatever still disagrees, and only that. Adds only, so it
+ *    cannot oscillate; worst case every game is stamped, which is trivially
+ *    consistent because an explicit role short-circuits `roleOf`.
+ * 3. PRUNE — drop any override the round turns out not to need, re-checking the
+ *    invariant on each removal.
+ *
+ * Stage 3 earns its keep because stage 1 decides in order and can stamp a game
+ * before a LATER game's stamp makes it unnecessary: "skins into Main, nassau
+ * into Side" stamps both, though demoting the nassau is enough on its own. It
+ * repeats, since removing one override can free another, and every removal is
+ * validated — so the result is consistent AND holds no override that could
+ * have been left out. That matters because a stored role is permanent in an
+ * archive that syncs.
  *
  * Lives here rather than inside the component because the invariant it has to
  * hold (`sectionsHold`, below) is worth proving exhaustively rather than
@@ -42,7 +54,31 @@ export function reconcileRoles(drafts: readonly GameDraft[]): GameDraft[] {
       role: roleOf(draft, out) === draft.section ? undefined : draft.section,
     }
   })
-  return sectionsHold(out) ? out : drafts.map((d) => ({ ...d, role: d.section }))
+  for (let pass = 0; pass < out.length; pass++) {
+    let stamped = false
+    out.forEach((g, i) => {
+      // `role === undefined` keeps this monotonic: a stamp is never revisited,
+      // so the loop always shrinks the set of games left to convince.
+      if (g.role === undefined && roleOf(g, out) !== g.section) {
+        out[i] = { ...g, role: g.section }
+        stamped = true
+      }
+    })
+    if (!stamped) break
+  }
+  for (let pass = 0; pass < out.length; pass++) {
+    let dropped = false
+    out.forEach((g, i) => {
+      if (g.role === undefined) return
+      const without = out.map((x, j) => (i === j ? { ...x, role: undefined } : x))
+      if (sectionsHold(without)) {
+        out[i] = without[i]!
+        dropped = true
+      }
+    })
+    if (!dropped) break
+  }
+  return out
 }
 
 /**

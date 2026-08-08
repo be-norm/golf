@@ -139,7 +139,7 @@ export function ScorecardScreen() {
       {back.length > 0 && half(back)}
       <p className="text-center text-sm text-stone-500">
         Tap a cell to correct that hole
-        {activeGame && activeGame.handicap.mode === 'net'
+        {activeGame?.handicap?.mode === 'net'
           ? ' · green underline = stroke hole'
           : ''}
       </p>

@@ -11,9 +11,12 @@ import { Stepper } from '../../components/Stepper'
  */
 export function HandicapControls({
   handicap,
+  gameName,
   onChange,
 }: {
   handicap: HandicapSettings
+  /** `gameLabel` for this game — see ConfigField's `gameName`. */
+  gameName?: string
   onChange: (handicap: HandicapSettings) => void
 }) {
   return (
@@ -54,7 +57,7 @@ export function HandicapControls({
             min={50}
             max={100}
             step={5}
-            label="allowance"
+            label={gameName ? `allowance — ${gameName}` : 'allowance'}
             onChange={(v) => onChange({ ...handicap, allowancePct: v })}
             format={(v) => `${v}%`}
           />
