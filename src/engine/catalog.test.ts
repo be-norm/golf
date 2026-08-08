@@ -291,6 +291,11 @@ describe('taxonomy never reaches the money', () => {
         detailLines: d.detailLines,
         notes: d.notes,
         holeSummaries: [1, 2, 3, 4, 5, 6, 7, 8, 9].map((h) => d.holeSummary(h)),
+        // the one channel that CREATES money: `GameAction.data` is appended
+        // verbatim as a game event, so an engine offering a press under one
+        // role and withholding it under another moves different money the
+        // moment it is taken — while every field above stays identical
+        actions: d.availableActions?.(),
       })
       const asMain = scored('main')
       expect(money(scored('side'))).toEqual(money(asMain))

@@ -53,7 +53,13 @@ export interface MakeRoundOpts {
   course?: Course
   players: RoundPlayer[]
   holes?: RoundHoles
-  games: Array<Pick<GameConfig, 'type' | 'config'> & { gameId?: Uuid; handicap?: HandicapSettings }>
+  games: Array<
+    Pick<GameConfig, 'type' | 'config'> & {
+      gameId?: Uuid
+      handicap?: HandicapSettings
+      role?: GameConfig['role']
+    }
+  >
 }
 
 export function makeRound(opts: MakeRoundOpts): Round {
@@ -71,6 +77,10 @@ export function makeRound(opts: MakeRoundOpts): Round {
     holes: opts.holes ?? 'full18',
     players: opts.players,
     games: opts.games.map((g, i) => ({
+      // spread FIRST so a field added to GameConfig (role, and whatever comes
+      // next) reaches the round instead of being silently dropped by a builder
+      // that enumerates fields — a test asserting on it would just see undefined
+      ...g,
       gameId: g.gameId ?? `game-${i + 1}`,
       type: g.type,
       handicap: g.handicap ?? { mode: 'gross', allowancePct: 100, reference: 'absolute' },

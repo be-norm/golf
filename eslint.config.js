@@ -84,11 +84,22 @@ export default tseslint.config(
             {
               // by PATTERN, not a single '../../catalog' literal: an engine one
               // directory deeper would spell it '../../../catalog' and escape
-              group: ['**/catalog'],
+              // `ledger` re-exports deriveRound's whole power (buildHoleLedger
+              // derives every game in the round) and `label` calls getEngine on
+              // the caller's behalf, so naming only the catalog left two ways
+              // to the same place.
+              group: ['**/catalog', '**/ledger', '**/label'],
               // every export that hands an engine another engine's meta or
               // derivation: `roleOf` reads meta.category itself, and
               // `deriveRound` re-derives every other game in the round
-              importNames: ['getEngine', 'listEngines', 'roleOf', 'deriveRound'],
+              importNames: [
+                'getEngine',
+                'listEngines',
+                'roleOf',
+                'deriveRound',
+                'buildHoleLedger',
+                'gameLabel',
+              ],
               message:
                 'an engine must not read the registry — taxonomy (meta.category/family/shapes) is presentation and must never reach a settlement (CLAUDE.md invariant #7)',
             },
@@ -117,7 +128,7 @@ export default tseslint.config(
               //
               // Any module inside another game's folder counts, not just one
               // literally named `engine`.
-              regex: '^\\.\\./(?!\\.\\./)([^/]+/|index$)|^\\.\\./\\.\\./(?!core/|catalog$)([^/]+/|index$)',
+              regex: '^\\.\\./(?!\\.\\./)([^/]+/|index$)|^\\.\\./\\.\\./(?!\\.\\./)(?!core/|catalog$)([^/]+/|index$)',
               message:
                 'engines never read each other — a game is a pure function of (config, its own events, RoundContext); overlays contribute to RoundContext instead (CLAUDE.md invariant #7)',
             },

@@ -59,20 +59,29 @@ const importSchema = z.object({
           // far more than it protects. An unusable value degrades to absent,
           // and `roleOf` derives it.
           role: z.enum(['main', 'side']).optional().catch(undefined),
-          // REPAIRED, not merely tolerated. Everything else on a game stays
-          // loose, but these two are dereferenced on every render (gameLabel,
-          // and the engine's own derive), so a file missing them parses
-          // cleanly, is written to Dexie, and then white-screens the scoring
-          // card. Same "degrade, don't refuse" policy as `role`: a restore is
-          // worth more than the fields it is missing.
+          // Repaired, never REFUSED — and never invented. `handicap` steers
+          // stroke allocation, so a junk value is worth replacing with the
+          // neutral one; the allowance is bounded because an unbounded number
+          // reaches `applyAllowance` and produces negative playing handicaps
+          // for the whole round, silently wrong rather than absent.
           handicap: z
             .looseObject({
               mode: z.enum(['gross', 'net']).catch('gross'),
-              allowancePct: z.number().catch(100),
+              allowancePct: z.number().min(0).max(200).catch(100),
               reference: z.enum(['absolute', 'offLow']).catch('absolute'),
             })
-            .catch({ mode: 'gross', allowancePct: 100, reference: 'absolute' }),
-          config: z.unknown().transform((v) => (typeof v === 'object' && v !== null ? v : {})),
+            .optional()
+            .catch(undefined)
+            .transform((h) => h ?? { mode: 'gross' as const, allowancePct: 100, reference: 'absolute' as const }),
+          // `config` is deliberately NOT coerced. Defaulting it to `{}` looks
+          // like a repair and is worse than the crash it replaces: skins then
+          // destructures `stakeCents` to undefined and settles NaN, which is
+          // zero-sum-false money nobody can see is wrong. `deriveRound` makes a
+          // game whose config its engine rejects inert instead. Left optional
+          // so a file omitting it still imports — coercing it here also made
+          // the whole round un-restorable, since a missing key is `undefined`
+          // and a bare transform is non-optional in zod.
+          config: z.unknown().optional(),
         }),
       )
       // gameId is the key `deriveRound` files derivations under, so a duplicate

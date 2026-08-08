@@ -92,12 +92,20 @@ export function buildRoundContext(round: Round, effective: readonly RoundEvent[]
   const allocations = new Map<Uuid, Map<Uuid, Map<number, number>>>()
   for (const game of round.games) {
     const perPlayer = new Map<Uuid, Map<number, number>>()
-    if (game.handicap.mode === 'net') {
+    // Read DEFENSIVELY, and here rather than at each screen. A round restored
+    // from an export can carry a game with no `handicap` at all (importRound
+    // validates a game loosely), and this is the first thing every surface
+    // touches — `useRound` → `deriveRound` → here — so an unguarded deref is a
+    // white screen on a round the user can still see in their list. Absent
+    // means gross, which allocates no strokes: the honest reading of "we don't
+    // know this game's handicap policy".
+    const handicap = game.handicap
+    if (handicap?.mode === 'net') {
       const effectiveCH = round.players.map((p) => {
-        const allowed = applyAllowance(p.courseHandicap, game.handicap.allowancePct)
+        const allowed = applyAllowance(p.courseHandicap, handicap.allowancePct)
         return nineOfEighteen ? Math.round(allowed / 2) : allowed
       })
-      const low = game.handicap.reference === 'offLow' ? Math.min(...effectiveCH) : 0
+      const low = handicap.reference === 'offLow' ? Math.min(...effectiveCH) : 0
       const subsetSIs = holesPlayed.map((h) => strokeIndex(h))
       round.players.forEach((p, i) => {
         const playing = effectiveCH[i]! - low

@@ -191,8 +191,16 @@ export function roleOf(game: GameConfig, allGames: readonly GameConfig[]): 'main
     g.role === 'main' || g.role === 'side'
       ? g.role === 'main'
       : categoryOf(g) === 'main'
-  const hasMainGame = allGames.some((g) => g.gameId !== game.gameId && claimsMain(g))
-  return hasMainGame ? 'side' : 'main'
+  if (allGames.some((g) => g.gameId !== game.gameId && claimsMain(g))) return 'side'
+
+  // Nobody claims it. Two "either" games — gross skins and net skins, the very
+  // round `gameLabel` exists for — would otherwise BOTH read 'main', which is
+  // the two-main-events bug in a different disguise. The first one in the round
+  // takes the main event; a group reads their own card top-down.
+  const firstUnclaimed = allGames.find(
+    (g) => !(g.role === 'main' || g.role === 'side') && categoryOf(g) === 'either',
+  )
+  return firstUnclaimed === undefined || firstUnclaimed.gameId === game.gameId ? 'main' : 'side'
 }
 
 /**
@@ -316,6 +324,13 @@ export function deriveRound(
   for (const game of round.games) {
     const engine = registry.get(game.type)
     if (!engine) continue
+    // Same rule as the event schemas below, applied one level up: a config the
+    // engine itself rejects makes the game INERT rather than letting it settle.
+    // Skins handed `{}` destructures `stakeCents` to undefined and pays
+    // `skins * undefined` — NaN in every settlement line, NaN through
+    // minimalTransfers, and zero-sum quietly false. A game that cannot be
+    // scored must move no money at all.
+    if (!engine.configSchema.safeParse(game.config).success) continue
     // Enforce each engine's event schemas here, once: an unknown kind or a
     // malformed payload (corrupt import, stale event) is dropped rather than
     // blind-cast inside the engine — reducers stay total, bad data is inert.
