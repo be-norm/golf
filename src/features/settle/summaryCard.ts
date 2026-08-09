@@ -122,32 +122,65 @@ export interface MoneyRow {
 export const NETS_TO_NOTHING = 'nets to nothing'
 
 /**
- * Each player's name and amount as ONE unbreakable token.
+ * A player and their money as ONE unbreakable token: `name NBSP amount`.
  *
- * Exported because fitting them is a job for whoever can measure text: the
- * painter ellipsizes any single pair too wide for its column, which it can only
- * do per pair. Given as tokens rather than a joined string so it never has to
- * take one apart again.
+ * THE PAIR is the unbreakable unit, so every space inside it is non-breaking —
+ * not just the join. Half the players in a real round are entered as "Ben
+ * Norman", and joining only name-to-amount left the wrap free to break inside
+ * the NAME instead: "Ben" alone on one line, "Norman +$10" on the next. Same
+ * stranded-token failure, one word earlier.
+ *
+ * Escaped rather than typed: a load-bearing invisible character is one a later
+ * edit silently replaces with a plain space.
  */
-export function moneyTokens(money: readonly MoneyRow[]): string[] {
-  // THE PAIR is the unbreakable unit, so every space inside it becomes a
-  // non-breaking one — not just the join. Half the players in a real round are
-  // entered as "Ben Norman", and joining only name-to-amount left the wrap free
-  // to break inside the NAME instead: "Ben" alone on one line, "Norman +$10" on
-  // the next. Same stranded-token failure, one word earlier.
-  //
-  // Escaped rather than typed: a load-bearing invisible character is one a
-  // later edit silently replaces with a plain space.
-  const NBSP = '\u00A0'
-  return money.map((m) => `${m.name} ${formatCentsSigned(m.cents)}`.replace(/ /g, NBSP))
+const NBSP = '\u00A0'
+
+function pairOf(m: MoneyRow): { name: string; amount: string } {
+  return { name: m.name.replace(/ /g, NBSP), amount: NBSP + formatCentsSigned(m.cents) }
 }
 
-/** The money tier as one line — the pairs, separated so a wrap breaks between them. */
-export function moneyLine(money: readonly MoneyRow[]): string {
+/**
+ * The money tier as ONE LINE, fitted to `max` by whoever can measure it.
+ *
+ * Measure-injected for the same reason `wrapText` is: the fitting has to
+ * happen where text can be measured, but it must not live in the painter,
+ * where jsdom cannot reach it. The painter passes its canvas measurer; the
+ * tests pass one character = one unit.
+ *
+ * IT SHORTENS THE NAME AND NEVER THE AMOUNT. Making the pair unbreakable means
+ * a pair wider than the column has no break left, so `wrapText` would chop the
+ * token itself — mid-number, putting "+$1" on one row and "0" on the next.
+ * Truncating the whole token instead is no better: it eats from the right, so
+ * the AMOUNT goes first and a player renders with no money beside their
+ * neighbours who have theirs, which is the exact absence this whole tier
+ * exists to remove. The money is the point of the line; the name is what
+ * yields, down to nothing if it has to.
+ *
+ * This is also the single owner of the separator and of the empty case, so the
+ * two surfaces cannot drift: the screen renders elements from `money` plus
+ * `NETS_TO_NOTHING`, and everything else goes through here.
+ */
+export function moneyLine(
+  measure: (s: string) => number,
+  money: readonly MoneyRow[],
+  max = Infinity,
+): string {
   if (money.length === 0) return NETS_TO_NOTHING
-  return moneyTokens(money).join(' \u00B7 ')
+  return money
+    .map((m) => {
+      const { name, amount } = pairOf(m)
+      if (measure(name + amount) <= max) return name + amount
+      // Measured WITH the marker each step rather than against a precomputed
+      // budget — proportional fonts are not additive, and this is the same
+      // rule `ellipsize` follows in the painter.
+      let cut = name
+      while (cut.length > 0 && measure(`${cut}…${amount}`) > max) cut = cut.slice(0, -1)
+      // Nothing of the name survives: show the money bare rather than drop the
+      // player, which is what truncating the whole token used to do.
+      return cut.length > 0 ? `${cut}…${amount}` : amount.slice(NBSP.length)
+    })
+    .join(' \u00B7 ')
 }
-
 
 /**
  * Per-player totals for one game, richest first. Zero entries are dropped: they

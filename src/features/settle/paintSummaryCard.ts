@@ -1,5 +1,5 @@
 import { formatCents, formatCentsSigned } from '../../engine/core/money'
-import { moneyTokens, NETS_TO_NOTHING } from './summaryCard'
+import { moneyLine } from './summaryCard'
 import type { ScorecardHalf, SummaryCard } from './summaryCard'
 
 /**
@@ -305,25 +305,18 @@ function gameBlock(g: Ctx, game: SummaryCard['games'][number]): Block {
     .map((n) => wrap(g, n, INNER - 28, { size: 17 }))
     .filter((rows) => rows.length > 0)
   // What the game MOVED, per player — the tier that lets a reader take FINAL
-  // STANDINGS apart (MAI-88). Always present: a game that moved nothing says so
-  // in words, because a panel silently contributing zero is the whole problem.
-  // `moneyLine` joins each name to its amount with a non-breaking space, so
-  // this wrap can only ever break BETWEEN players.
-  // ELLIPSIZED PER PAIR, then joined. Each pair is one unbreakable token by
-  // design, which means a pair wider than this column has no break left and
-  // `wrapText` falls through to chopping the token itself — mid-AMOUNT, so the
-  // image people share would carry "+$1" on one row and "0" on the next. A
-  // wrong number is worse than a shortened name, and only whoever can MEASURE
-  // can tell which pairs need shortening.
+  // STANDINGS apart (MAI-88). Always present: a game contributing zero in
+  // silence is the whole problem, so it says so in words instead.
+  //
+  // The model fits AND joins this; the painter only supplies the column width
+  // and a way to measure. One owner for the separator, the empty case and the
+  // truncation rule is what keeps this line and the settle screen from drifting
+  // — and it puts all three somewhere jsdom can reach.
   const moneyOpts: TextOpts = { size: MONEY_SIZE }
   const moneyCol = INNER - 28
   const wrappedMoney = wrap(
     g,
-    game.money.length === 0
-      ? NETS_TO_NOTHING
-      : moneyTokens(game.money)
-          .map((t) => ellipsize(g, t, moneyCol, moneyOpts, '...'))
-          .join(' \u00B7 '),
+    moneyLine((t) => width(g, t, moneyOpts), game.money, moneyCol),
     moneyCol,
     moneyOpts,
   )

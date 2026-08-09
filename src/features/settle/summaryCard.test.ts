@@ -4,7 +4,7 @@ import { deriveRound } from '../../engine/catalog'
 import { doubleNine } from '../../engine/core/tees'
 import type { Round } from '../../engine/core/types'
 import { EventLog, makeCourse, makePlayers, makeRound } from '../../engine/test/harness'
-import { NETS_TO_NOTHING, buildSummaryCard, moneyLine, moneyTokens } from './summaryCard'
+import { NETS_TO_NOTHING, buildSummaryCard, moneyLine } from './summaryCard'
 
 /**
  * The model is the single derivation behind both the settle screen and the
@@ -12,6 +12,8 @@ import { NETS_TO_NOTHING, buildSummaryCard, moneyLine, moneyTokens } from './sum
  */
 
 const NBSP_ = '\u00A0'
+/** one character = one unit, which is what the painter's pixel font approximates */
+const mono = (t: string) => t.length
 
 const card = (round: Round, log: EventLog) => {
   const { ctx, derivations } = deriveRound(round, log.events)
@@ -344,7 +346,7 @@ describe('buildSummaryCard', () => {
     const nassau = c.games.find((g) => g.name === 'Nassau')!
     expect(nassau.lines.length).toBeGreaterThan(0)
     expect(nassau.money).toEqual([])
-    expect(moneyLine(nassau.money)).toBe(NETS_TO_NOTHING)
+    expect(moneyLine(mono, nassau.money)).toBe(NETS_TO_NOTHING)
 
     const ctp = c.games.find((g) => g.name === 'Closest to the Pin')!
     expect(ctp.money.map((m) => `${m.name} ${m.cents}`)).toEqual([
@@ -361,7 +363,7 @@ describe('buildSummaryCard', () => {
    * money at all. Same rule `closeMargin` follows for "2 up".
    */
   it('never lets a name break away from its amount', () => {
-    const line = moneyLine([
+    const line = moneyLine(mono, [
       { playerId: 'p-a', name: 'John', cents: 1000 },
       { playerId: 'p-b', name: 'Mike', cents: -1000 },
     ])
@@ -378,13 +380,13 @@ describe('buildSummaryCard', () => {
     // join — the unbreakable unit. Joining only name-to-amount left the wrap
     // free to break inside the name instead, stranding "Ben" on its own line
     // above "Norman +$10", which is the same failure one word earlier.
-    const twoWord = moneyLine([{ playerId: 'p-c', name: 'Ben Norman', cents: 1000 }])
+    const twoWord = moneyLine(mono, [{ playerId: 'p-c', name: 'Ben Norman', cents: 1000 }])
     expect(twoWord).toBe(`Ben${NBSP}Norman${NBSP}+$10`)
     expect(twoWord.split(' ')).toHaveLength(1)
 
     // and never an empty value: `wrapText('')` returns [], so the painter would
     // reserve zero height and draw the next line straight on top of it
-    expect(moneyLine([]).length).toBeGreaterThan(0)
+    expect(moneyLine(mono, []).length).toBeGreaterThan(0)
   })
 
   it('sums the grouped side-bets panel across the games it folds', () => {
@@ -440,7 +442,7 @@ describe('buildSummaryCard', () => {
     // Bob took the skin, Ann took the CTP, both $2 — real money, both ways
     expect(grouped.lines.length).toBeGreaterThan(0)
     expect(grouped.money).toEqual([])
-    expect(moneyLine(grouped.money)).toBe(NETS_TO_NOTHING)
+    expect(moneyLine(mono, grouped.money)).toBe(NETS_TO_NOTHING)
     expect(NETS_TO_NOTHING).not.toMatch(/nothing moved/)
     // the side bets contributed nothing to anyone's total — which is exactly
     // what the line has to convey, and what 'nothing moved' got wrong
@@ -448,16 +450,66 @@ describe('buildSummaryCard', () => {
     expect(c.games.find((g) => g.name === 'Nassau')!.money.length).toBeGreaterThan(0)
   })
 
-  /** The model half of the unbreakable-pair contract: one token per player,
-   *  with no space left in it for a wrap to break on. */
-  it('gives the painter one token per player, with no break inside it', () => {
-    const tokens = moneyTokens([
+  /** The unbreakable-pair contract, asserted through the one function
+   *  production actually calls — an unfitted line is just `max = Infinity`. */
+  it('emits one unbreakable token per player, with no break inside it', () => {
+    const line = moneyLine(mono, [
       { playerId: 'p-a', name: 'Ben Norman', cents: 1000 },
       { playerId: 'p-b', name: 'Rob', cents: -1000 },
     ])
+    const tokens = line.split(' ').filter((t) => t !== '\u00B7')
     expect(tokens).toHaveLength(2)
-    expect(tokens.every((t) => !t.includes(' '))).toBe(true)
     expect(tokens[0]).toBe(`Ben${NBSP_}Norman${NBSP_}+$10`)
+  })
+
+  /**
+   * MAI-88, review round 2. A pair too wide for the column has no break left in
+   * it by construction, so SOMETHING has to give — and it must not be the
+   * money. Truncating the whole token ate the amount from the right and left a
+   * player showing no money at all beside neighbours who had theirs, which is
+   * the exact absence this tier exists to remove.
+   *
+   * Testable at all only because the fitting takes its measurer as an argument,
+   * the same trick `wrapText` uses to stay out of the untestable painter.
+   */
+  describe('fitting a money line to a column', () => {
+    const wide = [
+      { playerId: 'p-a', name: 'Christopher Vandenberghe-Smythe', cents: 1200 },
+      { playerId: 'p-b', name: 'Ann', cents: -1200 },
+    ]
+
+    it('shortens the name and never the amount', () => {
+      const line = moneyLine(mono, wide, 20)
+      for (const token of line.split(' ')) {
+        if (token === '\u00B7') continue
+        expect(token, token).toMatch(/[+-]\$\d+$/)
+      }
+      expect(line).toContain('…')
+      expect(line).toContain(`+$12`)
+      expect(line).toContain(`-$12`)
+    })
+
+    it('keeps every pair inside the column, at every width', () => {
+      for (let max = 6; max <= 60; max++) {
+        for (const token of moneyLine(mono, wide, max).split(' ')) {
+          if (token === '\u00B7') continue
+          expect(token.length, `"${token}" at max=${max}`).toBeLessThanOrEqual(max)
+        }
+      }
+    })
+
+    it('shows the money bare rather than drop a player entirely', () => {
+      // narrower than the amount plus one glyph plus the marker
+      const line = moneyLine(mono, wide, 5)
+      expect(line).toContain('+$12')
+      expect(line).toContain('-$12')
+    })
+
+    it('leaves a pair that already fits completely alone', () => {
+      expect(moneyLine(mono, [{ playerId: 'p-a', name: 'Ann', cents: 500 }], 100)).toBe(
+        `Ann${NBSP_}+$5`,
+      )
+    })
   })
 
   it('splits 18 holes into two halves with pars, totals and stroke flags', () => {
