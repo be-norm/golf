@@ -29,7 +29,7 @@ import { LOCAL_USER } from '../../db/ids'
 import { RulesSheet } from '../games/RulesSheet'
 import { useRound } from './useRound'
 import { holeLoop, ordinal } from './holeLoop'
-import { ScoreRow } from './ScoreRow'
+import { MAX_PUTTS, ScoreRow } from './ScoreRow'
 
 /**
  * Used only when no single game owns the affordance — several games offering
@@ -57,6 +57,9 @@ export function ScoringScreen() {
   // event key → the id it was written as, or undefined while still in flight.
   // See `emitOnce`.
   const takingRef = useRef<Map<string, string | undefined>>(new Map())
+  // "playerId:hole" -> the putt count last SENT, so a burst of taps steps from
+  // intent rather than from a stale render - see setPutts
+  const sentPuttsRef = useRef<Map<string, number>>(new Map())
   // Release a key only once the derivation actually CONTAINS its event — the
   // control on screen now reflects the tap, so a further tap is a further
   // intent rather than a stale duplicate. An effect rather than a render-phase
@@ -67,6 +70,7 @@ export function ScoringScreen() {
     for (const [key, id] of takingRef.current) {
       if (id !== undefined && view.events.some((e) => e.id === id)) takingRef.current.delete(key)
     }
+    sentPuttsRef.current.clear()
   }, [view])
 
   // Initial hole, captured ONCE when the view first loads: ?hole= deep link
@@ -212,29 +216,55 @@ export function ScoringScreen() {
     void eventStore.append(round.id, [{ type: 'score/set', playerId, hole: currentHole, gross }])
   }
 
-  // Deliberately unguarded, like `setScore` beside it: every tap is a distinct
-  // intent here — the control CYCLES, so two quick taps mean 1 then 2, not one
-  // number twice. The emit guard exists for controls where a repeat is a
-  // duplicate; this is not one.
-  const setPutts = (playerId: string, putts: number) => {
-    void eventStore.append(round.id, [{ type: 'score/putts', playerId, hole: currentHole, putts }])
+  // STEPS FROM WHAT WAS SENT, not from what is rendered — and resolves that
+  // inside the handler, because a ref must not be read during render.
+  //
+  // The control shows the DERIVED count, which lags a tap by a write, a live
+  // query and a re-derive. Computing the next value from it meant three quick
+  // taps for a three-putt each read the same stale count and appended "1, 1,
+  // 1": the hole settled on 1 — the number Snake will pay on — and the log kept
+  // two duplicates forever. Tapping fast IS how a three-putt gets entered, so
+  // that is the ordinary case rather than the corner one.
+  //
+  // Remembering the last value SENT makes each tap step from the one before.
+  // Cleared by the next derivation, which is when the screen has caught up.
+  const puttKey = (playerId: string) => `${playerId}:${currentHole}`
+
+  const setPutts = (playerId: string, step: 'more' | 'fewer') => {
+    const key = puttKey(playerId)
+    const current = sentPuttsRef.current.get(key) ?? ctx.puttsFor(playerId, currentHole)
+
+    if (step === 'fewer') {
+      if (current === undefined) return
+      // Down off zero is the way back to NOT RECORDED. Without it the only
+      // erase gesture left is entering 0, which does not mean "I mis-tapped" —
+      // it means chip-in, and a junk game pays for one.
+      if (current === 0) {
+        sentPuttsRef.current.delete(key)
+        void eventStore.append(round.id, [
+          { type: 'score/puttsClear', playerId, hole: currentHole },
+        ])
+        return
+      }
+      sentPuttsRef.current.set(key, current - 1)
+      void eventStore.append(round.id, [
+        { type: 'score/putts', playerId, hole: currentHole, putts: current - 1 },
+      ])
+      return
+    }
+
+    // From not-recorded the first tap means ONE, not zero: nearly every hole
+    // is a one- or two-putt, and zero is a chip-in — rare, and reachable with a
+    // step up then down rather than being what a single tap lands on.
+    const next = current === undefined ? 1 : Math.min(MAX_PUTTS, current + 1)
+    // already at the ceiling: no event, so the log gains nothing to say
+    if (next === current) return
+    sentPuttsRef.current.set(key, next)
+    void eventStore.append(round.id, [
+      { type: 'score/putts', playerId, hole: currentHole, putts: next },
+    ])
   }
 
-  // The last emitter on this screen without a same-frame guard, and it needs
-  // one for the reason all the others do: the header button survives its own
-  // tap, so two quick taps read the same `view` closure, compute the same
-  // `last`, and append two retracts of the same event. Replay shrugs (targets
-  // collect into a Set) but the duplicate outlives the round in every export.
-  //
-  // `undoneRef` is the right set to share with `giveBack`, and permanent is
-  // right — with one condition. `effectiveEvents` strips RETRACTED events, so
-  // an id whose retract was written can never be `last` again; but that says
-  // nothing about an id whose retract was never written at all. A rejected
-  // append (quota, a DatabaseClosedError during another tab's upgrade, an
-  // aborted transaction) would otherwise leave the event live, still `last`,
-  // and permanently un-undoable — the scorekeeper tapping ↩ Undo on a wrong
-  // score and getting silence. So a failure releases, exactly as `emitOnce`
-  // below does and for the same reason.
   const undo = () => {
     const effective = effectiveEvents(view.events)
     const last = effective[effective.length - 1]
@@ -490,7 +520,7 @@ export function ScoringScreen() {
             strokes={dotsGame ? ctx.strokesFor(dotsGame.gameId, p.playerId, currentHole) : 0}
             onScore={(gross) => setScore(p.playerId, gross)}
             putts={ctx.puttsFor(p.playerId, currentHole)}
-            onPutts={round.trackPutts ? (n) => setPutts(p.playerId, n) : undefined}
+            onPutts={round.trackPutts ? (step) => setPutts(p.playerId, step) : undefined}
           />
         ))}
       </section>

@@ -37,15 +37,25 @@ export type ScoreClearEvent = EventEnvelope & {
  * "not recorded", so absence must never be folded to 0. `RoundContext` keeps
  * the two apart.
  *
- * No `score/puttsClear` counterpart, deliberately and by precedent: nothing in
- * the app emits `score/clear` either. The setter ships and the clearer arrives
- * when a screen actually needs one; undo is `meta/retract`, as everywhere else.
+ * It DOES need a clearer, unlike `score/set` — which is why one exists here and
+ * no screen has ever emitted `score/clear`. For a stroke, "wrong number" is
+ * fixed by writing the right number; there is no meaningful blank. For putts
+ * there is, because 0 is a real count: without a way back to "not recorded" the
+ * only erase gesture available is to enter 0, which does not mean "I never
+ * saw this" — it means "chip-in", and Dots pays for one.
  */
 export type ScorePuttsEvent = EventEnvelope & {
   type: 'score/putts'
   playerId: Uuid
   hole: number
   putts: number
+}
+
+/** Take back a putt count entirely, to "not recorded" — NOT to zero. */
+export type ScorePuttsClearEvent = EventEnvelope & {
+  type: 'score/puttsClear'
+  playerId: Uuid
+  hole: number
 }
 
 export type RoundCompletedEvent = EventEnvelope & { type: 'round/completed' }
@@ -66,6 +76,7 @@ export type RoundEvent =
   | ScoreSetEvent
   | ScoreClearEvent
   | ScorePuttsEvent
+  | ScorePuttsClearEvent
   | RoundCompletedEvent
   | RoundReopenedEvent
   | RetractEvent
@@ -95,6 +106,11 @@ export const eventDraftSchema = z.discriminatedUnion('type', [
     // 0 is a chip-in, not "unrecorded"; 10 matches `gross`'s upper bound in
     // spirit — a number past it is a mistap, and the log is forever.
     putts: z.number().int().min(0).max(10),
+  }),
+  z.object({
+    type: z.literal('score/puttsClear'),
+    playerId: z.string(),
+    hole: z.number().int().min(1).max(18),
   }),
   z.object({ type: z.literal('round/completed') }),
   z.object({ type: z.literal('round/reopened') }),

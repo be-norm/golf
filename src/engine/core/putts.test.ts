@@ -58,6 +58,28 @@ describe('putts in RoundContext', () => {
     expect(ctxFor(log).puttsFor('p-bob', 5)).toBeUndefined()
   })
 
+  it('clears back to not-recorded, which is not the same as zero', () => {
+    const log = new EventLog()
+    log.append({ type: 'score/putts', playerId: 'p-ann', hole: 2, putts: 3 })
+    log.append({ type: 'score/puttsClear', playerId: 'p-ann', hole: 2 })
+
+    // NOT 0. Zero is a chip-in, and a junk game pays for one — so the erase
+    // gesture has to remove the fact rather than record a different one.
+    expect(ctxFor(log).puttsFor('p-ann', 2)).toBeUndefined()
+  })
+
+  it('re-records after a clear, and clears only the hole it names', () => {
+    const log = new EventLog()
+    log.append({ type: 'score/putts', playerId: 'p-ann', hole: 2, putts: 3 })
+    log.append({ type: 'score/putts', playerId: 'p-ann', hole: 3, putts: 1 })
+    log.append({ type: 'score/puttsClear', playerId: 'p-ann', hole: 2 })
+    log.append({ type: 'score/putts', playerId: 'p-ann', hole: 2, putts: 2 })
+
+    const ctx = ctxFor(log)
+    expect(ctx.puttsFor('p-ann', 2)).toBe(2)
+    expect(ctx.puttsFor('p-ann', 3)).toBe(1)
+  })
+
   it('leaves the scorecard alone — putts are not strokes', () => {
     const log = new EventLog()
     log.append({ type: 'score/set', playerId: 'p-ann', hole: 1, gross: 4 })

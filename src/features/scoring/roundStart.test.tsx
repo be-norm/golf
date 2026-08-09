@@ -173,6 +173,44 @@ describe('RoundStartScreen', () => {
     expect(screen.queryByLabelText('Bogey course handicap')).not.toBeInTheDocument()
   })
 
+  /**
+   * MAI-90, review round 1. The repo refuses `setCourseHandicap` on a
+   * NON-EMPTY LOG, but this screen used to gate its fields on "anything
+   * scored" — so any non-score event opened a gap where the fields rendered,
+   * the typed number sat in local state looking accepted, the write was
+   * rejected, and the round quietly kept the old course handicap. That
+   * mis-allocates strokes for all 18 holes with nothing said.
+   *
+   * A putt tapped before the first score is an ordinary way to reach it, which
+   * is what turned a latent divergence into an everyday one. A Wolf pick or a
+   * CTP award does the same, and always could.
+   */
+  it('locks handicaps on ANY event, not just a score', async () => {
+    const round = makeRound({
+      players: makePlayers([{ name: 'Scratch', ch: 0 }, { name: 'Bogey', ch: 18 }]),
+      trackPutts: true,
+      games: [
+        {
+          type: 'skins',
+          config: { stakeCents: 100, carryover: true },
+          handicap: { mode: 'net', allowancePct: 100, reference: 'offLow' },
+        },
+      ],
+    })
+    round.id = 'round-start-locked-by-putts'
+    await db.rounds.put(round)
+    // no score anywhere — just a putt count on the first hole
+    await eventStore.append(round.id, [
+      { type: 'score/putts', playerId: 'p-bogey', hole: 1, putts: 2 },
+    ])
+
+    renderStart(round.id)
+
+    // the UI must agree with the write it would attempt
+    expect(await screen.findByText(/Locked — scoring has started/)).toBeInTheDocument()
+    expect(screen.queryByLabelText('Bogey course handicap')).not.toBeInTheDocument()
+  })
+
   it('shows no strokes for a gross game', async () => {
     const round = makeRound({
       players: makePlayers([{ name: 'Ann', ch: 5 }, { name: 'Bo', ch: 12 }]),

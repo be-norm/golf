@@ -26,7 +26,12 @@ export interface HoleImpact {
  * added, not when its first consumer arrives.
  */
 export function eventHole(e: RoundEvent): number | null {
-  if (e.type === 'score/set' || e.type === 'score/clear' || e.type === 'score/putts') {
+  if (
+    e.type === 'score/set' ||
+    e.type === 'score/clear' ||
+    e.type === 'score/putts' ||
+    e.type === 'score/puttsClear'
+  ) {
     return e.hole
   }
   if (e.type === 'game/event') {

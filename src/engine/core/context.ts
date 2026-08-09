@@ -99,18 +99,21 @@ export function buildRoundContext(round: Round, effective: readonly RoundEvent[]
   const gross = deriveGross(effective)
 
   // Last write wins per (player, hole), the same rule `deriveGross` applies to
-  // scores — a corrected putt count is a correction, not a second one. No
-  // clear counterpart to handle: nothing emits `score/clear` either, and undo
-  // is a retraction, which never reaches here.
+  // scores — a corrected putt count is a correction, not a second one — and a
+  // clear takes the fact away entirely rather than setting it to 0.
   const putts = new Map<Uuid, Map<number, number>>()
   for (const e of effective) {
-    if (e.type !== 'score/putts') continue
-    let byHole = putts.get(e.playerId)
-    if (!byHole) {
-      byHole = new Map()
-      putts.set(e.playerId, byHole)
+    if (e.type === 'score/putts') {
+      let byHole = putts.get(e.playerId)
+      if (!byHole) {
+        byHole = new Map()
+        putts.set(e.playerId, byHole)
+      }
+      byHole.set(e.hole, e.putts)
+    } else if (e.type === 'score/puttsClear') {
+      // back to NOT RECORDED, not to zero — the whole reason this kind exists
+      putts.get(e.playerId)?.delete(e.hole)
     }
-    byHole.set(e.hole, e.putts)
   }
   const puttsFor = (playerId: Uuid, hole: number): number | undefined =>
     putts.get(playerId)?.get(hole)
