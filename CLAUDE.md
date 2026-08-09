@@ -1,8 +1,15 @@
 # Golf — game tracker for golf money games between friends
 
 Installable offline-first PWA. One scorekeeper phone per group enters hole-by-hole scores;
-the app computes all game standings/payouts (Skins, Nassau, Wolf, Vegas in MVP).
-Full plan/architecture history: see `docs/` and the games catalog in `docs/games-catalog.md`.
+the app computes all game standings/payouts. Six games ship today — Skins, Nassau, Wolf,
+Vegas, Six Point and Closest to the Pin; `docs/games-catalog.md` holds those plus every game
+still to come, with implementation-grade scoring math.
+
+**The architecture of record is the invariants below** — there is no separate plan history to
+consult, and this line used to promise one. `docs/` carries exactly two standing design notes
+(`native-app-plan.md`, `account-deletion.md`) alongside that catalog; everything else is in
+Linear (team MAI, project "Additional Games"), where each ticket says why it was built the
+way it was.
 
 ## Commands
 
