@@ -638,7 +638,7 @@ describe('ScoringScreen — award grid', () => {
  * today; the duplicate would just outlive the round in every export.
  */
 describe('ScoringScreen — input chips', () => {
-  it('two taps landing in the same frame answer once, not twice', async () => {
+  async function wolfRound(id: string) {
     const round = makeRound({
       players: makePlayers([{ name: 'Ann' }, { name: 'Bob' }, { name: 'Cal' }, { name: 'Dee' }]),
       holes: 'front9',
@@ -649,10 +649,14 @@ describe('ScoringScreen — input chips', () => {
         },
       ],
     })
-    round.id = 'round-input-twice'
+    round.id = id
     await db.rounds.put(round)
-    const router = createMemoryRouter(routes, { initialEntries: [`/round/${round.id}`] })
-    render(<RouterProvider router={router} />)
+    render(<RouterProvider router={createMemoryRouter(routes, { initialEntries: [`/round/${id}`] })} />)
+    return round
+  }
+
+  it('two taps landing in the same frame answer once, not twice', async () => {
+    const round = await wolfRound('round-input-twice')
 
     const lone = await screen.findByRole('button', { name: /Lone Wolf/ })
     fireEvent.click(lone)
@@ -664,6 +668,36 @@ describe('ScoringScreen — input chips', () => {
     // settle: a second identical pick would land here if the guard were absent
     await screen.findByText(/Ann/)
     expect(await eventStore.list(round.id)).toHaveLength(1)
+  })
+
+  /**
+   * DEDUPING IS FOR THE SAME ANSWER TWICE — changing your mind must get
+   * through. The options of one prompt are adjacent buttons in a wrapping row,
+   * so a slip-tap on a partner followed at once by the intended Lone Wolf is
+   * an ordinary miss. Keying the guard on the PROMPT rather than the ANSWER
+   * kept the partner: a different hole multiplier and different sides, so
+   * wrong money — worse than the duplicate the guard was added to prevent.
+   */
+  it('lets a corrected answer through, and keeps the correction', async () => {
+    const round = await wolfRound('round-input-corrected')
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Bob' }))
+    fireEvent.click(await screen.findByRole('button', { name: /Lone Wolf/ }))
+
+    await waitFor(async () => {
+      expect(await eventStore.list(round.id)).toHaveLength(2)
+    })
+    const events = await eventStore.list(round.id)
+    // last write wins in replay, so the pick the scorekeeper meant is the one
+    // that counts — but only if the second tap was allowed to land at all
+    expect(events.map((e) => (e as { data: { choice: string } }).data.choice)).toEqual([
+      'p-bob',
+      'lone',
+    ])
+    // and the prompt is gone, so the hole computed on the corrected pick
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: /Lone Wolf/ })).not.toBeInTheDocument()
+    })
   })
 })
 
