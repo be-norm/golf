@@ -63,9 +63,9 @@ export function ScoringScreen() {
   // the next tap fell back to the derived count and stepped from a number the
   // user had already stepped away from (−, −, + from 1 ended with the log
   // saying 2). Carries its own playerId/hole so the release never parses a key.
-  const sentPuttsRef = useRef<Map<string, { playerId: string; hole: number; value: number | null }>>(
-    new Map(),
-  )
+  const sentPuttsRef = useRef<
+    Map<string, { value: number | null; id: string | undefined }>
+  >(new Map())
   // Release a key only once the derivation actually CONTAINS its event — the
   // control on screen now reflects the tap, so a further tap is a further
   // intent rather than a stale duplicate. An effect rather than a render-phase
@@ -76,15 +76,20 @@ export function ScoringScreen() {
     for (const [key, id] of takingRef.current) {
       if (id !== undefined && view.events.some((e) => e.id === id)) takingRef.current.delete(key)
     }
-    // PER KEY, and only once the derivation agrees — exactly the rule above.
-    // Clearing wholesale dropped entries whose write had not landed, so any
-    // emission arriving mid-burst (an unrelated round write, a sync pull) reset
-    // the stepper to the stale count and the next tap re-sent a number already
-    // sent: three taps for a three-putt recorded 2. That is the bug this ref
-    // exists to prevent, through a door left open beside it.
+    // PER KEY, and against the EVENT rather than the value it carried.
+    // Clearing wholesale dropped entries whose write had not landed, so an
+    // emission arriving mid-burst reset the stepper to the stale count and the
+    // next tap re-sent a number already sent. Matching on the VALUE instead
+    // fixed that but left a narrower version: tapping back to the count already
+    // landed (+ then −) makes derived and sent agree while both writes are
+    // still in flight, so the key releases early and the next tap re-sends. The
+    // value is never wrong — if the two agree, stepping from either gives the
+    // same answer — but the duplicate outlives the round in every export.
+    // Waiting for the id removes the coincidence entirely.
     for (const [key, sent] of sentPuttsRef.current) {
-      const derived = view.ctx.puttsFor(sent.playerId, sent.hole) ?? null
-      if (derived === sent.value) sentPuttsRef.current.delete(key)
+      if (sent.id !== undefined && view.events.some((e) => e.id === sent.id)) {
+        sentPuttsRef.current.delete(key)
+      }
     }
   }, [view])
 
@@ -251,9 +256,15 @@ export function ScoringScreen() {
 
   const sendPutts = (playerId: string, value: number | null, draft: EventDraft) => {
     const key = puttKey(playerId, currentHole)
-    sentPuttsRef.current.set(key, { playerId, hole: currentHole, value })
+    sentPuttsRef.current.set(key, { value, id: undefined })
     void eventStore
       .append(round.id, [draft])
+      .then(([event]) => {
+        // a later tap may already own this key — only stamp the id onto the
+        // entry this append actually created
+        const held = sentPuttsRef.current.get(key)
+        if (held && held.value === value && held.id === undefined) held.id = event?.id
+      })
       // nothing was written, so nothing is coming to release this
       .catch(() => sentPuttsRef.current.delete(key))
   }
