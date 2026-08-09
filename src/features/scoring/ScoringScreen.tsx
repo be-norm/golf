@@ -212,6 +212,14 @@ export function ScoringScreen() {
     void eventStore.append(round.id, [{ type: 'score/set', playerId, hole: currentHole, gross }])
   }
 
+  // Deliberately unguarded, like `setScore` beside it: every tap is a distinct
+  // intent here — the control CYCLES, so two quick taps mean 1 then 2, not one
+  // number twice. The emit guard exists for controls where a repeat is a
+  // duplicate; this is not one.
+  const setPutts = (playerId: string, putts: number) => {
+    void eventStore.append(round.id, [{ type: 'score/putts', playerId, hole: currentHole, putts }])
+  }
+
   // The last emitter on this screen without a same-frame guard, and it needs
   // one for the reason all the others do: the header button survives its own
   // tap, so two quick taps read the same `view` closure, compute the same
@@ -481,6 +489,8 @@ export function ScoringScreen() {
             gross={ctx.gross.get(p.playerId)?.get(currentHole)}
             strokes={dotsGame ? ctx.strokesFor(dotsGame.gameId, p.playerId, currentHole) : 0}
             onScore={(gross) => setScore(p.playerId, gross)}
+            putts={ctx.puttsFor(p.playerId, currentHole)}
+            onPutts={round.trackPutts ? (n) => setPutts(p.playerId, n) : undefined}
           />
         ))}
       </section>

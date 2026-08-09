@@ -7,13 +7,29 @@ interface ScoreRowProps {
   /** handicap strokes received on this hole (primary game) — shown as dots */
   strokes: number
   onScore: (gross: number) => void
+  /**
+   * Putts on this hole, when the round is counting them (MAI-90). `undefined`
+   * is "not recorded" and 0 is a chip-in — the two are different everywhere,
+   * including here, where one reads "putts?" and the other reads "0".
+   * Omitting `onPutts` is what turns the affordance off entirely.
+   */
+  putts?: number
+  onPutts?: (putts: number) => void
 }
 
 /**
  * The default-to-par chip: tap once to confirm par; ± adjusts and commits
  * immediately (the event log absorbs corrections). ~4–6 taps per hole for four.
  */
-export function ScoreRow({ name, par, gross, strokes, onScore }: ScoreRowProps) {
+export function ScoreRow({
+  name,
+  par,
+  gross,
+  strokes,
+  onScore,
+  putts,
+  onPutts,
+}: ScoreRowProps) {
   const shown = gross ?? par
   const diff = gross !== undefined ? gross - par : 0
 
@@ -25,6 +41,24 @@ export function ScoreRow({ name, par, gross, strokes, onScore }: ScoreRowProps) 
           <p className="text-sm tracking-widest text-felt-300" aria-label={`${strokes} strokes`}>
             {strokes > 0 ? '■'.repeat(strokes) : `+${-strokes}`}
           </p>
+        )}
+        {/* Under the name rather than beside the score: putts are a second,
+            optional fact about the hole, and the stroke is what the group is
+            actually calling out. Two small taps — the count steps up and wraps,
+            because a putt count is a small number and a −/+ pair here would
+            crowd the row it hangs off. */}
+        {onPutts && (
+          <button
+            onClick={() => onPutts(((putts ?? 0) + 1) % 6)}
+            aria-label={`${name} putts`}
+            className={`pixel-press font-display mt-1.5 px-2 py-1 text-[10px] uppercase ${
+              putts === undefined
+                ? 'border-stone-700 bg-stone-900 text-stone-500'
+                : 'border-felt-600 bg-felt-900/60 text-felt-300'
+            }`}
+          >
+            {putts === undefined ? 'putts?' : `${putts} putts`}
+          </button>
         )}
       </div>
       <div className="flex items-center gap-1.5">

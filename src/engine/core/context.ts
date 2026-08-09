@@ -9,6 +9,21 @@ export interface RoundContext {
   holesPlayed: readonly number[]
   /** playerId → (hole → gross); missing key = no score yet */
   gross: ReadonlyMap<Uuid, ReadonlyMap<number, number>>
+  /**
+   * How many putts this player took on this hole, or undefined if nobody
+   * recorded it — the first shared fact contributed to context rather than
+   * owned by an engine (MAI-54, MAI-90).
+   *
+   * UNDEFINED AND 0 ARE DIFFERENT, and any consumer that conflates them is
+   * wrong: a chip-in genuinely takes no putts, so folding absence to zero would
+   * hand Snake a three-putt-free hole it never saw and Dots a poley nobody
+   * made. Read it as "we don't know" and let the game decide what that means.
+   *
+   * Round-level because putts are a SCORECARD fact: a group can track them with
+   * no putting game running at all, and Snake, Dots and Trouble all want the
+   * same number rather than three of their own.
+   */
+  puttsFor(playerId: Uuid, hole: number): number | undefined
   par(hole: number): number
   strokeIndex(hole: number): number
   /** handicap strokes this player receives on this hole under this game's handicap policy */
@@ -82,6 +97,23 @@ export function buildRoundContext(round: Round, effective: readonly RoundEvent[]
     course.holes.some((hole) => hole.number === h),
   )
   const gross = deriveGross(effective)
+
+  // Last write wins per (player, hole), the same rule `deriveGross` applies to
+  // scores — a corrected putt count is a correction, not a second one. No
+  // clear counterpart to handle: nothing emits `score/clear` either, and undo
+  // is a retraction, which never reaches here.
+  const putts = new Map<Uuid, Map<number, number>>()
+  for (const e of effective) {
+    if (e.type !== 'score/putts') continue
+    let byHole = putts.get(e.playerId)
+    if (!byHole) {
+      byHole = new Map()
+      putts.set(e.playerId, byHole)
+    }
+    byHole.set(e.hole, e.putts)
+  }
+  const puttsFor = (playerId: Uuid, hole: number): number | undefined =>
+    putts.get(playerId)?.get(hole)
 
   const holeByNumber = new Map(course.holes.map((h) => [h.number, h]))
   const holeData = (hole: number) => {
@@ -195,6 +227,7 @@ export function buildRoundContext(round: Round, effective: readonly RoundEvent[]
     round,
     holesPlayed,
     gross,
+    puttsFor,
     par,
     strokeIndex,
     strokesFor,

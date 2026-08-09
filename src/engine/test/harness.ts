@@ -53,6 +53,7 @@ export interface MakeRoundOpts {
   course?: Course
   players: RoundPlayer[]
   holes?: RoundHoles
+  trackPutts?: boolean
   games: Array<
     Pick<GameConfig, 'type' | 'config'> & {
       gameId?: Uuid
@@ -71,6 +72,7 @@ export function makeRound(opts: MakeRoundOpts): Round {
     )
   return {
     id: 'round-1',
+    ...(opts.trackPutts !== undefined && { trackPutts: opts.trackPutts }),
     courseId: course.id,
     courseSnapshot: course,
     teeSetId: course.teeSets[0]!.id,

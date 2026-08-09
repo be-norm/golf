@@ -84,6 +84,9 @@ export function SetupScreen() {
   const [games, setGames] = useState<GameDraft[]>([])
   const [rulesFor, setRulesFor] = useState<string>()
   const [picker, setPicker] = useState<'main' | 'side'>()
+  // A scorecard preference, not a game — plenty of groups count putts with no
+  // putting game running, which is why it lives on the round (MAI-90).
+  const [trackPutts, setTrackPutts] = useState(false)
   /**
    * Auto-open the picker ONCE, the first time step 2 is reached with nothing
    * chosen — the empty state is otherwise a dead end behind a disabled button.
@@ -334,6 +337,9 @@ export function SetupScreen() {
       holes: playedHoles,
       players: roundPlayers,
       games: gameConfigs,
+      // Stored only when ON, so a round that isn't counting putts looks exactly
+      // like every round created before this existed (MAI-90).
+      ...(trackPutts ? { trackPutts: true } : {}),
       status: 'live',
       startedAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -662,6 +668,40 @@ export function SetupScreen() {
               {sideDrafts.length === 0 ? '+ Add a side bet' : '+ More side bets'}
             </button>
           </div>
+
+          {/* Not a game, so it sits apart from them: putts are a scorecard
+              fact, and a group can count them with nothing riding on it.
+              Snake and Dots will read the same numbers rather than each
+              collecting their own (MAI-54, MAI-90). */}
+          <button
+            onClick={() => setTrackPutts(!trackPutts)}
+            aria-pressed={trackPutts}
+            className={`pixel-press flex items-center justify-between gap-3 px-4 py-3 text-left ${
+              trackPutts
+                ? 'border-felt-500 bg-felt-900/60'
+                : 'border-stone-700 bg-stone-900/60'
+            }`}
+          >
+            <span>
+              <span
+                className={`font-display block text-[10px] uppercase ${
+                  trackPutts ? 'text-felt-300' : 'text-stone-400'
+                }`}
+              >
+                Count putts
+              </span>
+              <span className="mt-1 block text-stone-400">
+                Adds a putts tap to each player while you score
+              </span>
+            </span>
+            <span
+              className={`font-display shrink-0 text-[10px] uppercase ${
+                trackPutts ? 'text-felt-300' : 'text-stone-500'
+              }`}
+            >
+              {trackPutts ? 'On' : 'Off'}
+            </span>
+          </button>
 
           {problems.length > 0 && (
             <ul className="rounded-xl bg-flag-600/10 p-3 text-sm text-flag-500 ring-1 ring-flag-600/40">

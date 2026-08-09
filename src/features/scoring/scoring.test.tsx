@@ -495,6 +495,98 @@ describe('ScoringScreen', () => {
 })
 
 /**
+ * MAI-90. Putts are a scorecard fact the round opts into, so the two things
+ * worth pinning on the screen are that recording one lands exactly one event —
+ * and that a round which is NOT counting them is untouched. The second matters
+ * more: every round played today is that round.
+ */
+describe('ScoringScreen — putts', () => {
+  async function puttsRound(id: string, trackPutts: boolean) {
+    const round = makeRound({
+      players: makePlayers([{ name: 'Ann' }, { name: 'Bob' }]),
+      holes: 'front9',
+      trackPutts,
+      games: [{ type: 'skins', config: { stakeCents: 100, carryover: true } }],
+    })
+    round.id = id
+    await db.rounds.put(round)
+    render(
+      <RouterProvider router={createMemoryRouter(routes, { initialEntries: [`/round/${id}`] })} />,
+    )
+    return round
+  }
+
+  it('offers nothing at all when the round is not counting putts', async () => {
+    await puttsRound('round-putts-off', false)
+
+    await screen.findByText('Ann')
+    expect(screen.queryByRole('button', { name: /putts/ })).not.toBeInTheDocument()
+  })
+
+  it('records a count, and one tap is one event', async () => {
+    const round = await puttsRound('round-putts-on', true)
+
+    const chip = await screen.findByRole('button', { name: 'Ann putts' })
+    // unrecorded reads as a question, not as zero — they are different facts
+    expect(chip).toHaveTextContent('putts?')
+    await userEvent.click(chip)
+
+    await waitFor(async () => {
+      expect(await eventStore.list(round.id)).toHaveLength(1)
+    })
+    expect((await eventStore.list(round.id))[0]).toMatchObject({
+      type: 'score/putts',
+      playerId: 'p-ann',
+      hole: 1,
+      putts: 1,
+    })
+    await waitFor(async () => {
+      expect(await screen.findByRole('button', { name: 'Ann putts' })).toHaveTextContent('1 putts')
+    })
+  })
+
+  /** The count cycles, so a second tap is a SECOND intent rather than a
+   *  duplicate — which is why this control is deliberately unguarded. */
+  it('steps the count on each tap, and wraps back round', async () => {
+    const round = await puttsRound('round-putts-cycle', true)
+
+    for (const expected of ['1 putts', '2 putts', '3 putts']) {
+      await userEvent.click(await screen.findByRole('button', { name: 'Bob putts' }))
+      await waitFor(async () => {
+        expect(await screen.findByRole('button', { name: 'Bob putts' })).toHaveTextContent(expected)
+      })
+    }
+    const events = await eventStore.list(round.id)
+    expect(events.map((e) => (e as { putts: number }).putts)).toEqual([1, 2, 3])
+    // …and it can reach 0 again, because a chip-in is a real count. Waiting
+    // between taps is not ceremony: the control cycles from what is RENDERED,
+    // so clicking again before the re-derive lands reads a stale count and the
+    // tap is lost — which is exactly what a fast human tap does too.
+    for (const expected of ['4 putts', '5 putts', '0 putts']) {
+      await userEvent.click(await screen.findByRole('button', { name: 'Bob putts' }))
+      await waitFor(async () => {
+        expect(await screen.findByRole('button', { name: 'Bob putts' })).toHaveTextContent(expected)
+      })
+    }
+  })
+
+  it('keeps putts per hole, not per round', async () => {
+    const round = await puttsRound('round-putts-per-hole', true)
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Ann putts' }))
+    await waitFor(async () => {
+      expect(await eventStore.list(round.id)).toHaveLength(1)
+    })
+    await userEvent.click(screen.getByRole('button', { name: 'next hole' }))
+
+    // hole 2 knows nothing about hole 1's count
+    await waitFor(async () => {
+      expect(await screen.findByRole('button', { name: 'Ann putts' })).toHaveTextContent('putts?')
+    })
+  })
+})
+
+/**
  * MAI-46 — the award channel, on the screen the scorekeeper is holding.
  *
  * The grid's whole reason for existing is the two gates it does NOT have. The
