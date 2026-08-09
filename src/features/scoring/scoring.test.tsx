@@ -658,6 +658,25 @@ describe('ScoringScreen — putts', () => {
     expect(events.map((e) => (e as { putts: number }).putts)).toEqual([1, 2, 3])
   })
 
+  /**
+   * A putt that gets UNDONE. The pending ref shadows the derivation, so if it
+   * never releases the stepper keeps stepping from a count the round no longer
+   * has — the screen says 'putts?' and the next tap writes 2.
+   */
+  it('forgets a count that was undone', async () => {
+    await puttsRound('round-putts-undone', true)
+
+    await userEvent.click(await more('Ann'))
+    await waitFor(async () => expect(await count('Ann')).toHaveTextContent('1 putts'))
+
+    await userEvent.click(screen.getByRole('button', { name: 'undo' }))
+    await waitFor(async () => expect(await count('Ann')).toHaveTextContent('putts?'))
+
+    // the hole is empty again, so the next tap means ONE
+    await userEvent.click(await more('Ann'))
+    await waitFor(async () => expect(await count('Ann')).toHaveTextContent('1 putts'))
+  })
+
   it('cannot step below not-recorded', async () => {
     const round = await puttsRound('round-putts-floor', true)
 
