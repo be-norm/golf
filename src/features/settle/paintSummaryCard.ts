@@ -1,5 +1,5 @@
 import { formatCents, formatCentsSigned } from '../../engine/core/money'
-import { moneyLine } from './summaryCard'
+import { moneyTokens, NETS_TO_NOTHING } from './summaryCard'
 import type { ScorecardHalf, SummaryCard } from './summaryCard'
 
 /**
@@ -309,7 +309,24 @@ function gameBlock(g: Ctx, game: SummaryCard['games'][number]): Block {
   // in words, because a panel silently contributing zero is the whole problem.
   // `moneyLine` joins each name to its amount with a non-breaking space, so
   // this wrap can only ever break BETWEEN players.
-  const wrappedMoney = wrap(g, moneyLine(game.money), INNER - 28, { size: MONEY_SIZE })
+  // ELLIPSIZED PER PAIR, then joined. Each pair is one unbreakable token by
+  // design, which means a pair wider than this column has no break left and
+  // `wrapText` falls through to chopping the token itself — mid-AMOUNT, so the
+  // image people share would carry "+$1" on one row and "0" on the next. A
+  // wrong number is worse than a shortened name, and only whoever can MEASURE
+  // can tell which pairs need shortening.
+  const moneyOpts: TextOpts = { size: MONEY_SIZE }
+  const moneyCol = INNER - 28
+  const wrappedMoney = wrap(
+    g,
+    game.money.length === 0
+      ? NETS_TO_NOTHING
+      : moneyTokens(game.money)
+          .map((t) => ellipsize(g, t, moneyCol, moneyOpts, '...'))
+          .join(' \u00B7 '),
+    moneyCol,
+    moneyOpts,
+  )
   const body = wrapped.reduce((h, l) => h + l.rows.length * LINE, 0) || LINE
   const notesBody = wrappedNotes.reduce((h, rows) => h + rows.length * NOTE_LINE, 0)
   const moneyBody = wrappedMoney.length * MONEY_LINE
@@ -384,7 +401,7 @@ function gameBlock(g: Ctx, game: SummaryCard['games'][number]): Block {
       cursor += RULE_H + NOTE_GAP
       wrappedMoney.forEach((row, i) => {
         text(g, row, PAD + 14, cursor + MONEY_LINE / 2 + i * MONEY_LINE, {
-          size: MONEY_SIZE,
+          ...moneyOpts,
           color: C.dim,
         })
       })

@@ -4,12 +4,14 @@ import { deriveRound } from '../../engine/catalog'
 import { doubleNine } from '../../engine/core/tees'
 import type { Round } from '../../engine/core/types'
 import { EventLog, makeCourse, makePlayers, makeRound } from '../../engine/test/harness'
-import { ALL_SQUARE, buildSummaryCard, moneyLine } from './summaryCard'
+import { NETS_TO_NOTHING, buildSummaryCard, moneyLine, moneyTokens } from './summaryCard'
 
 /**
  * The model is the single derivation behind both the settle screen and the
  * shared image, so these assertions are the regression guard for both.
  */
+
+const NBSP_ = '\u00A0'
 
 const card = (round: Round, log: EventLog) => {
   const { ctx, derivations } = deriveRound(round, log.events)
@@ -342,7 +344,7 @@ describe('buildSummaryCard', () => {
     const nassau = c.games.find((g) => g.name === 'Nassau')!
     expect(nassau.lines.length).toBeGreaterThan(0)
     expect(nassau.money).toEqual([])
-    expect(moneyLine(nassau.money)).toBe(ALL_SQUARE)
+    expect(moneyLine(nassau.money)).toBe(NETS_TO_NOTHING)
 
     const ctp = c.games.find((g) => g.name === 'Closest to the Pin')!
     expect(ctp.money.map((m) => `${m.name} ${m.cents}`)).toEqual([
@@ -409,6 +411,53 @@ describe('buildSummaryCard', () => {
       { playerId: 'p-ann', name: 'Ann', cents: 500 },
       { playerId: 'p-bob', name: 'Bob', cents: -500 },
     ])
+  })
+
+  /**
+   * MAI-88, review round 1. Money can MOVE and still leave everyone level, so
+   * the empty case had to stop claiming otherwise: a grouped side-bets panel
+   * whose two games cancel prints both payouts and then this line, and
+   * "nothing moved" directly beneath two payments is simply false.
+   */
+  it('says a panel NETS to nothing, even when it lists real payouts', () => {
+    const round = makeRound({
+      players: makePlayers([{ name: 'Ann' }, { name: 'Bob' }]),
+      holes: 'front9',
+      games: [
+        { type: 'nassau', config: { stakeCents: 500, teams: null, autoPress: false } },
+        { type: 'skins', config: { stakeCents: 200, carryover: false } },
+        { type: 'ctp', config: { stakeCents: 200 } },
+      ],
+    })
+    const log = new EventLog(round.id)
+    // hole 1 (par 4) to Bob outright — that is the skin; hole 4 is the par 3
+    log.scoreByHole(round, { Ann: [5, 4, 5, 3], Bob: [4, 4, 5, 3] }, [1, 2, 3, 4])
+    log.append({ type: 'game/event', gameId: 'game-3', kind: 'ctp/award', data: { hole: 4, playerId: 'p-ann' } })
+    log.append({ type: 'round/completed' })
+
+    const c = card(round, log)
+    const grouped = c.games.find((g) => g.name === 'Side bets')!
+    // Bob took the skin, Ann took the CTP, both $2 — real money, both ways
+    expect(grouped.lines.length).toBeGreaterThan(0)
+    expect(grouped.money).toEqual([])
+    expect(moneyLine(grouped.money)).toBe(NETS_TO_NOTHING)
+    expect(NETS_TO_NOTHING).not.toMatch(/nothing moved/)
+    // the side bets contributed nothing to anyone's total — which is exactly
+    // what the line has to convey, and what 'nothing moved' got wrong
+    for (const m of grouped.money) expect(m.cents).toBe(0)
+    expect(c.games.find((g) => g.name === 'Nassau')!.money.length).toBeGreaterThan(0)
+  })
+
+  /** The model half of the unbreakable-pair contract: one token per player,
+   *  with no space left in it for a wrap to break on. */
+  it('gives the painter one token per player, with no break inside it', () => {
+    const tokens = moneyTokens([
+      { playerId: 'p-a', name: 'Ben Norman', cents: 1000 },
+      { playerId: 'p-b', name: 'Rob', cents: -1000 },
+    ])
+    expect(tokens).toHaveLength(2)
+    expect(tokens.every((t) => !t.includes(' '))).toBe(true)
+    expect(tokens[0]).toBe(`Ben${NBSP_}Norman${NBSP_}+$10`)
   })
 
   it('splits 18 holes into two halves with pars, totals and stroke flags', () => {

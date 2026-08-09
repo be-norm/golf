@@ -10,7 +10,7 @@ import { enqueueDeleteRound } from '../../remote/outbox'
 import { useRound } from '../scoring/useRound'
 import { BigButton } from '../../components/BigButton'
 import { DetailLines } from '../../components/DetailLines'
-import { ALL_SQUARE, buildSummaryCard } from './summaryCard'
+import { buildSummaryCard, NETS_TO_NOTHING } from './summaryCard'
 import { ShareSheet } from './ShareSheet'
 
 export function SettleScreen() {
@@ -164,7 +164,7 @@ export function SettleScreen() {
                 "3 skins died unwon" can still never be read as a payout. */}
             <div className="mt-2.5 space-y-1 border-t border-stone-800 pt-2.5">
               {g.money.length === 0 ? (
-                <p className="text-stone-500">{ALL_SQUARE}</p>
+                <p className="text-stone-500">{NETS_TO_NOTHING}</p>
               ) : (
                 <p className="flex flex-wrap gap-x-2 gap-y-0.5">
                   {g.money.map((m) => (

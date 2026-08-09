@@ -109,21 +109,27 @@ export interface MoneyRow {
   cents: number
 }
 
-/** A game that settled to nothing, in words — see `GamePanel.money`. */
-export const ALL_SQUARE = 'all square — nothing moved'
+/**
+ * A game that contributed nothing, in words — see `GamePanel.money`.
+ *
+ * "nets to nothing", NOT "nothing moved". Money genuinely can move and still
+ * leave every player level: two side bets that cancel (Ann takes a $2 CTP, Bob
+ * takes a $2 skin) print both payouts and then this line, and "nothing moved"
+ * directly under two payments is simply false. The reader's question is what
+ * this panel contributed to their total, and the answer is nothing — which is
+ * true whether the bets pushed or cancelled.
+ */
+export const NETS_TO_NOTHING = 'nets to nothing'
 
 /**
- * The per-game money tier as one line, for renderers that lay out text rather
- * than elements.
+ * Each player's name and amount as ONE unbreakable token.
  *
- * A NON-BREAKING SPACE joins each name to its amount, and ordinary spaces
- * surround the separators — so the line breaks BETWEEN players and never
- * between a player and their money. The painter word-wraps on spaces, and
- * "John" stranded above "+$10" would be worse than not showing the money at
- * all; `closeMargin` writes "2 up" with one for exactly this reason.
+ * Exported because fitting them is a job for whoever can measure text: the
+ * painter ellipsizes any single pair too wide for its column, which it can only
+ * do per pair. Given as tokens rather than a joined string so it never has to
+ * take one apart again.
  */
-export function moneyLine(money: readonly MoneyRow[]): string {
-  if (money.length === 0) return ALL_SQUARE
+export function moneyTokens(money: readonly MoneyRow[]): string[] {
   // THE PAIR is the unbreakable unit, so every space inside it becomes a
   // non-breaking one — not just the join. Half the players in a real round are
   // entered as "Ben Norman", and joining only name-to-amount left the wrap free
@@ -133,10 +139,15 @@ export function moneyLine(money: readonly MoneyRow[]): string {
   // Escaped rather than typed: a load-bearing invisible character is one a
   // later edit silently replaces with a plain space.
   const NBSP = '\u00A0'
-  return money
-    .map((m) => `${m.name} ${formatCentsSigned(m.cents)}`.replace(/ /g, NBSP))
-    .join(' \u00B7 ')
+  return money.map((m) => `${m.name} ${formatCentsSigned(m.cents)}`.replace(/ /g, NBSP))
 }
+
+/** The money tier as one line — the pairs, separated so a wrap breaks between them. */
+export function moneyLine(money: readonly MoneyRow[]): string {
+  if (money.length === 0) return NETS_TO_NOTHING
+  return moneyTokens(money).join(' \u00B7 ')
+}
+
 
 /**
  * Per-player totals for one game, richest first. Zero entries are dropped: they
