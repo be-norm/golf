@@ -523,6 +523,32 @@ describe('SetupScreen — choosing games', () => {
     expect(teams.b.length).toBeGreaterThan(0)
   })
 
+  /**
+   * MAI-90. A round counts putts because a game in it READS putts — the group
+   * is never offered the choice. Offering it was the first design and it was
+   * wrong: nothing in this app shows putts back to you, so a Skins round was
+   * being asked for a number that went into the log and was never seen again.
+   *
+   * The negative is the one that matters, because it is every round played
+   * today: no shipped engine reads putts, so nothing about them should appear
+   * anywhere in setup.
+   */
+  it('says nothing about putts when no chosen game needs them', async () => {
+    await pickPenmar()
+    await cont()
+    await addPlayer('Ann', 10)
+    await addPlayer('Bo', 10)
+    await cont()
+    await pickGame('Skins')
+
+    expect(screen.queryByText(/putts/i)).not.toBeInTheDocument()
+
+    await teeOff()
+    await waitFor(async () => expect(await roundFor('penmar')).toBeDefined())
+    // and the round is byte-identical to one created before any of this existed
+    expect((await roundFor('penmar'))!.trackPutts).toBeUndefined()
+  })
+
   it('keeps an unplayable game visible in the by-type view, with the reason', async () => {
     await toStepTwo() // two players
     const sheet = within(await picker())

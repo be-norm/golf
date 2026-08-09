@@ -379,6 +379,17 @@ export interface GameActionCopy {
   emptyState: string
 }
 
+/**
+ * A fact about how a hole was PLAYED that lives on the round rather than in any
+ * one bet, is entered by the scorekeeper, and reaches engines through
+ * `RoundContext` — the one-way escape hatch invariant #7 reserves.
+ *
+ * A set rather than a boolean per fact because the hatch is designed to carry
+ * more of them: Criers & Whiners' mulligan credits are the next one the catalog
+ * names. Each is something several games want and none should collect twice.
+ */
+export type RoundFact = 'putts'
+
 /** Player-facing rules, rendered generically by the rules sheet. Must describe
  *  THIS implementation (our point tables, our press conventions), not folklore. */
 export interface GameRules {
@@ -407,6 +418,21 @@ export interface GameEngine<C = unknown> {
     /** every shape this game can be played in; see GameShape */
     shapes: readonly GameShape[]
     rules: GameRules
+    /**
+     * Round-level facts this engine READS out of `RoundContext` — the ones a
+     * scorekeeper has to enter and no engine can derive alone (MAI-90).
+     *
+     * Presentation, like everything else on `meta`: `deriveRound` never looks
+     * at it. What reads it is SETUP, which turns the round's collection of that
+     * fact on and says which game asked. That is the only way a game can
+     * require one — `validateSetup` sees config, players and siblings, never
+     * the round, so an engine cannot otherwise refuse a round that isn't
+     * collecting what it needs, and would derive nothing while looking healthy.
+     *
+     * It is also what keeps the entry affordance off every other round: a group
+     * playing Skins is asked for putts by nobody, so nothing asks them.
+     */
+    reads?: readonly RoundFact[]
     /**
      * Required of any engine whose `derive` returns `availableActions` — the
      * shared affordance has no vocabulary of its own, and a game that offers
