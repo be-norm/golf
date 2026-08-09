@@ -98,6 +98,50 @@ describe('ScoringScreen', () => {
   })
 
   /**
+   * The other half of guarding undo, and the one that would hurt: a PERMANENT
+   * set must not suppress a legitimate later undo. It cannot, because
+   * `effectiveEvents` strips retracted events — so a retracted id can never be
+   * `last` again, and each tap targets something new. Asserted rather than
+   * argued, because "the guard swallowed my undo" is a far worse bug than the
+   * duplicate it prevents.
+   */
+  it('undoes repeatedly, one event at a time', async () => {
+    const round = makeRound({
+      players: makePlayers([{ name: 'Cal' }, { name: 'Dee' }]),
+      holes: 'front9',
+      games: [{ type: 'skins', config: { stakeCents: 100, carryover: true } }],
+    })
+    round.id = 'round-undo-repeat'
+    await db.rounds.put(round)
+
+    const router = createMemoryRouter(routes, { initialEntries: [`/round/${round.id}`] })
+    render(<RouterProvider router={router} />)
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Cal score' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Dee score' }))
+    await waitFor(async () => {
+      expect(await eventStore.list(round.id)).toHaveLength(2)
+    })
+
+    const undoButton = await screen.findByRole('button', { name: 'undo' })
+    for (const expected of [3, 4]) {
+      await userEvent.click(undoButton)
+      await waitFor(async () => {
+        expect(await eventStore.list(round.id)).toHaveLength(expected)
+      })
+    }
+
+    const events = await eventStore.list(round.id)
+    const retracts = events.filter((e) => e.type === 'meta/retract')
+    expect(retracts).toHaveLength(2)
+    // two DIFFERENT targets, newest first — not the same event twice
+    expect(retracts.map((e) => (e as { targetEventId: string }).targetEventId)).toEqual([
+      events[1]!.id,
+      events[0]!.id,
+    ])
+  })
+
+  /**
    * The header ↩ Undo survives its own tap, so two quick taps read the same
    * render closure, compute the same `last` event, and retract it twice.
    * Replay shrugs — retract targets collect into a Set — but the duplicate
