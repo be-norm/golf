@@ -126,8 +126,11 @@ Lowest total net. Allowance 95% common (WHS). Ties: countback (back 9 → last 6
 - **Money:** one settlement line, and only when the match is won. Each player pays or collects
   the stake; a lone side against a pair plays the stake against each opponent (`sideStake`), so
   an uneven 2v1 stays zero-sum.
-- `category: 'either'` — a match beside a group Skins is an ordinary side bet, and a `'main'`
-  category would have made that unbuildable in the picker.
+- `category: 'either'` — a match riding beside a group game is an ordinary side bet, and a
+  `'main'` category would have kept it out of the picker's side-bet section entirely. Note the
+  limit: sides partition the WHOLE roster (`nonEmptyPartitionProblems`), so a foursome's match
+  is 2v2, never two of them playing while the other two sit out. Subset sides would be a change
+  to the shared teams contract, not to this engine.
 
 ### 7. Best Ball / Four-Ball — Tier 1, strokes-only
 Team hole score = lowest net among teammates. WHS: 90% match / 85% stroke, off low in group.

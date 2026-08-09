@@ -285,8 +285,10 @@ export function matchWonLabel(match: MatchState, sides: MatchSides): string | nu
  * A full side collectively wagers ONE stake (the 1v1/2v2 convention: a $5 bet
  * swings $5 per player). An outnumbered lone player instead plays that stake
  * against EACH opponent, so their swing scales with the other side's size —
- * this keeps an uneven 2v1 zero-sum and mirrors Wolf's lone-wolf math. With
- * ≤4 players the only uneven split is a lone side, so it stays integer.
+ * this keeps an uneven 2v1 zero-sum and mirrors Wolf's lone-wolf math. Every
+ * caller caps itself at four players, where the only uneven split IS a lone
+ * side, so it stays integer — a fifth-player game would have to check that
+ * again rather than inherit it.
  */
 export function sideStake(
   // `stake`, not `stakeCents`: Nassau passes cents, Wolf passes dimensionless

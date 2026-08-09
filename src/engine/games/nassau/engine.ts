@@ -590,7 +590,7 @@ export const nassauEngine: GameEngine<NassauConfig> = {
         'A bet is won the moment a side is up more holes than the bet has left — 3 up with 2 to play is won 3&2, the margin stops moving there, and the money settles on that hole.',
         'Otherwise the bet runs to the end of its stretch: whoever is up wins its stake, and a tied bet pushes.',
         'Every player pays or collects the stake — a $5 bet swings $5 per player, in singles or 2v2.',
-        'In a 2-v-1, the solo player plays each opponent for the stake: a $5 bet swings $10 for them, $5 for each of the pair.',
+        'Outnumbered, a lone player plays the stake against each opponent: a $5 bet swings $10 against two of them, $15 against three, while each of them swings $5.',
         'A hole where only one side posts a score goes to that side; no scores at all halves it.',
       ],
       terms: [
@@ -615,7 +615,7 @@ export const nassauEngine: GameEngine<NassauConfig> = {
   configFields: [
     { key: 'stakeCents', kind: 'money', label: 'Stake per bet', min: 100, step: 100 },
     { key: 'autoPress', kind: 'boolean', label: 'Auto-press', hint: 'New press at 2 down' },
-    { key: 'teams', kind: 'teams', label: 'Teams (best ball · 2v2 or 2v1)' },
+    { key: 'teams', kind: 'teams', label: 'Teams (best ball · two sides)' },
   ],
   defaultConfig: (players) => ({
     stakeCents: 500,

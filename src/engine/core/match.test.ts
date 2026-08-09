@@ -99,6 +99,18 @@ describe('stretchLabel', () => {
   it('reads the holes actually played, not the range the round declared', () => {
     expect(stretchLabel([1, 2, 3, 4, 5, 6, 7, 8, 9], 'full18')).toBe('F9')
   })
+
+  /**
+   * No holes at all falls back to the range, because it is the only thing left
+   * to answer from. A round can genuinely reach this — a back-nine round whose
+   * course snapshot has nine holes leaves `holesPlayed` empty (context.ts), and
+   * `importRound` validates games loosely enough to restore one. It moves no
+   * money either way; this pins the label rather than leaving it to chance.
+   */
+  it('answers from the declared range when no holes are playable', () => {
+    expect(stretchLabel([], 'back9')).toBe('B9')
+    expect(stretchLabel([], 'full18')).toBe('F9')
+  })
 })
 
 describe('toPlayAfterIn', () => {

@@ -115,7 +115,7 @@ describe('gameLabel', () => {
    * The ASCII rule has to hold for text this file never sees. Boolean and select
    * phrases come from engine-authored `configFields` labels, and this repo
    * already writes "·" into exactly that kind of string — nassau's teams field
-   * is `'Teams (best ball · 2v2 or 2v1)'`, off the card today only because
+   * is `'Teams (best ball · two sides)'`, off the card today only because
    * `teams` has no short form. So the guard lives in `renderFieldValue`: an
    * unpaintable phrase is skipped rather than shown, and the label degrades to
    * numbering instead of painting a glyph in the wrong typeface.

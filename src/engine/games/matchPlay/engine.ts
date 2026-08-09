@@ -228,16 +228,22 @@ export const matchPlayEngine: GameEngine<MatchPlayConfig> = {
   type: 'matchPlay',
   meta: {
     name: MATCH_PLAY_NAME,
-    blurb: 'One match over the round. Win more holes than are left and it is over.',
+    blurb: 'One match over the round. Go up more holes than are left and it is over.',
     minPlayers: 2,
     maxPlayers: 4,
     // 'either', not 'main'. The picker offers a game in the side-bet section
-    // only if its category admits one (GamePickerSheet), and "the group plays
-    // skins, two of us have a match going" is the ordinary case — 'main' would
-    // make it unbuildable. Nothing is lost: an 'either' game with no main
-    // beside it still reads as the main event (roleOf), and beside a Nassau it
-    // correctly reads as the side bet instead of leaving the round with two
-    // main events for `primaryGame` to pick between on order alone.
+    // only if its category admits one (GamePickerSheet), and a match riding
+    // alongside a group game is ordinary: a pair playing skins and a match at
+    // the same time, or a four-ball whose main event is the skins pot. 'main'
+    // would make both unbuildable. Nothing is lost, either: an 'either' game
+    // with no main beside it still reads as the main event (roleOf), and beside
+    // a Nassau it correctly reads as the side bet instead of leaving the round
+    // with two main events for `primaryGame` to pick between on order alone.
+    //
+    // What it does NOT buy is a match between two players out of four. Sides
+    // are `nonEmptyPartitionProblems` — every player on exactly one of them —
+    // so a foursome's match is 2v2, never Ann v Bob with the other two sitting
+    // it out. Subset sides would be a change to the shared teams contract.
     category: 'either',
     family: 'match',
     // 1v1 by default, fixed sides when `teams` is set — the same set Nassau
@@ -255,7 +261,7 @@ export const matchPlayEngine: GameEngine<MatchPlayConfig> = {
         'The match is won the moment a side is up more holes than the match has left — 3 up with 2 to play is won 3&2, the margin stops moving there, and the money settles on that hole.',
         'Otherwise it runs to the last hole: whoever is up wins the stake, and a level match pushes.',
         'Every player pays or collects the stake — a $5 match swings $5 per player, in singles or 2v2.',
-        'In a 2-v-1, the solo player plays each opponent for the stake: a $5 match swings $10 for them, $5 for each of the pair.',
+        'Outnumbered, a lone player plays the stake against each opponent: a $5 match swings $10 against two of them, $15 against three, while each of them swings $5.',
         'A hole where only one side posts a score goes to that side; no scores at all halves it.',
       ],
       terms: [
@@ -281,7 +287,7 @@ export const matchPlayEngine: GameEngine<MatchPlayConfig> = {
   configSchema: matchPlayConfigSchema,
   configFields: [
     { key: 'stakeCents', kind: 'money', label: 'Stake', min: 100, step: 100 },
-    { key: 'teams', kind: 'teams', label: 'Teams (best ball · 2v2 or 2v1)' },
+    { key: 'teams', kind: 'teams', label: 'Teams (best ball · two sides)' },
   ],
   defaultConfig: (players) => ({
     stakeCents: 500,

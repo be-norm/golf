@@ -125,7 +125,7 @@ function discriminator(
  * THE ASCII RULE IS ENFORCED HERE, not asked for. Boolean and select phrases
  * are engine-authored free text, and this repo already writes "·" into exactly
  * that kind of string — `nassau`'s teams field is literally
- * `'Teams (best ball · 2v2 or 2v1)'`, kept off the share card today only by the
+ * `'Teams (best ball · two sides)'`, kept off the share card today only by the
  * accident that `teams` has no short form. A convention would have caught that
  * the day someone added a boolean labelled the same way; a choke point catches
  * it always. A rejected label simply falls through to the next candidate, so
