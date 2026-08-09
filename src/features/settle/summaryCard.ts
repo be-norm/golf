@@ -124,9 +124,18 @@ export const ALL_SQUARE = 'all square — nothing moved'
  */
 export function moneyLine(money: readonly MoneyRow[]): string {
   if (money.length === 0) return ALL_SQUARE
+  // THE PAIR is the unbreakable unit, so every space inside it becomes a
+  // non-breaking one — not just the join. Half the players in a real round are
+  // entered as "Ben Norman", and joining only name-to-amount left the wrap free
+  // to break inside the NAME instead: "Ben" alone on one line, "Norman +$10" on
+  // the next. Same stranded-token failure, one word earlier.
+  //
   // Escaped rather than typed: a load-bearing invisible character is one a
   // later edit silently replaces with a plain space.
-  return money.map((m) => `${m.name}\u00A0${formatCentsSigned(m.cents)}`).join(` \u00B7 `)
+  const NBSP = '\u00A0'
+  return money
+    .map((m) => `${m.name} ${formatCentsSigned(m.cents)}`.replace(/ /g, NBSP))
+    .join(' \u00B7 ')
 }
 
 /**

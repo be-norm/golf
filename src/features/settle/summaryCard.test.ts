@@ -372,6 +372,14 @@ describe('buildSummaryCard', () => {
     expect(line.split(' ')).toEqual([`John${NBSP}+$10`, '\u00B7', `Mike${NBSP}-$10`])
     // a PLAIN space between a name and its amount is the bug this prevents
     expect(line).not.toMatch(/John \+/)
+    // A NAME WITH A SPACE IN IT is the case that makes the pair — not the
+    // join — the unbreakable unit. Joining only name-to-amount left the wrap
+    // free to break inside the name instead, stranding "Ben" on its own line
+    // above "Norman +$10", which is the same failure one word earlier.
+    const twoWord = moneyLine([{ playerId: 'p-c', name: 'Ben Norman', cents: 1000 }])
+    expect(twoWord).toBe(`Ben${NBSP}Norman${NBSP}+$10`)
+    expect(twoWord.split(' ')).toHaveLength(1)
+
     // and never an empty value: `wrapText('')` returns [], so the painter would
     // reserve zero height and draw the next line straight on top of it
     expect(moneyLine([]).length).toBeGreaterThan(0)
