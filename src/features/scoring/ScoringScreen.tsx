@@ -54,18 +54,18 @@ export function ScoringScreen() {
   const [actionsOpen, setActionsOpen] = useState(false)
   // event ids already sent for retraction — see `giveBack`
   const undoneRef = useRef<Set<string>>(new Set())
-  // event key → has its append committed yet? See `emitOnce`.
-  const takingRef = useRef<Map<string, boolean>>(new Map())
-  // Release the guard only for events that are BOTH written and now visible.
-  // A derivation proves the events it contains and no others, so clearing the
-  // whole map would drop a key whose append is still in flight — its control
-  // still renders untaken, and the next tap on it appends the duplicate this
-  // exists to stop. An effect rather than a render-phase check both because
-  // refs must not be touched during render and because after the commit is the
-  // honest moment: that is when the control actually reads `taken`.
+  // event key → the id it was written as, or undefined while still in flight.
+  // See `emitOnce`.
+  const takingRef = useRef<Map<string, string | undefined>>(new Map())
+  // Release a key only once the derivation actually CONTAINS its event — the
+  // control on screen now reflects the tap, so a further tap is a further
+  // intent rather than a stale duplicate. An effect rather than a render-phase
+  // check both because refs must not be touched during render and because
+  // after the commit is the honest moment.
   useEffect(() => {
-    for (const [key, committed] of takingRef.current) {
-      if (committed) takingRef.current.delete(key)
+    if (!view) return
+    for (const [key, id] of takingRef.current) {
+      if (id !== undefined && view.events.some((e) => e.id === id)) takingRef.current.delete(key)
     }
   }, [view])
 
@@ -229,34 +229,48 @@ export function ScoringScreen() {
    * the first game to COUNT its events rather than treat them as a set would
    * double-pay on a fumbled tap.
    *
-   * THE KEY IDENTIFIES THE EVENT, NOT THE CONTROL, and both halves of that
-   * cost a review round to get right:
+   * THE KEY IS THE EVENT — the whole payload, not the control that emitted it.
+   * Three review rounds narrowed it to that, each time by finding one more
+   * thing the identity had to include:
    *
-   * - It carries the GAME. `GameEventOffer.id` and `InputRequest.id` are unique
-   *   only WITHIN a game — an engine cannot see its siblings — and a round can
-   *   hold two instances of one game (MAI-44), so two CTPs both mint
-   *   `ctp-4-p-ann`. A bare id makes the second game's tap vanish silently.
-   * - For an input it carries the ANSWER too. One `InputRequest` renders a row
-   *   of options, and they are alternatives, not repeats: keying on the prompt
-   *   alone means a slip-tap on a Wolf partner followed at once by the intended
-   *   Lone Wolf keeps the PARTNER — a different hole multiplier and different
-   *   sides, so wrong money, and worse than the duplicate this prevents.
-   *   Deduping is for the same answer twice; changing your mind must get
-   *   through, and replay's last-write-wins is what makes it correct.
+   * - The GAME. `GameEventOffer.id` and `InputRequest.id` are unique only
+   *   WITHIN a game (an engine cannot see its siblings) and a round can hold
+   *   two instances of one game (MAI-44), so two CTPs both mint `ctp-4-p-ann`.
+   * - For an input, the ANSWER. One `InputRequest` renders a row of options and
+   *   they are alternatives, not repeats: a slip-tap on a Wolf partner followed
+   *   at once by the intended Lone Wolf must keep LONE. Deduping is for the
+   *   same answer twice; changing your mind gets through, and replay's
+   *   last-write-wins is what makes that correct.
+   * - And the option's own `data`, which is exactly what a future game will use
+   *   to tell two options apart (BBB's three points, a hammer's multiplier) —
+   *   two options sharing a `value` and differing only there are different
+   *   answers.
    *
-   * RELEASED WHEN THE EVENT IS BOTH WRITTEN AND VISIBLE — not on the append,
-   * which resolves before Dexie's live query re-reads and so hands the guard
-   * back inside the very window it exists to close; and not on any derivation,
-   * which proves only the events it actually contains and would drop a key
-   * whose append is still in flight. A failed append releases at once, since no
-   * derivation is coming to do it.
+   * Keying on the payload makes all three true by construction rather than by
+   * three remembered rules, and there is nothing left for a fourth to miss:
+   * identical payload = the same event = a duplicate.
+   *
+   * RELEASED WHEN THE EVENT IS ACTUALLY VISIBLE IN A DERIVATION, which is what
+   * the guard is about and is NOT the same as the append resolving. With two
+   * appends in flight the live query re-read triggered by the first can be
+   * delivered after the second has committed, so releasing on "committed plus
+   * any new derivation" drops a key whose event that derivation does not
+   * contain — reopening the window. Holding the event's own id and looking for
+   * it closes that. A failed append releases at once, since no derivation is
+   * coming to do it.
    */
-  const emitOnce = (key: string, draft: EventDraft) => {
+  type GameEventDraft = Extract<EventDraft, { type: 'game/event' }>
+  const emitOnce = (draft: GameEventDraft) => {
+    const key = `${draft.gameId}:${draft.kind}:${JSON.stringify(draft.data)}`
     if (takingRef.current.has(key)) return
-    takingRef.current.set(key, false)
+    takingRef.current.set(key, undefined)
     void eventStore
       .append(round.id, [draft])
-      .then(() => takingRef.current.set(key, true))
+      .then(([event]) => {
+        // nothing written means nothing to wait for
+        if (event) takingRef.current.set(key, event.id)
+        else takingRef.current.delete(key)
+      })
       .catch(() => takingRef.current.delete(key))
   }
 
@@ -264,7 +278,7 @@ export function ScoringScreen() {
   // two are the channel's contract, and an option disagreeing with the prompt
   // it was rendered beneath is a bug rather than a feature (MAI-46).
   const answerInput = (input: InputRequest, option: InputRequest['options'][number]) => {
-    emitOnce(`${input.gameId}:${input.id}:${option.value}`, {
+    emitOnce({
       type: 'game/event',
       gameId: input.gameId,
       kind: input.eventKind,
@@ -276,10 +290,8 @@ export function ScoringScreen() {
   // one game event lands; give it back and its events are retracted. An award
   // cell and a press row differ in WHEN they may be tapped, never in what a tap
   // does — so they must not differ in the code that does it either.
-  // An offer's id already names one hole, one player, one thing, so it IS the
-  // event's identity — unlike an input, whose options are alternatives.
   const take = (offer: GameEventOffer) => {
-    emitOnce(`${offer.gameId}:${offer.id}`, {
+    emitOnce({
       type: 'game/event',
       gameId: offer.gameId,
       kind: offer.eventKind,
