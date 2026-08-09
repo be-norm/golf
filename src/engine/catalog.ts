@@ -17,6 +17,51 @@ import type {
 // it alongside GameDerivation.
 export type { StandingLine }
 
+/**
+ * The WRITE half the two optional channels share: offer something tappable,
+ * emit exactly one game event, undo by retracting it (invariant #2 — compensate,
+ * never delete).
+ *
+ * Deliberately NOT the lifecycle. WHEN a thing may be tapped is the entire
+ * difference between an action and an award — a press belongs to the tee you
+ * are standing on, an award belongs to whichever hole it happened on, forever —
+ * and that difference lives on the screens, not here.
+ */
+export interface GameEventOffer {
+  /**
+   * Stable id — the same offer across re-derives keeps the same id.
+   *
+   * Unique WITHIN this game, not across the round: an engine cannot see its
+   * siblings, and a round can hold two instances of one game (MAI-44), so two
+   * Nassaus both mint `nassau-press-front-3`. Any consumer flattening offers
+   * from several games into one keyed list must compose with `gameId`.
+   */
+  id: string
+  gameId: Uuid
+  eventKind: string
+  /**
+   * Appended verbatim as the game event's data.
+   *
+   * IT MUST CARRY `hole`. `buildHoleLedger` places a game event in its
+   * prefix replay by reading `data.hole` (ledger.ts), so a payload without one
+   * is attributed to every prefix and lands its money on the wrong ledger row.
+   * Awards make this load-bearing rather than incidental: they are the one
+   * thing in the app designed to be recorded LONG after the hole they describe.
+   */
+  data: Record<string, unknown>
+  /**
+   * Already in effect. The offer stays visible rather than vanishing, so a
+   * mistap is visible and reversible instead of silently final.
+   */
+  taken?: boolean
+  /**
+   * Events to retract to undo it (invariant #2: compensate, never delete).
+   * Empty when the GAME started it rather than the player — an auto-press is
+   * not theirs to undo, so the UI shows it engaged but inert.
+   */
+  undoEventIds?: Uuid[]
+}
+
 /** A blocking prompt the scoring UI renders as a generic chip — no game-specific screens. */
 export interface InputRequest {
   /** stable id so answering emits exactly one event */
@@ -24,8 +69,17 @@ export interface InputRequest {
   gameId: Uuid
   hole: number
   prompt: string
-  options: { value: string; label: string }[]
-  /** the game event kind to append with data { hole, choice } */
+  /**
+   * `data` rides along into the emitted payload, under the channel's own
+   * `{ hole, choice }` — so an option can carry the extra facts its answer
+   * needs (which of Bingo Bango Bongo's three points, a hammer's multiplier)
+   * without every such game inventing a second event kind. It cannot overwrite
+   * `hole` or `choice`: those are the channel's contract, and an option that
+   * disagreed with the prompt it was rendered under would be a bug, not a
+   * feature.
+   */
+  options: { value: string; label: string; data?: Record<string, unknown> }[]
+  /** the game event kind to append with data { ...option.data, hole, choice } */
   eventKind: string
 }
 
@@ -43,10 +97,7 @@ export interface InputRequest {
  * Contrast `InputRequest`, which is genuinely blocking: Wolf's hole cannot
  * compute without its pick, so that one is right to interrupt.
  */
-export interface GameAction {
-  /** stable id — same action across re-derives keeps the same id */
-  id: string
-  gameId: Uuid
+export interface GameAction extends GameEventOffer {
   /** the hole the action takes effect from (a press starts here) */
   hole: number
   /** the button, e.g. "Press F9" */
@@ -57,20 +108,46 @@ export interface GameAction {
   effect: string
   /** the game's convention says act now — the UI badges these */
   recommended: boolean
-  eventKind: string
-  /** appended verbatim as the game event's data */
-  data: Record<string, unknown>
   /**
-   * Already in effect. The row stays in the list rather than vanishing, so a
-   * mistap is visible and reversible instead of silently final.
+   * The badge on a recommended row, in the game's own words — "2 down" for a
+   * Nassau press. Short: it renders in a 9px column beside the row.
+   *
+   * NOT `detail`, which the row already prints two lines up. Sourcing the badge
+   * from there would set "Bob 2 down · 7 to play" twice in one row and blow the
+   * column. This is per-action rather than per-engine because the reason can
+   * vary between offers even though Nassau's happens not to (MAI-47).
    */
-  taken?: boolean
-  /**
-   * Events to retract to undo it (invariant #2: compensate, never delete).
-   * Empty when the GAME started it rather than the player — an auto-press is
-   * not theirs to undo, so the UI shows it engaged but inert.
-   */
-  undoEventIds?: Uuid[]
+  recommendedReason?: string
+}
+
+/**
+ * ONE PLAYER, ONE THING, ONE HOLE — closest to the pin, a greenie, a sandie,
+ * the snake. The third input channel, and it exists because neither of the
+ * other two fits (MAI-46):
+ *
+ * - `requiredInputs` BLOCKS scoring. Nobody is stuck waiting on a greenie.
+ * - `availableActions` is a flat list behind a button, and it is frontier-gated
+ *   (`ScoringScreen`): correct for a press, which must be declared on the tee
+ *   you are standing on, and wrong for an award in exactly the cases awards
+ *   exist for. You remember on 12 that Rob had the greenie on 7; you mistap a
+ *   KP and notice once every hole is scored. Both must stay recordable.
+ *
+ * THE LIFECYCLE RULE, which is the whole ticket: editable on ANY hole the round
+ * has reached, including after every hole is scored, right up to
+ * `round/completed`. Awards do not inherit the frontier gate.
+ *
+ * The engine decides which groups appear on which hole (KP only on par 3s), so
+ * the grid stays generic and no screen ever grows per-game branching.
+ */
+export interface Award extends GameEventOffer {
+  hole: number
+  playerId: Uuid
+  /** the row: what is being given, e.g. "Closest to the pin" */
+  group: string
+  /** the cell: who it would be given to, i.e. the player's name */
+  label: string
+  /** a cell is a toggle and is never indeterminate, so this is not optional */
+  taken: boolean
 }
 
 export interface GameDerivation {
@@ -108,6 +185,17 @@ export interface GameDerivation {
    * affordance for this game; leave it off and nothing changes.
    */
   availableActions?(): GameAction[]
+  /**
+   * Per-player, per-hole awards for ONE hole — the grid under the score rows.
+   * Implement it and the scoring screen grows an award grid for this game;
+   * leave it off and nothing changes.
+   *
+   * Takes the hole, like `holeSummary`, rather than returning the round's worth
+   * at once: 18 holes × 4 players × 6 groups is 432 objects per game per
+   * derive, and `deriveRound` runs on every tap plus once per hole inside
+   * `buildHoleLedger`'s prefix replay.
+   */
+  awards?(hole: number): Award[]
   settlement: Settlement
   /**
    * Things the game has to SAY on the settle surface that are not money
@@ -268,6 +356,29 @@ export type GameShape =
   /** sides that re-form each hole */
   | 'partners'
 
+/**
+ * How this game TALKS about its optional actions — the button, the sheet
+ * header, the explainer, the empty state.
+ *
+ * A sibling of `meta.rules` because it is the same kind of thing: player-facing
+ * copy the engine owns. `GameAction` is a generic channel, but every string
+ * around it used to be Nassau's, so the second action-bearing game would have
+ * inherited "Press" as its button and "a press is a new bet at the same stake"
+ * as its explanation (MAI-47).
+ *
+ * `plural` is declared rather than derived: "Press" + "s" is "Presss".
+ */
+export interface GameActionCopy {
+  /** the button and the sheet header — "Press" | "Throw" | "Wager" */
+  verb: string
+  /** the header when nothing names a hole — "Presses" */
+  plural: string
+  /** what taking one of these MEANS, in a sentence or two */
+  blurb: string
+  /** why there is nothing on offer, stated as the RULE rather than one cause */
+  emptyState: string
+}
+
 /** Player-facing rules, rendered generically by the rules sheet. Must describe
  *  THIS implementation (our point tables, our press conventions), not folklore. */
 export interface GameRules {
@@ -296,6 +407,14 @@ export interface GameEngine<C = unknown> {
     /** every shape this game can be played in; see GameShape */
     shapes: readonly GameShape[]
     rules: GameRules
+    /**
+     * Required of any engine whose `derive` returns `availableActions` — the
+     * shared affordance has no vocabulary of its own, and a game that offers
+     * actions without declaring this would render the previous game's verb.
+     * Enforced by catalog.test.ts rather than by the type, which cannot see
+     * inside `derive`.
+     */
+    actions?: GameActionCopy
   }
   configSchema: z.ZodType<C>
   configFields: ConfigFieldSpec[]

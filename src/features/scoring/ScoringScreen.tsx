@@ -1,15 +1,25 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router'
 import { motion, AnimatePresence } from 'motion/react'
 import { eventStore } from '../../db/eventStore'
 import { roundRepo } from '../../db/repos'
-import { effectiveEvents } from '../../engine/core/replay'
+import { effectiveEvents, isCompleted } from '../../engine/core/replay'
 import { combineSettlements, formatCentsSigned } from '../../engine/core/money'
-import type { GameAction, GameDerivation, InputRequest } from '../../engine/catalog'
+import { getEngine } from '../../engine/catalog'
+import type {
+  Award,
+  GameAction,
+  GameActionCopy,
+  GameDerivation,
+  GameEventOffer,
+  InputRequest,
+} from '../../engine/catalog'
+import type { EventDraft } from '../../engine/core/events'
 import type { GameConfig, Round } from '../../engine/core/types'
 import { gameLabel } from '../../engine/label'
 import { partitionByRole, shouldGroupSideBets, strokeGame } from '../../lib/gameRoles'
 import { ActionsSheet } from './ActionsSheet'
+import { AwardGrid } from './AwardGrid'
 import { Sheet } from '../../components/Sheet'
 import { GameSummary, SummaryParts, type SummaryPart } from '../../components/GameSummary'
 import { DetailLines } from '../../components/DetailLines'
@@ -21,6 +31,18 @@ import { useRound } from './useRound'
 import { holeLoop, ordinal } from './holeLoop'
 import { ScoreRow } from './ScoreRow'
 
+/**
+ * Used only when no single game owns the affordance — several games offering
+ * at once, or (a bug catalog.test.ts fails on) one that declares nothing.
+ * Deliberately says nothing about any game's rules.
+ */
+const DEFAULT_ACTION_COPY: GameActionCopy = {
+  verb: 'Actions',
+  plural: 'Actions',
+  blurb: 'Optional moves your games are offering right now. Each one says what it costs.',
+  emptyState: 'Nothing on offer right now.',
+}
+
 export function ScoringScreen() {
   const { roundId } = useParams<{ roundId: string }>()
   const navigate = useNavigate()
@@ -30,8 +52,22 @@ export function ScoringScreen() {
   const [standingsOpen, setStandingsOpen] = useState(false)
   const [rulesFor, setRulesFor] = useState<string>()
   const [actionsOpen, setActionsOpen] = useState(false)
-  // event ids already sent for retraction — see `undoAction`
+  // event ids already sent for retraction — see `giveBack`
   const undoneRef = useRef<Set<string>>(new Set())
+  // event key → the id it was written as, or undefined while still in flight.
+  // See `emitOnce`.
+  const takingRef = useRef<Map<string, string | undefined>>(new Map())
+  // Release a key only once the derivation actually CONTAINS its event — the
+  // control on screen now reflects the tap, so a further tap is a further
+  // intent rather than a stale duplicate. An effect rather than a render-phase
+  // check both because refs must not be touched during render and because
+  // after the commit is the honest moment.
+  useEffect(() => {
+    if (!view) return
+    for (const [key, id] of takingRef.current) {
+      if (id !== undefined && view.events.some((e) => e.id === id)) takingRef.current.delete(key)
+    }
+  }, [view])
 
   // Initial hole, captured ONCE when the view first loads: ?hole= deep link
   // (scorecard tap), else first not-fully-scored hole, else the last hole.
@@ -70,6 +106,28 @@ export function ScoringScreen() {
     () => (view ? [...view.derivations.values()].some((d) => d.availableActions) : false),
     [view],
   )
+  // The vocabulary belongs to the games actually OFFERING (MAI-47): if they all
+  // speak the same one, the affordance speaks it too; otherwise it says nothing
+  // specific, because "⚡ Press" over a list holding a hammer throw is worse
+  // than neutral wording.
+  //
+  // The test is over every offering game, not over the copies that survive a
+  // filter, and both halves of that matter. Counting only DECLARED copies made
+  // two Nassaus — a supported round since MAI-44, since `duplicateInstanceProblems`
+  // blocks only identical settings — read as "two voices" and fall back to
+  // "Actions", losing the empty state that answers "why can't I press?". And
+  // it made Nassau beside a game that declares NOTHING read as one voice, so
+  // Nassau's verb and blurb rendered over the other game's actions — precisely
+  // the failure MAI-47 exists to prevent. Reference equality is the right test:
+  // `meta.actions` is one object per engine, so two instances of a game share it.
+  const actionCopy = useMemo(() => {
+    if (!view) return DEFAULT_ACTION_COPY
+    const voices = view.round.games
+      .filter((g) => view.derivations.get(g.gameId)?.availableActions)
+      .map((g) => getEngine(g.type)?.meta.actions)
+    const first = voices[0]
+    return first && voices.every((c) => c === first) ? first : DEFAULT_ACTION_COPY
+  }, [view])
   const recommendsAction = actions.some((a) => a.recommended)
   // the badge counts what's still on OFFER — a press already running is in the
   // list so it can be undone, but it isn't something left to take
@@ -121,6 +179,21 @@ export function ScoringScreen() {
     : []
   const holeInputs = pendingInputs.filter((i) => i.hole === currentHole)
 
+  // Deliberately NOT a useMemo: `currentHole` is derived below the early
+  // returns, so keying a hook on it would mean moving one or the other. It is a
+  // handful of array pushes, and `awards(hole)` builds one hole's worth by
+  // design (see GameDerivation.awards).
+  //
+  // COMPLETED IS THE ONE GATE. Awards are editable on any hole the round has
+  // reached, right up to `round/completed` — not frontier-gated like the press
+  // button above, and not withdrawn once every hole is scored. Read off the
+  // EVENTS rather than `round.status`, so a reopened round gets its grid back.
+  const roundOver = isCompleted(round, effectiveEvents(view.events))
+  const holeAwards: Award[] = []
+  if (!roundOver) {
+    for (const d of derivations.values()) holeAwards.push(...(d.awards?.(currentHole) ?? []))
+  }
+
   // A press starts from the first unfinished hole — the tee the group is
   // standing on. Only offer it while that hole is the one on screen: entering
   // hole 1's scores must not light up an offer for hole 2 while hole 1 is still
@@ -139,42 +212,140 @@ export function ScoringScreen() {
     void eventStore.append(round.id, [{ type: 'score/set', playerId, hole: currentHole, gross }])
   }
 
+  // The last emitter on this screen without a same-frame guard, and it needs
+  // one for the reason all the others do: the header button survives its own
+  // tap, so two quick taps read the same `view` closure, compute the same
+  // `last`, and append two retracts of the same event. Replay shrugs (targets
+  // collect into a Set) but the duplicate outlives the round in every export.
+  //
+  // `undoneRef` is the right set to share with `giveBack`, and permanent is
+  // right — with one condition. `effectiveEvents` strips RETRACTED events, so
+  // an id whose retract was written can never be `last` again; but that says
+  // nothing about an id whose retract was never written at all. A rejected
+  // append (quota, a DatabaseClosedError during another tab's upgrade, an
+  // aborted transaction) would otherwise leave the event live, still `last`,
+  // and permanently un-undoable — the scorekeeper tapping ↩ Undo on a wrong
+  // score and getting silence. So a failure releases, exactly as `emitOnce`
+  // below does and for the same reason.
   const undo = () => {
     const effective = effectiveEvents(view.events)
     const last = effective[effective.length - 1]
-    if (last) void eventStore.append(round.id, [{ type: 'meta/retract', targetEventId: last.id }])
+    if (!last || undoneRef.current.has(last.id)) return
+    undoneRef.current.add(last.id)
+    void eventStore
+      .append(round.id, [{ type: 'meta/retract', targetEventId: last.id }])
+      .catch(() => undoneRef.current.delete(last.id))
   }
 
-  const answerInput = (input: InputRequest, choice: string) => {
-    void eventStore.append(round.id, [
-      { type: 'game/event', gameId: input.gameId, kind: input.eventKind, data: { hole: input.hole, choice } },
-    ])
+  /**
+   * ONE TAP, ONE EVENT — for every control that emits a game event and then
+   * SURVIVES ITS OWN TAP, which is all of them except the actions row (whose
+   * sheet closes underneath it). An award cell, an input chip: both stay
+   * mounted until a re-derive replaces them, so two taps inside one frame both
+   * fire against stale props and append the same event twice. Replay shrugs —
+   * every reducer here is last-write-wins — but the log is append-only and
+   * syncs, so the duplicate outlives the round in every export and archive, and
+   * the first game to COUNT its events rather than treat them as a set would
+   * double-pay on a fumbled tap.
+   *
+   * THE KEY IS THE EVENT — the whole payload, not the control that emitted it.
+   * Three review rounds narrowed it to that, each time by finding one more
+   * thing the identity had to include:
+   *
+   * - The GAME. `GameEventOffer.id` and `InputRequest.id` are unique only
+   *   WITHIN a game (an engine cannot see its siblings) and a round can hold
+   *   two instances of one game (MAI-44), so two CTPs both mint `ctp-4-p-ann`.
+   * - For an input, the ANSWER. One `InputRequest` renders a row of options and
+   *   they are alternatives, not repeats: a slip-tap on a Wolf partner followed
+   *   at once by the intended Lone Wolf must keep LONE. Deduping is for the
+   *   same answer twice; changing your mind gets through, and replay's
+   *   last-write-wins is what makes that correct.
+   * - And the option's own `data`, which is exactly what a future game will use
+   *   to tell two options apart (BBB's three points, a hammer's multiplier) —
+   *   two options sharing a `value` and differing only there are different
+   *   answers.
+   *
+   * Keying on the payload makes all three true by construction rather than by
+   * three remembered rules, and there is nothing left for a fourth to miss:
+   * identical payload = the same event = a duplicate.
+   *
+   * RELEASED WHEN THE EVENT IS ACTUALLY VISIBLE IN A DERIVATION, which is what
+   * the guard is about and is NOT the same as the append resolving. With two
+   * appends in flight the live query re-read triggered by the first can be
+   * delivered after the second has committed, so releasing on "committed plus
+   * any new derivation" drops a key whose event that derivation does not
+   * contain — reopening the window. Holding the event's own id and looking for
+   * it closes that. A failed append releases at once, since no derivation is
+   * coming to do it.
+   */
+  type GameEventDraft = Extract<EventDraft, { type: 'game/event' }>
+  const emitOnce = (draft: GameEventDraft) => {
+    const key = `${draft.gameId}:${draft.kind}:${JSON.stringify(draft.data)}`
+    if (takingRef.current.has(key)) return
+    takingRef.current.set(key, undefined)
+    void eventStore
+      .append(round.id, [draft])
+      .then(([event]) => {
+        // nothing written means nothing to wait for
+        if (event) takingRef.current.set(key, event.id)
+        else takingRef.current.delete(key)
+      })
+      .catch(() => takingRef.current.delete(key))
+  }
+
+  // An option's own `data` rides UNDER `{ hole, choice }`, never over it: those
+  // two are the channel's contract, and an option disagreeing with the prompt
+  // it was rendered beneath is a bug rather than a feature (MAI-46).
+  const answerInput = (input: InputRequest, option: InputRequest['options'][number]) => {
+    emitOnce({
+      type: 'game/event',
+      gameId: input.gameId,
+      kind: input.eventKind,
+      data: { ...option.data, hole: input.hole, choice: option.value },
+    })
+  }
+
+  // The write half both optional channels share (GameEventOffer): take it and
+  // one game event lands; give it back and its events are retracted. An award
+  // cell and a press row differ in WHEN they may be tapped, never in what a tap
+  // does — so they must not differ in the code that does it either.
+  const take = (offer: GameEventOffer) => {
+    emitOnce({
+      type: 'game/event',
+      gameId: offer.gameId,
+      kind: offer.eventKind,
+      data: offer.data,
+    })
+  }
+
+  // Undo is a compensation event, never a delete (invariant #2). The actions
+  // sheet stays open: toggling a bet off then on again shouldn't cost two taps
+  // to re-open the same list.
+  //
+  // Which means, unlike a taken action, these controls survive their own tap —
+  // so two quick taps would both fire before the re-derive, appending the same
+  // retract twice. Replay tolerates that (targets collect into a Set), but the
+  // log is append-only and syncs: the duplicate would outlive the round in
+  // every export and archive. Guard on what's already been sent, not on render
+  // state. The award grid needs this for exactly the same reason — its cells
+  // stay mounted through their own tap.
+  // A failed append releases, same as `undo` and `emitOnce`: nothing was
+  // written, so the bet is still running and has to stay takeable back.
+  const giveBack = (offer: GameEventOffer) => {
+    const targets = (offer.undoEventIds ?? []).filter((id) => !undoneRef.current.has(id))
+    if (targets.length === 0) return
+    targets.forEach((id) => undoneRef.current.add(id))
+    void eventStore
+      .append(
+        round.id,
+        targets.map((targetEventId) => ({ type: 'meta/retract' as const, targetEventId })),
+      )
+      .catch(() => targets.forEach((id) => undoneRef.current.delete(id)))
   }
 
   const takeAction = (action: GameAction) => {
     setActionsOpen(false)
-    void eventStore.append(round.id, [
-      { type: 'game/event', gameId: action.gameId, kind: action.eventKind, data: action.data },
-    ])
-  }
-
-  // Undo is a compensation event, never a delete (invariant #2). The sheet
-  // stays open: toggling a bet off then on again shouldn't cost two taps to
-  // re-open the same list.
-  //
-  // Which means, unlike `takeAction`, this button survives its own tap — so two
-  // quick taps would both fire before the re-derive, appending the same retract
-  // twice. Replay tolerates that (targets collect into a Set), but the log is
-  // append-only and syncs: the duplicate would outlive the round in every
-  // export and archive. Guard on what's already been sent, not on render state.
-  const undoAction = (action: GameAction) => {
-    const targets = (action.undoEventIds ?? []).filter((id) => !undoneRef.current.has(id))
-    if (targets.length === 0) return
-    targets.forEach((id) => undoneRef.current.add(id))
-    void eventStore.append(
-      round.id,
-      targets.map((targetEventId) => ({ type: 'meta/retract' as const, targetEventId })),
-    )
+    take(action)
   }
 
   const finish = async () => {
@@ -263,7 +434,7 @@ export function ScoringScreen() {
                 {input.options.map((o) => (
                   <button
                     key={o.value}
-                    onClick={() => answerInput(input, o.value)}
+                    onClick={() => answerInput(input, o)}
                     className="pixel-press border-stone-600 bg-stone-800 px-4 py-2.5 text-lg"
                   >
                     {o.label}
@@ -283,7 +454,7 @@ export function ScoringScreen() {
         <section className="mb-2 flex justify-end">
           <button
             onClick={() => setActionsOpen(true)}
-            aria-label={`press options — ${openActions} available`}
+            aria-label={`${actionCopy.verb.toLowerCase()} options — ${openActions} available`}
             className={`pixel-press font-display px-4 py-2 text-[10px] uppercase ${
               recommendsAction
                 ? 'border-coin-500 bg-coin-500/15 text-coin-400'
@@ -295,7 +466,7 @@ export function ScoringScreen() {
             {/* only the marker blinks — house convention (HomeScreen, UpdateToast).
                 A primary control that strobes for ten holes is worse than the
                 interrupting card this replaced. */}
-            {recommendsAction && <span className="animate-blink mr-1">▶</span>}⚡ Press
+            {recommendsAction && <span className="animate-blink mr-1">▶</span>}⚡ {actionCopy.verb}
             {openActions > 0 && <span className="ml-1.5">· {openActions}</span>}
           </button>
         </section>
@@ -313,6 +484,17 @@ export function ScoringScreen() {
           />
         ))}
       </section>
+
+      <AwardGrid
+        awards={holeAwards}
+        playerIds={round.players.map((p) => p.playerId)}
+        gameName={(gameId) => {
+          const g = round.games.find((game) => game.gameId === gameId)
+          return g ? gameLabel(g, round.games) : ''
+        }}
+        onTake={take}
+        onUndo={giveBack}
+      />
 
       <div className="fixed inset-x-0 bottom-0 z-30 border-t-4 border-felt-600 bg-stone-950/95 px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 backdrop-blur">
         <div className="mx-auto max-w-md">
@@ -470,12 +652,13 @@ export function ScoringScreen() {
         open={actionsOpen}
         onClose={() => setActionsOpen(false)}
         actions={actions}
+        copy={actionCopy}
         games={round.games.flatMap((g) => {
           const d = derivations.get(g.gameId)
           return d ? [{ gameId: g.gameId, name: gameLabel(g, round.games), derivation: d }] : []
         })}
         onTake={takeAction}
-        onUndo={undoAction}
+        onUndo={giveBack}
       />
 
       <RulesSheet type={rulesFor} onClose={() => setRulesFor(undefined)} />

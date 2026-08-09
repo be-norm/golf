@@ -112,6 +112,35 @@ describe('engine registry invariants', () => {
   })
 
   /**
+   * `GameAction` is a generic channel, but the affordance around it has no
+   * vocabulary of its own (MAI-47) — so a game that offers actions and declares
+   * no copy would render whatever the previous game called its move, or the
+   * neutral fallback, with nothing saying why.
+   *
+   * The type cannot enforce this: whether a game offers actions is decided
+   * inside `derive`, not on `meta`. So it is checked here, against a real
+   * derivation rather than a promise.
+   */
+  it('every game offering actions declares how to talk about them', () => {
+    const players = makePlayers([{ name: 'A' }, { name: 'B' }, { name: 'C' }, { name: 'D' }])
+    for (const engine of shippedEngines()) {
+      const seated = players.slice(0, Math.max(engine.meta.minPlayers, 2))
+      const round = makeRound({
+        players: seated,
+        holes: 'front9',
+        games: [{ type: engine.type, config: engine.defaultConfig(seated) }],
+      })
+      const d = deriveRound(round, new EventLog().events).derivations.get('game-1')!
+      if (!d.availableActions) continue
+      const copy = engine.meta.actions
+      expect(copy, `${engine.type} offers actions with no meta.actions`).toBeDefined()
+      for (const [key, value] of Object.entries(copy!)) {
+        expect(value.length, `${engine.type} meta.actions.${key}`).toBeGreaterThan(0)
+      }
+    }
+  })
+
+  /**
    * A game that can be played solo AND in teams says so, but a game claiming
    * `teams` or `partners` must be able to seat them: two players cannot form
    * two sides, and a rotating-partner game needs at least three.
@@ -215,6 +244,9 @@ describe('roleOf', () => {
  * both answers are internally consistent and zero-sum.
  */
 describe('taxonomy never reaches the money', () => {
+  /** The front nine, named once: the holes scored, awarded and compared over. */
+  const HOLES = [1, 2, 3, 4, 5, 6, 7, 8, 9]
+
   /** Nine holes of real, varied scores — enough for every engine to move money. */
   const CARD: Record<string, number[]> = {
     A: [4, 5, 3, 4, 6, 4, 3, 5, 4],
@@ -264,16 +296,32 @@ describe('taxonomy never reaches the money', () => {
         round,
         Object.fromEntries(names.map((n) => [n, CARD[n]!])),
       )
+      const derived = deriveRound({ ...round, games }, log.events).derivations.get('game-1')!
       // games that need an in-round choice get one, or they never settle
-      for (const input of deriveRound({ ...round, games }, log.events)
-        .derivations.get('game-1')!
-        .requiredInputs()) {
+      for (const input of derived.requiredInputs()) {
         log.append({
           type: 'game/event',
           gameId: 'game-1',
           kind: input.eventKind,
-          data: { hole: input.hole, choice: input.options[0]!.value },
+          data: { ...input.options[0]!.data, hole: input.hole, choice: input.options[0]!.value },
         })
+      }
+      // …and the same for the AWARD channel, for the same two reasons. It is
+      // what makes an award game move money at all (without it the "moved no
+      // money" assertion below fires), and `Award.data` is appended verbatim as
+      // a game event exactly like `GameAction.data` — so an engine handing out
+      // awards under one role and withholding them under another moves
+      // different money the moment one is tapped.
+      for (const hole of HOLES) {
+        const cell = derived.awards?.(hole)[0]
+        if (cell) {
+          log.append({
+            type: 'game/event',
+            gameId: 'game-1',
+            kind: cell.eventKind,
+            data: cell.data,
+          })
+        }
       }
       return deriveRound({ ...round, games }, log.events).derivations.get('game-1')!
     }
@@ -290,12 +338,14 @@ describe('taxonomy never reaches the money', () => {
         summaryParts: d.summaryParts,
         detailLines: d.detailLines,
         notes: d.notes,
-        holeSummaries: [1, 2, 3, 4, 5, 6, 7, 8, 9].map((h) => d.holeSummary(h)),
-        // the one channel that CREATES money: `GameAction.data` is appended
-        // verbatim as a game event, so an engine offering a press under one
-        // role and withholding it under another moves different money the
-        // moment it is taken — while every field above stays identical
+        holeSummaries: HOLES.map((h) => d.holeSummary(h)),
+        // the two channels that CREATE money: `GameAction.data` and
+        // `Award.data` are appended verbatim as game events, so an engine
+        // offering a press — or a greenie — under one role and withholding it
+        // under another moves different money the moment it is taken, while
+        // every field above stays identical
         actions: d.availableActions?.(),
+        awards: HOLES.map((h) => d.awards?.(h)),
       })
       const asMain = scored('main')
       expect(money(scored('side'))).toEqual(money(asMain))

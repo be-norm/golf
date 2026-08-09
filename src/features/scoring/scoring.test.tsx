@@ -1,6 +1,6 @@
 import 'fake-indexeddb/auto'
-import { describe, expect, it } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { describe, expect, it, vi } from 'vitest'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { createMemoryRouter, RouterProvider } from 'react-router'
 import '../../engine/games'
@@ -95,6 +95,137 @@ describe('ScoringScreen', () => {
     })
     const events = await eventStore.list(round.id)
     expect(events[1]).toMatchObject({ type: 'meta/retract', targetEventId: events[0]!.id })
+  })
+
+  /**
+   * The failure path, which is the one that would hurt most: the guard marks
+   * an id undone BEFORE the append is known to have landed. A rejected append
+   * (quota, a DatabaseClosedError while another tab upgrades, an aborted
+   * transaction) writes no retract at all — so the event is still live, still
+   * `last`, and a permanent mark would make ↩ Undo silently dead for it, on
+   * exactly the wrong score the scorekeeper is trying to fix.
+   */
+  it('stays undoable when the retract fails to write', async () => {
+    const round = makeRound({
+      players: makePlayers([{ name: 'Cal' }, { name: 'Dee' }]),
+      holes: 'front9',
+      games: [{ type: 'skins', config: { stakeCents: 100, carryover: true } }],
+    })
+    round.id = 'round-undo-failed'
+    await db.rounds.put(round)
+
+    const router = createMemoryRouter(routes, { initialEntries: [`/round/${round.id}`] })
+    render(<RouterProvider router={router} />)
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Cal score' }))
+    await waitFor(async () => {
+      expect(await eventStore.list(round.id)).toHaveLength(1)
+    })
+
+    const undoButton = await screen.findByRole('button', { name: 'undo' })
+    const failing = vi
+      .spyOn(eventStore, 'append')
+      .mockRejectedValueOnce(new Error('QuotaExceededError'))
+    await userEvent.click(undoButton)
+    await waitFor(() => {
+      expect(failing).toHaveBeenCalledTimes(1)
+    })
+    // nothing was written, so the score is still there to undo
+    expect(await eventStore.list(round.id)).toHaveLength(1)
+    failing.mockRestore()
+
+    // …and the next tap works, rather than hitting a guard holding an id whose
+    // retract never landed
+    await userEvent.click(undoButton)
+    await waitFor(async () => {
+      expect(await eventStore.list(round.id)).toHaveLength(2)
+    })
+    const events = await eventStore.list(round.id)
+    expect(events[1]).toMatchObject({ type: 'meta/retract', targetEventId: events[0]!.id })
+  })
+
+  /**
+   * The other half of guarding undo, and the one that would hurt: a PERMANENT
+   * set must not suppress a legitimate later undo. It cannot, because
+   * `effectiveEvents` strips retracted events — so a retracted id can never be
+   * `last` again, and each tap targets something new. Asserted rather than
+   * argued, because "the guard swallowed my undo" is a far worse bug than the
+   * duplicate it prevents.
+   */
+  it('undoes repeatedly, one event at a time', async () => {
+    const round = makeRound({
+      players: makePlayers([{ name: 'Cal' }, { name: 'Dee' }]),
+      holes: 'front9',
+      games: [{ type: 'skins', config: { stakeCents: 100, carryover: true } }],
+    })
+    round.id = 'round-undo-repeat'
+    await db.rounds.put(round)
+
+    const router = createMemoryRouter(routes, { initialEntries: [`/round/${round.id}`] })
+    render(<RouterProvider router={router} />)
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Cal score' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Dee score' }))
+    await waitFor(async () => {
+      expect(await eventStore.list(round.id)).toHaveLength(2)
+    })
+
+    const undoButton = await screen.findByRole('button', { name: 'undo' })
+    for (const expected of [3, 4]) {
+      await userEvent.click(undoButton)
+      await waitFor(async () => {
+        expect(await eventStore.list(round.id)).toHaveLength(expected)
+      })
+    }
+
+    const events = await eventStore.list(round.id)
+    const retracts = events.filter((e) => e.type === 'meta/retract')
+    expect(retracts).toHaveLength(2)
+    // two DIFFERENT targets, newest first — not the same event twice
+    expect(retracts.map((e) => (e as { targetEventId: string }).targetEventId)).toEqual([
+      events[1]!.id,
+      events[0]!.id,
+    ])
+  })
+
+  /**
+   * The header ↩ Undo survives its own tap, so two quick taps read the same
+   * render closure, compute the same `last` event, and retract it twice.
+   * Replay shrugs — retract targets collect into a Set — but the duplicate
+   * outlives the round in every export and archive, which is the harm every
+   * other guard on this screen exists to prevent.
+   */
+  it('two taps on undo retract once, not twice', async () => {
+    const round = makeRound({
+      players: makePlayers([{ name: 'Cal' }, { name: 'Dee' }]),
+      holes: 'front9',
+      games: [{ type: 'skins', config: { stakeCents: 100, carryover: true } }],
+    })
+    round.id = 'round-undo-twice'
+    await db.rounds.put(round)
+
+    const router = createMemoryRouter(routes, { initialEntries: [`/round/${round.id}`] })
+    render(<RouterProvider router={router} />)
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Cal score' }))
+    // Wait for the SCREEN, not the database. `undo` reads the last event off
+    // the rendered view, so clicking while the live query is still catching up
+    // finds no event, returns early, and lands no retract at all — which is a
+    // flake, not the race under test. The chip drops "par?" once its score is
+    // in the derivation.
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Cal score' })).not.toHaveTextContent('par?')
+    })
+
+    const undoButton = await screen.findByRole('button', { name: 'undo' })
+    fireEvent.click(undoButton)
+    fireEvent.click(undoButton)
+
+    await waitFor(async () => {
+      expect(await eventStore.list(round.id)).toHaveLength(2)
+    })
+    const events = await eventStore.list(round.id)
+    expect(events.filter((e) => e.type === 'meta/retract')).toHaveLength(1)
   })
 
   /**
@@ -234,6 +365,41 @@ describe('ScoringScreen', () => {
     expect(screen.queryByRole('button', { name: /Press F9/ })).not.toBeInTheDocument()
   })
 
+  /**
+   * Two Nassaus at different stakes is a supported round (MAI-44 —
+   * `duplicateInstanceProblems` blocks only IDENTICAL settings), and both speak
+   * the same vocabulary. Counting declared copies rather than offering games
+   * read that as two voices and fell back to the neutral "Actions", losing the
+   * empty state that answers "why can't I press?".
+   */
+  it('keeps one game’s vocabulary when two instances of it are both offering', async () => {
+    const round = makeRound({
+      players: makePlayers([{ name: 'Ann' }, { name: 'Bob' }]),
+      games: [
+        { type: 'nassau', config: { stakeCents: 500, teams: null, autoPress: false } },
+        { type: 'nassau', config: { stakeCents: 1000, teams: null, autoPress: false } },
+      ],
+    })
+    round.id = 'round-two-nassaus'
+    for (const g of round.games) g.handicap = { mode: 'gross', reference: 'offLow', allowancePct: 100 }
+    await db.rounds.put(round)
+    await eventStore.append(round.id, [
+      { type: 'score/set', playerId: 'p-ann', hole: 1, gross: 4 },
+      { type: 'score/set', playerId: 'p-bob', hole: 1, gross: 5 },
+    ])
+    const router = createMemoryRouter(routes, { initialEntries: [`/round/${round.id}`] })
+    render(<RouterProvider router={router} />)
+
+    // still "press options", not "actions options"
+    const button = await screen.findByRole('button', { name: /press options/ })
+    await userEvent.click(button)
+    // …and the sheet still answers in Nassau's words. Both bets are down, so
+    // four rows render — which is also what would collide on React keys if the
+    // flat list keyed on `id` alone.
+    expect(await screen.findByText('Press from hole 2')).toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: /Press F9/ })).toHaveLength(2)
+  })
+
   it('no press offer while looking at a hole the group has already played', async () => {
     // holes 1–2 are in, so the group is on the 3rd tee — but the scorekeeper
     // has paged back to hole 1 to check a score. Nothing to press from here.
@@ -325,6 +491,350 @@ describe('ScoringScreen', () => {
     const before = await eventStore.list(round.id)
     await userEvent.click(row)
     expect(await eventStore.list(round.id)).toHaveLength(before.length)
+  })
+})
+
+/**
+ * MAI-46 — the award channel, on the screen the scorekeeper is holding.
+ *
+ * The grid's whole reason for existing is the two gates it does NOT have. The
+ * press affordance is frontier-gated and disappears once every hole is scored,
+ * which is correct for a press and fatal for a greenie you remembered five
+ * holes later — so the two tests that matter most here are the direct
+ * contrasts with the press tests above.
+ */
+describe('ScoringScreen — award grid', () => {
+  /** Front nine of the default card: pars 4 4 5 3 4 4 3 5 4 → par 3s on 4 and 7. */
+  async function ctpRound(id: string, scoredHoles: number[] = []) {
+    const round = makeRound({
+      players: makePlayers([{ name: 'Ann' }, { name: 'Bob' }]),
+      holes: 'front9',
+      games: [{ type: 'ctp', config: { stakeCents: 200 } }],
+    })
+    round.id = id
+    await db.rounds.put(round)
+    for (const hole of scoredHoles) {
+      await eventStore.append(round.id, [
+        { type: 'score/set', playerId: 'p-ann', hole, gross: 4 },
+        { type: 'score/set', playerId: 'p-bob', hole, gross: 5 },
+      ])
+    }
+    return round
+  }
+
+  const showHole = (round: { id: string }, hole: number) => {
+    const router = createMemoryRouter(routes, {
+      initialEntries: [`/round/${round.id}?hole=${hole}`],
+    })
+    render(<RouterProvider router={router} />)
+  }
+
+  const cell = (name: string) =>
+    screen.findByRole('button', { name: `Closest to the pin — ${name}` })
+
+  /**
+   * A cell's accessible NAME doesn't change when it lights up, so `findByRole`
+   * happily resolves the stale button before the live query has re-derived —
+   * and the next tap would then call onTake instead of onUndo. Wait on the
+   * state, never on the element.
+   */
+  const litCell = async (name: string) => {
+    await waitFor(async () => {
+      expect(await cell(name)).toHaveAttribute('aria-pressed', 'true')
+    })
+    return cell(name)
+  }
+
+  it('offers a cell per player on a par 3, and nothing on a par 4', async () => {
+    const round = await ctpRound('round-award-par3')
+    showHole(round, 4)
+
+    expect(await cell('Ann')).toHaveAttribute('aria-pressed', 'false')
+    expect(await cell('Bob')).toBeInTheDocument()
+    const grid = within(screen.getByRole('region', { name: 'Awards' }))
+    expect(grid.getByText('Closest to the pin')).toBeInTheDocument()
+    // ONE award game names no game. The heading disambiguates, and there is
+    // nothing here to disambiguate — CTP's only row is named after the game, so
+    // an unconditional heading stacked "Closest to the Pin" straight on top of
+    // "Closest to the pin". Caught by running it, not by a test.
+    expect(grid.queryByText('Closest to the Pin')).not.toBeInTheDocument()
+  })
+
+  /** …and the case the heading WAS written for: two games handing out awards on
+   *  the same hole, where "whose greenie is this?" is a real question. */
+  it('names each game once two of them are giving things out on the same hole', async () => {
+    const round = makeRound({
+      players: makePlayers([{ name: 'Ann' }, { name: 'Bob' }]),
+      holes: 'front9',
+      games: [
+        { type: 'ctp', config: { stakeCents: 200 } },
+        { type: 'ctp', config: { stakeCents: 500 } },
+      ],
+    })
+    round.id = 'round-award-two-games'
+    await db.rounds.put(round)
+    showHole(round, 4)
+
+    const grid = within(await screen.findByRole('region', { name: 'Awards' }))
+    // gameLabel discriminates two instances by stake, so both headings render
+    expect(grid.getByText('Closest to the Pin ($2)')).toBeInTheDocument()
+    expect(grid.getByText('Closest to the Pin ($5)')).toBeInTheDocument()
+  })
+
+  it('says nothing at all on a hole with no awards to give', async () => {
+    const round = await ctpRound('round-award-par4')
+    showHole(round, 5)
+
+    await screen.findByText('Hole')
+    expect(screen.queryByRole('region', { name: 'Awards' })).not.toBeInTheDocument()
+  })
+
+  it('one tap appends exactly one award event, naming the hole', async () => {
+    const round = await ctpRound('round-award-tap')
+    showHole(round, 7)
+
+    await userEvent.click(await cell('Bob'))
+    await waitFor(async () => {
+      expect(await eventStore.list(round.id)).toHaveLength(1)
+    })
+    const events = await eventStore.list(round.id)
+    expect(events[0]).toMatchObject({
+      type: 'game/event',
+      kind: 'ctp/award',
+      // `hole` in the PAYLOAD, not just in the UI: buildHoleLedger places a
+      // game event in its prefix replay by reading it, and an award is the one
+      // thing recorded long after the hole it names
+      data: { hole: 7, playerId: 'p-bob' },
+    })
+  })
+
+  /**
+   * THE CONTRAST WITH `no press offer while looking at a hole the group has
+   * already played`. Same situation — the group is on the 3rd tee, the
+   * scorekeeper has paged back — and the opposite, correct answer.
+   */
+  it('still offers awards on a hole behind the frontier', async () => {
+    // holes 1–3 in, so hole 4 is the frontier; page back to the par 3 on… no,
+    // hole 4 IS the par 3, so score through it and page back to it
+    const round = await ctpRound('round-award-behind', [1, 2, 3, 4, 5])
+    showHole(round, 4)
+
+    const bob = await cell('Bob')
+    expect(bob).toBeEnabled()
+    // and there is no press-style affordance withdrawing it
+    await userEvent.click(bob)
+    await waitFor(async () => {
+      expect((await eventStore.list(round.id)).some((e) => e.type === 'game/event')).toBe(true)
+    })
+  })
+
+  /**
+   * THE CONTRAST WITH the `offersActions && onFrontier && !allScored` gate: a
+   * mistapped KP has to stay fixable after the last putt drops and before
+   * anyone taps Finish.
+   */
+  it('still offers awards once every hole is scored', async () => {
+    const round = await ctpRound('round-award-all-scored', [1, 2, 3, 4, 5, 6, 7, 8, 9])
+    showHole(round, 7)
+
+    // the bar has already flipped to Finish, and the grid is still live
+    expect(await screen.findByRole('button', { name: /Finish round/ })).toBeInTheDocument()
+    expect(await cell('Ann')).toBeEnabled()
+  })
+
+  it('tapping the lit cell takes the award back', async () => {
+    const round = await ctpRound('round-award-undo')
+    showHole(round, 4)
+
+    await userEvent.click(await cell('Ann'))
+    await waitFor(async () => {
+      expect(await eventStore.list(round.id)).toHaveLength(1)
+    })
+
+    await userEvent.click(await litCell('Ann'))
+
+    await waitFor(async () => {
+      expect(await eventStore.list(round.id)).toHaveLength(2)
+    })
+    const events = await eventStore.list(round.id)
+    expect(events[1]).toMatchObject({ type: 'meta/retract', targetEventId: events[0]!.id })
+    await waitFor(async () => {
+      expect(await cell('Ann')).toHaveAttribute('aria-pressed', 'false')
+    })
+  })
+
+  /**
+   * The cell survives its own tap, so a fast double-tap lands twice before the
+   * re-derive. The append-only log outlives the round in every export and
+   * archive — one compensation event, not two. (Same race, same guard, as the
+   * press row; fired synchronously because that IS the race.)
+   */
+  /**
+   * The take half of the same race. An award cell survives its own tap — unlike
+   * an actions row, whose sheet closes — so two taps land before the re-derive.
+   * The log is append-only and syncs, so the duplicate would outlive the round
+   * in every export, and the first award game to COUNT its events rather than
+   * treat them as a set would double-pay on a fumbled tap.
+   */
+  it('two taps landing in the same frame award once, not twice', async () => {
+    const round = await ctpRound('round-award-take-twice')
+    showHole(round, 4)
+
+    const untaken = await cell('Ann')
+    fireEvent.click(untaken)
+    fireEvent.click(untaken)
+
+    await waitFor(async () => {
+      expect(await litCell('Ann')).toBeInTheDocument()
+    })
+    expect(await eventStore.list(round.id)).toHaveLength(1)
+  })
+
+  /**
+   * The guard has to be keyed WITH THE GAME. `Award.id` is unique only within
+   * one game — an engine cannot see its siblings — so two CTPs both mint
+   * `ctp-4-p-ann`, and a bare-id guard makes the second game's tap vanish with
+   * no feedback at all.
+   */
+  it('guards each game separately when two of them offer the same cell', async () => {
+    const round = makeRound({
+      players: makePlayers([{ name: 'Ann' }, { name: 'Bob' }]),
+      holes: 'front9',
+      games: [
+        { type: 'ctp', config: { stakeCents: 200 } },
+        { type: 'ctp', config: { stakeCents: 500 } },
+      ],
+    })
+    round.id = 'round-award-two-guards'
+    await db.rounds.put(round)
+    showHole(round, 4)
+
+    // one cell per game, both named for Ann, tapped in the same frame
+    const anns = await screen.findAllByRole('button', { name: 'Closest to the pin — Ann' })
+    expect(anns).toHaveLength(2)
+    fireEvent.click(anns[0]!)
+    fireEvent.click(anns[1]!)
+
+    await waitFor(async () => {
+      expect(await eventStore.list(round.id)).toHaveLength(2)
+    })
+    const events = await eventStore.list(round.id)
+    expect(new Set(events.map((e) => (e as { gameId: string }).gameId)).size).toBe(2)
+  })
+
+  /** …and the guard must not wedge: giving an award back and taking it again
+   *  reuses the same offer id, and has to keep working. */
+  it('lets the same cell be taken again after it is given back', async () => {
+    const round = await ctpRound('round-award-retake')
+    showHole(round, 4)
+
+    await userEvent.click(await cell('Ann'))
+    await userEvent.click(await litCell('Ann'))
+    await waitFor(async () => {
+      expect(await eventStore.list(round.id)).toHaveLength(2) // award + retract
+    })
+    await userEvent.click(await cell('Ann'))
+
+    await waitFor(async () => {
+      expect(await litCell('Ann')).toBeInTheDocument()
+    })
+    expect(await eventStore.list(round.id)).toHaveLength(3)
+  })
+
+  it('two taps landing in the same frame retract once, not twice', async () => {
+    const round = await ctpRound('round-award-undo-twice')
+    showHole(round, 4)
+
+    await userEvent.click(await cell('Bob'))
+    await waitFor(async () => {
+      expect(await eventStore.list(round.id)).toHaveLength(1)
+    })
+
+    const lit = await litCell('Bob')
+    fireEvent.click(lit)
+    fireEvent.click(lit)
+
+    await waitFor(async () => {
+      expect(await eventStore.list(round.id)).toHaveLength(2)
+    })
+    const events = await eventStore.list(round.id)
+    expect(events.filter((e) => e.type === 'meta/retract')).toHaveLength(1)
+  })
+})
+
+/**
+ * The blocking channel survives its own tap for the same reason the award cell
+ * does — the chip stays mounted until a re-derive removes it — so it needs the
+ * same guard. Wolf's reducer is last-write-wins, so no money moves wrongly
+ * today; the duplicate would just outlive the round in every export.
+ */
+describe('ScoringScreen — input chips', () => {
+  async function wolfRound(id: string) {
+    const round = makeRound({
+      players: makePlayers([{ name: 'Ann' }, { name: 'Bob' }, { name: 'Cal' }, { name: 'Dee' }]),
+      holes: 'front9',
+      games: [
+        {
+          type: 'wolf',
+          config: { pointCents: 100, rotation: ['p-ann', 'p-bob', 'p-cal', 'p-dee'] },
+        },
+      ],
+    })
+    round.id = id
+    await db.rounds.put(round)
+    render(<RouterProvider router={createMemoryRouter(routes, { initialEntries: [`/round/${id}`] })} />)
+    return round
+  }
+
+  it('two taps landing in the same frame answer once, not twice', async () => {
+    const round = await wolfRound('round-input-twice')
+
+    const lone = await screen.findByRole('button', { name: /Lone Wolf/ })
+    fireEvent.click(lone)
+    fireEvent.click(lone)
+
+    await waitFor(async () => {
+      expect(await eventStore.list(round.id)).toHaveLength(1)
+    })
+    // settle: a second identical pick would land here if the guard were absent
+    await screen.findByText(/Ann/)
+    expect(await eventStore.list(round.id)).toHaveLength(1)
+  })
+
+  /**
+   * DEDUPING IS FOR THE SAME ANSWER TWICE — changing your mind must get
+   * through. The options of one prompt are adjacent buttons in a wrapping row,
+   * so a slip-tap on a partner followed at once by the intended Lone Wolf is
+   * an ordinary miss. Keying the guard on the PROMPT rather than the ANSWER
+   * kept the partner: a different hole multiplier and different sides, so
+   * wrong money — worse than the duplicate the guard was added to prevent.
+   */
+  it('lets a corrected answer through, and keeps the correction', async () => {
+    const round = await wolfRound('round-input-corrected')
+
+    // BOTH resolved before either is clicked. An `await` between the two taps
+    // lets the first append re-derive and unmount the prompt, so the second
+    // query races the teardown — which is a flake, not the scenario. The
+    // scenario is two taps in ONE frame, and this is what that looks like.
+    const partner = await screen.findByRole('button', { name: 'Bob' })
+    const lone = screen.getByRole('button', { name: /Lone Wolf/ })
+    fireEvent.click(partner)
+    fireEvent.click(lone)
+
+    await waitFor(async () => {
+      expect(await eventStore.list(round.id)).toHaveLength(2)
+    })
+    const events = await eventStore.list(round.id)
+    // last write wins in replay, so the pick the scorekeeper meant is the one
+    // that counts — but only if the second tap was allowed to land at all
+    expect(events.map((e) => (e as { data: { choice: string } }).data.choice)).toEqual([
+      'p-bob',
+      'lone',
+    ])
+    // and the prompt is gone, so the hole computed on the corrected pick
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: /Lone Wolf/ })).not.toBeInTheDocument()
+    })
   })
 })
 

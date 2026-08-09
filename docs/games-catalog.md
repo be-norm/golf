@@ -191,12 +191,16 @@ the hole has no value. Modelling the throw as a prompt would nag on every hole.
 
 ### 29. Yellow Ball — Tier 3. Inputs: ball-survival flag. Rotating money ball + best ball aggregate.
 
-### 30. Closest to the Pin (CTP) — Tier 1. Inputs: one award per eligible hole.
-The most-played side bet in golf and, until now, missing from this catalog. Par 3s only (the
-engine decides eligibility from `courseSnapshot` par, so the award grid simply doesn't offer
-it elsewhere). One winner per hole collects from every other player, or a fixed pot per hole.
-**Dead-money story required:** nobody hits the green on a par 3 and the hole's CTP goes
-unclaimed — declare it dead on `notes`, never a $0 settlement line (MAI-40).
+### 30. Closest to the Pin (CTP) — **SHIPPED** (MAI-46). Inputs: one award per eligible hole.
+The most-played side bet in golf, and the award channel's first game. Par 3s only (the engine
+decides eligibility from `courseSnapshot` par, so the award grid simply doesn't offer it
+elsewhere). One winner per hole collects the stake from every other player. No carryover: each
+par 3 stands alone.
+**Dead money:** an unawarded par 3 goes on `notes`, never a $0 settlement line (MAI-40) — and
+only once the whole card is played out, because `finalized` is true from the next tee onwards
+and the group may still be intending to record it. The first `category: 'side'` and
+`family: 'award'` engine, so it is also what makes the picker's Side Bets section and its
+"Awards" heading real.
 
 ### 31. Long Drive — Tier 1. Inputs: one award per eligible hole.
 Usually one nominated hole (a par 5), sometimes several; fairway-only is the common house
@@ -210,13 +214,23 @@ in play. Eligible holes are config, not derivable, since the group picks them at
 - **Derivable vs not:** birdies/eagles, hole winners, stableford/quota points are all derivable
   from gross + par + SI + CH. Wolf picks, BBB winners, junk awards, putts, hammer/press/wager
   decisions, and team-format team scores are not — they arrive as `game/event`s.
-- **Two channels for those events, and picking the wrong one is a real bug.** Sort every
-  non-derivable input by whether the hole can compute without it:
+- **Putts live at ROUND level, not in any game (MAI-54).** Snake is driven by them and Dots
+  needs them for 3-putt/poley, so a `score/putts` event feeding `RoundContext` is entered once
+  and read one-way by both — which also makes 3-putt/snake derivable rather than tapped. Not
+  built yet; it ships with Snake. Awards stayed binary because of it.
+- **Three channels for those events, and picking the wrong one is a real bug.** Sort every
+  non-derivable input by whether the hole can compute without it, and by whether it expires:
   - **Blocking → `requiredInputs` / `InputRequest`.** The hole is stuck until someone answers
     (Wolf's pick, a hammer accept/fold, BBB's point winners). Right to interrupt scoring.
+    An option may carry its own `data`, merged under `{ hole, choice }`.
   - **Optional, player-initiated → `availableActions` / `GameAction`.** Legal but not required
     (a Nassau press, a hammer throw, a Banker wager). These live behind a button and only
-    *badge* when the game's convention says act now (`recommended`).
+    *badge* when the game's convention says act now (`recommended`). Frontier-gated: they
+    belong to the tee you are standing on. The engine supplies the verb (`meta.actions`).
+  - **Per-player, per-hole and permanent → `awards` / `Award`.** CTP, greenies, sandies, the
+    snake. A grid of group rows × player cells under the score rows, no frontier gate and no
+    all-scored gate — an award belongs to its hole forever, so it stays editable until the
+    round is completed.
 
   Availability ("this is legal") is true on most holes; recommendation ("do it now") is rare.
   Nassau shipped them on one channel and nagged "Press?" on every hole while never saying why

@@ -68,6 +68,16 @@ Full plan/architecture history: see `docs/` and the games catalog in `docs/games
    for genuine overlays (Criers & Whiners' mulligan credits, putts shared between Snake and
    Dots) is **contributing to `RoundContext` before any engine derives** — context to engines,
    never engine to engine. Design toward it; don't build it until something needs it.
+   **Putts are the first planned contributor, and the line they draw is the one to keep
+   (MAI-54).** An AWARD is a binary per-player, per-hole *bet* fact owned by one engine —
+   the greenie, the CTP — and rides the award channel below. A PUTT COUNT is a *scorecard*
+   fact owned by the round: it is a number, golfers write it on the paper card beside
+   strokes, and it is true regardless of which bets are running. So putts get a round-level
+   `score/putts` event feeding `RoundContext`, entered once and read one-way by Snake, Dots
+   and Trouble alike — which also makes 3-putt/snake DERIVABLE rather than another button.
+   Not built yet; it ships with Snake, and its entry affordance must be opt-in (a plain
+   Skins round must not grow a putts row). What the decision buys today is that the award
+   channel stays a binary toggle and never had to carry counts.
 8. **Sync-ready IDs.** Locally-minted entity IDs are UUIDv7; rows carry `updatedAt`.
    Exception: courses imported from OpenGolfAPI keep the provider's UUID as their id —
    deliberate, so the same course dedupes across devices and the shared library
@@ -255,6 +265,38 @@ change, use a 6-digit code (`{{ .Token }}` + `verifyOtp`) rather than a link.
   why (MAI-34): a thing that's legal most of the time will interrupt most of the
   time. A `GameAction` carries its own argument — `detail` (why it's offered)
   and `effect` (what taking it creates).
+  **The affordance owns no vocabulary** (MAI-47): button, sheet header, explainer
+  and empty state all come from the offering engine's `meta.actions`
+  (`verb`/`plural`/`blurb`/`emptyState`), and the recommendation badge from the
+  action's own `recommendedReason`. `ScoringScreen` uses one game's words when
+  exactly one game is offering and neutral wording otherwise. A game that offers
+  actions and declares no copy is a `catalog.test.ts` failure, not a fallback.
+- **Awards pull too — and they never expire.** `awards?(hole)`/`Award` is the
+  THIRD channel (MAI-46), for "give THIS player THIS thing on THIS hole":
+  closest to the pin, greenies, sandies, the snake. It renders as group rows ×
+  player cells under the score rows (`AwardGrid`), every cell a toggle, and the
+  engine decides which groups appear on which hole (CTP only on par 3s) so no
+  screen learns any golf. **It deliberately does NOT inherit the actions
+  affordance's `onFrontier && !allScored` gate**, and that is the whole ticket:
+  a press belongs to the tee you are standing on, an award belongs to the hole
+  it happened on — you remember it on 12, or fix it on the 18th green. Its one
+  gate is `round/completed`, read off the EVENTS so a reopened round gets its
+  grid back. `Award.data` MUST carry `hole`: `buildHoleLedger` places a game
+  event in its prefix replay by reading it, and awards are the one thing
+  designed to be recorded long after the hole they name. The tests worth keeping
+  are the direct contrasts with the press tests in the same file. `GameAction`
+  and `Award` share their write half (`GameEventOffer`) — they differ in WHEN
+  they may be tapped, never in what a tap does.
+- **An award is unclaimed exactly when it can no longer be claimed** — i.e. when
+  `ctx.completed` says the round is over, the same instant the grid stops being
+  tappable. Neither weaker test works, and both were tried: `ctx.finalized(hole)`
+  goes true the moment play moves on, so an unawarded hole would report dead
+  money while the group is two holes down the fairway intending to record it at
+  the turn; and "every hole finalized" (the proxy Skins uses to kill its carry,
+  which is right for Skins because a hole missing a score still settles among
+  the scores posted) fires the moment one player picks up on the par 3, while
+  the round is live and the cell is still lit. An award game also skips any hole
+  `ctx.anyScored` says nobody played (MAI-38).
 - **The share card is painted, not screenshotted.** `Share` on the settle screen
   produces a PNG drawn by hand onto a canvas (`paintSummaryCard.ts`), never a
   DOM capture — rasterising the live screen means `foreignObject`, and so means

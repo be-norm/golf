@@ -29,6 +29,21 @@ export interface RoundContext {
    */
   finalized(hole: number): boolean
   /**
+   * The round is OVER: nothing more is coming.
+   *
+   * Read from `round/completed` / `round/reopened` in the events, deliberately
+   * ignoring `round.status` — the money ledger replays prefixes against the
+   * same round object, and a status flag would report every prefix as finished.
+   *
+   * Distinct from "every hole is finalized", which is true as soon as play has
+   * moved past the last hole anybody touched, and so is ALREADY true while the
+   * group is still on the course with scores outstanding. Any game whose
+   * narration depends on a manual input still being enterable has to ask THIS,
+   * not that: a thing is unclaimed exactly when it can no longer be claimed
+   * (see the award channel, and `ctp`'s dead-money note).
+   */
+  completed: boolean
+  /**
    * Did ANYBODY post a score on this hole — i.e. was it actually played?
    * Distinct from `finalized`, which is true for a hole nobody reached once
    * the round completes. Engines need the difference whenever they narrate or
@@ -186,6 +201,7 @@ export function buildRoundContext(round: Round, effective: readonly RoundEvent[]
     netFor,
     bestNetAmongPosted,
     finalized,
+    completed,
     anyScored,
     finalizedAt,
   }
