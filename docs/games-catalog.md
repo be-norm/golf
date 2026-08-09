@@ -4,7 +4,8 @@ Research-verified catalog of golf side games, precise enough to implement as eng
 Each engine lives in `src/engine/games/<type>/` and implements the `GameEngine` contract
 in `src/engine/catalog.ts`.
 
-**Built today (5):** Skins · Nassau · Wolf · Vegas · Six Point. Everything else is roadmap.
+**Built today (7):** Skins · Nassau · Match Play · Wolf · Vegas · Six Point · Closest to the
+Pin. Everything else is roadmap.
 The source of truth is `src/engine/games/index.ts` — if it's registered there it ships, and
 the `[shipped]` tags below should agree. They drifted once; check the registry, not the tags.
 
@@ -107,8 +108,26 @@ difference in points. `teamNumber = 10*min + max`.
 ### 5. Stroke Play (Medal) — Tier 1, strokes-only
 Lowest total net. Allowance 95% common (WHS). Ties: countback (back 9 → last 6 → 3 → 1).
 
-### 6. Match Play — Tier 1, strokes-only
-+1/0/−1 per hole; ends when up > remaining ("4&3"). 100% of CH difference off low.
+### 6. Match Play `[shipped]` — Tier 1, strokes-only
+**Format:** 2 individuals or 2v2 best ball (2v1 supported). One match over the round.
++1/0/−1 per hole by lower net; ends when up > remaining ("4&3"). 100% of CH difference off low.
+- **Impl:** `src/engine/games/matchPlay/` — a thin engine over `core/match.ts`, which is the
+  reason that kit was extracted (MAI-48). No events, no actions, no awards: the match is a
+  pure function of the scores. Its span is `ctx.holesPlayed`, so **a 9-hole round is one match
+  over that nine** with no special case, and the single bet is labelled by
+  `stretchLabel` — `18` / `F9` / `B9`.
+- **Deliberately NOT a Nassau config.** A one-bet, no-press Nassau settles the same money, but
+  golfers look for "Match Play" by name, and press identity / auto-press / undo-follows-
+  ownership are dead weight when there is nothing to press.
+- **Close-out, margin and degradation are the kit's** and identical to Nassau's: decided the
+  moment a side is up more than remains, frozen there, settled on that hole, and `N&M` quoted
+  only when a hole somebody actually played clinched it (otherwise the plain `N up`, MAI-38).
+  Level at the end is a push and never "closes".
+- **Money:** one settlement line, and only when the match is won. Each player pays or collects
+  the stake; a lone side against a pair plays the stake against each opponent (`sideStake`), so
+  an uneven 2v1 stays zero-sum.
+- `category: 'either'` — a match beside a group Skins is an ordinary side bet, and a `'main'`
+  category would have made that unbuildable in the picker.
 
 ### 7. Best Ball / Four-Ball — Tier 1, strokes-only
 Team hole score = lowest net among teammates. WHS: 90% match / 85% stroke, off low in group.
@@ -191,7 +210,7 @@ the hole has no value. Modelling the throw as a prompt would nag on every hole.
 
 ### 29. Yellow Ball — Tier 3. Inputs: ball-survival flag. Rotating money ball + best ball aggregate.
 
-### 30. Closest to the Pin (CTP) — **SHIPPED** (MAI-46). Inputs: one award per eligible hole.
+### 30. Closest to the Pin (CTP) `[shipped]` — Inputs: one award per eligible hole (MAI-46).
 The most-played side bet in golf, and the award channel's first game. Par 3s only (the engine
 decides eligibility from `courseSnapshot` par, so the award grid simply doesn't offer it
 elsewhere). One winner per hole collects the stake from every other player. No carryover: each

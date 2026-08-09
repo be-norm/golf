@@ -12,6 +12,7 @@ import {
   scoreMatchHole,
   segmentSpans,
   sideStake,
+  stretchLabel,
   toPlayAfterIn,
   type MatchSegment,
   type MatchSide,
@@ -220,13 +221,10 @@ function derive(
   // who's up, by how much, holes left; dormie/closed-out/final when apt.
   const sideShort = sides.short
   const segLabel = (seg: Segment): string =>
-    // a collapsed 9-hole nassau's single bet is the nine that was played
+    // a collapsed 9-hole nassau's single bet is the nine that was played, which
+    // is core/match's rule to name (every match game's single bet needs it)
     seg === 'overall'
-      ? ctx.holesPlayed.length <= 9
-        ? ctx.round.holes === 'back9'
-          ? 'B9'
-          : 'F9'
-        : '18'
+      ? stretchLabel(ctx.holesPlayed, ctx.round.holes)
       : seg === 'front'
         ? 'F9'
         : 'B9'
