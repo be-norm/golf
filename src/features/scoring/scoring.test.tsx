@@ -596,6 +596,68 @@ describe('ScoringScreen — putts', () => {
     expect(events.every((e) => e.type !== 'meta/retract')).toBe(true)
   })
 
+  /**
+   * MAI-90, review round 2. The ref could not say "I have sent a clear", so
+   * after one it fell back to the DERIVED count — stale by construction, the
+   * clear not having landed — and stepping up went to 2 from a hole the user
+   * had just emptied.
+   *
+   * FIRED SYNCHRONOUSLY, and that is the test, not a detail: `userEvent`
+   * awaits and flushes between clicks, so every write lands before the next tap
+   * and the stale path is never taken. Written with `userEvent` first, this
+   * passed against the bug it was written for.
+   */
+  it('steps up from a clear it has sent, not from the count it replaced', async () => {
+    const round = await puttsRound('round-putts-after-clear', true)
+
+    await userEvent.click(await more('Ann'))
+    await waitFor(async () => expect(await count('Ann')).toHaveTextContent('1 putts'))
+
+    // 1 → 0 → not recorded → back up to one putt, all in one frame.
+    // Both buttons resolved BEFORE either is clicked: an `await` between taps
+    // flushes microtasks, the writes land, and the stale path this exists for
+    // is never taken.
+    const minus = await fewer('Ann')
+    const plus = await more('Ann')
+    fireEvent.click(minus)
+    fireEvent.click(minus)
+    fireEvent.click(plus)
+
+    await waitFor(async () => {
+      expect(await eventStore.list(round.id)).toHaveLength(4)
+    })
+    const events = await eventStore.list(round.id)
+    expect(events.map((e) => `${e.type}${'putts' in e ? ':' + e.putts : ''}`)).toEqual([
+      'score/putts:1',
+      'score/putts:0',
+      'score/puttsClear',
+      'score/putts:1',
+    ])
+    await waitFor(async () => expect(await count('Ann')).toHaveTextContent('1 putts'))
+  })
+
+  /**
+   * Counting survives unrelated writes to the round row, which re-fire the live
+   * query underneath the stepper.
+   *
+   * HONEST LIMIT: this does NOT isolate the release rule it was written for.
+   * The defect needs an emission to arrive while a putt write is still in
+   * flight, and nothing at this layer can order those two — with each tap
+   * awaited, the wholesale release that caused the bug passes this too. The
+   * per-key release is kept on reasoning, not on this test.
+   */
+  it('keeps counting across unrelated writes to the round', async () => {
+    const round = await puttsRound('round-putts-interrupted', true)
+
+    for (const expected of ['1 putts', '2 putts', '3 putts']) {
+      await db.rounds.update(round.id, { updatedAt: new Date().toISOString() })
+      await userEvent.click(await more('Bob'))
+      await waitFor(async () => expect(await count('Bob')).toHaveTextContent(expected))
+    }
+    const events = await eventStore.list(round.id)
+    expect(events.map((e) => (e as { putts: number }).putts)).toEqual([1, 2, 3])
+  })
+
   it('cannot step below not-recorded', async () => {
     const round = await puttsRound('round-putts-floor', true)
 
