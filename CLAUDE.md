@@ -75,9 +75,17 @@ Full plan/architecture history: see `docs/` and the games catalog in `docs/games
    strokes, and it is true regardless of which bets are running. So putts get a round-level
    `score/putts` event feeding `RoundContext`, entered once and read one-way by Snake, Dots
    and Trouble alike — which also makes 3-putt/snake DERIVABLE rather than another button.
-   Not built yet; it ships with Snake, and its entry affordance must be opt-in (a plain
-   Skins round must not grow a putts row). What the decision buys today is that the award
-   channel stays a binary toggle and never had to carry counts.
+   Built as `score/putts` + `score/puttsClear` -> `ctx.puttsFor` (MAI-90); no engine reads
+   them yet. **A round collects a shared fact because a GAME declares it reads one**
+   (`meta.reads`, a `RoundFact` set), never because the user was offered a switch:
+   nothing here shows putts back to you, so a Skins round asked for a number that went
+   into the log and was never seen again. That declaration is also the ONLY way a game can
+   require one - `validateSetup` sees config, players and siblings, never the round - so
+   an engine reading a fact nobody collects would derive nothing while looking healthy.
+   The rule lives in `src/lib/roundFacts.ts`; setup freezes the answer onto
+   `Round.trackPutts`. `undefined` and `0` are different everywhere (a chip-in takes no
+   putts). What the decision buys is that the award channel stays a binary toggle and
+   never had to carry counts.
 8. **Sync-ready IDs.** Locally-minted entity IDs are UUIDv7; rows carry `updatedAt`.
    Exception: courses imported from OpenGolfAPI keep the provider's UUID as their id —
    deliberate, so the same course dedupes across devices and the shared library

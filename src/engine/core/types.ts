@@ -167,6 +167,27 @@ export interface Round {
   updatedAt: string
   deviceId: string
   schemaVersion: number
+  /**
+   * Track putts on this round (MAI-90).
+   *
+   * The switch belongs to the ROUND rather than to a game's `meta`, because
+   * putts are a scorecard fact: plenty of groups count them with no putting
+   * game running, and Snake, Dots and Trouble all want the same number rather
+   * than each collecting its own. Off means the scoring screen is unchanged —
+   * a plain Skins round must not grow a putts row per player per hole.
+   *
+   * OPTIONAL, so it is additive: rounds stored before this shipped simply lack
+   * it, sync carries the whole round as a blob, and `importRound` validates the
+   * round with `z.looseObject`.
+   *
+   * OPEN QUESTION FOR SNAKE (MAI-58): a game cannot require this. `validateSetup`
+   * sees config, players and siblings — never the round — so an engine that
+   * reads putts cannot refuse a round with tracking off, and would derive
+   * nothing while looking healthy. Resolve it there, either with an
+   * engine-declared need that setup reads to switch this on, or by widening
+   * validation to see the round. Don't let it stay implicit.
+   */
+  trackPutts?: boolean
   /** Owner partition — see the note on Player.userId. */
   userId?: string
 }

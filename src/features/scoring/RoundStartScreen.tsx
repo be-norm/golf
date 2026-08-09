@@ -125,6 +125,19 @@ export function RoundStartScreen() {
   const anyScored = round.players.some((p) =>
     ctx.holesPlayed.some((h) => ctx.gross.get(p.playerId)?.get(h) !== undefined),
   )
+  /**
+   * WHETHER THE HANDICAP EDIT IS STILL LIVE, and it has to be the same question
+   * `roundRepo.setCourseHandicap` asks: it refuses on a non-EMPTY LOG, not on
+   * "anything scored" (repos.ts). Gating the fields on `anyScored` let any
+   * non-score event open the gap — a Wolf pick, a CTP award, and now a putt —
+   * so the fields rendered, the field kept the typed number in local state, the
+   * write was rejected, and the round quietly kept the old course handicap,
+   * mis-allocating strokes for all 18 holes with nothing said.
+   *
+   * That is a wrong-money bug reached by tapping putts before the first score,
+   * which is an ordinary thing to do (MAI-90, review round 1).
+   */
+  const logStarted = view.events.length > 0
 
   const goToCard = () => navigate(`/round/${round.id}`, { replace: true })
 
@@ -157,7 +170,7 @@ export function RoundStartScreen() {
           <h2 className="font-display text-[10px] uppercase text-stone-400">Course handicaps</h2>
           {/* Once scoring starts the per-game rows below already carry each CH,
               so this collapses to the reason it can't be changed. */}
-          {!anyScored && (
+          {!logStarted && (
             <ul className="mt-2 space-y-1.5">
               {round.players.map((p) => (
                 <li key={p.playerId} className="flex items-center justify-between gap-2">
@@ -172,7 +185,7 @@ export function RoundStartScreen() {
             </ul>
           )}
           <p className="mt-2 text-xs text-stone-500">
-            {anyScored
+            {logStarted
               ? 'Locked — scoring has started.'
               : 'Tap to adjust. These lock once the first score is in.'}
           </p>

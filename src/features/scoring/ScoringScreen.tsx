@@ -29,7 +29,7 @@ import { LOCAL_USER } from '../../db/ids'
 import { RulesSheet } from '../games/RulesSheet'
 import { useRound } from './useRound'
 import { holeLoop, ordinal } from './holeLoop'
-import { ScoreRow } from './ScoreRow'
+import { MAX_PUTTS, ScoreRow } from './ScoreRow'
 
 /**
  * Used only when no single game owns the affordance — several games offering
@@ -57,6 +57,15 @@ export function ScoringScreen() {
   // event key → the id it was written as, or undefined while still in flight.
   // See `emitOnce`.
   const takingRef = useRef<Map<string, string | undefined>>(new Map())
+  // What was last SENT per (player, hole), so a burst of taps steps from intent
+  // rather than from a stale render — see `setPutts`. `value: null` is a CLEAR
+  // that has been sent: a plain number map could not say that, so after a clear
+  // the next tap fell back to the derived count and stepped from a number the
+  // user had already stepped away from (−, −, + from 1 ended with the log
+  // saying 2). Carries its own playerId/hole so the release never parses a key.
+  const sentPuttsRef = useRef<
+    Map<string, { value: number | null; id: string | undefined }>
+  >(new Map())
   // Release a key only once the derivation actually CONTAINS its event — the
   // control on screen now reflects the tap, so a further tap is a further
   // intent rather than a stale duplicate. An effect rather than a render-phase
@@ -66,6 +75,23 @@ export function ScoringScreen() {
     if (!view) return
     for (const [key, id] of takingRef.current) {
       if (id !== undefined && view.events.some((e) => e.id === id)) takingRef.current.delete(key)
+    }
+    // PER KEY, and against the EVENT rather than the value it carried.
+    // Clearing wholesale dropped entries whose write had not landed, so an
+    // emission arriving mid-burst reset the stepper to the stale count and the
+    // next tap re-sent a number already sent. Matching on the VALUE instead
+    // fixed that but left a narrower version: tapping back to the count already
+    // landed (+ then −) makes derived and sent agree while both writes are
+    // still in flight, so the key releases early and the next tap re-sends. The
+    // value is never wrong — if the two agree, stepping from either gives the
+    // same answer — but the duplicate outlives the round in every export.
+    // Waiting for the id removes that coincidence; the entry is owned by
+    // IDENTITY rather than by its value, which removes the mirror of it that
+    // lived in the stamping itself (see `sendPutts`).
+    for (const [key, sent] of sentPuttsRef.current) {
+      if (sent.id !== undefined && view.events.some((e) => e.id === sent.id)) {
+        sentPuttsRef.current.delete(key)
+      }
     }
   }, [view])
 
@@ -212,21 +238,86 @@ export function ScoringScreen() {
     void eventStore.append(round.id, [{ type: 'score/set', playerId, hole: currentHole, gross }])
   }
 
-  // The last emitter on this screen without a same-frame guard, and it needs
-  // one for the reason all the others do: the header button survives its own
-  // tap, so two quick taps read the same `view` closure, compute the same
-  // `last`, and append two retracts of the same event. Replay shrugs (targets
-  // collect into a Set) but the duplicate outlives the round in every export.
+  // STEPS FROM WHAT WAS SENT, not from what is rendered — resolved inside the
+  // handler, because a ref must not be read during render.
   //
-  // `undoneRef` is the right set to share with `giveBack`, and permanent is
-  // right — with one condition. `effectiveEvents` strips RETRACTED events, so
-  // an id whose retract was written can never be `last` again; but that says
-  // nothing about an id whose retract was never written at all. A rejected
-  // append (quota, a DatabaseClosedError during another tab's upgrade, an
-  // aborted transaction) would otherwise leave the event live, still `last`,
-  // and permanently un-undoable — the scorekeeper tapping ↩ Undo on a wrong
-  // score and getting silence. So a failure releases, exactly as `emitOnce`
-  // below does and for the same reason.
+  // The control shows the DERIVED count, which lags a tap by a write, a live
+  // query and a re-derive. Stepping from it made three quick taps for a
+  // three-putt append "1, 1, 1": the hole settled on 1 — the number a putting
+  // game would pay on — and the log kept two duplicates. Tapping fast is how a
+  // three-putt gets entered, so that is the ordinary case.
+  //
+  // `null` is NOT RECORDED throughout, whether that came from the derivation or
+  // from a clear this screen has already sent but not yet seen land.
+  const puttKey = (playerId: string, hole: number) => `${playerId}:${hole}`
+
+  const sentPutts = (playerId: string): number | null => {
+    const sent = sentPuttsRef.current.get(puttKey(playerId, currentHole))
+    return sent ? sent.value : (ctx.puttsFor(playerId, currentHole) ?? null)
+  }
+
+  const sendPutts = (playerId: string, value: number | null, draft: EventDraft) => {
+    const key = puttKey(playerId, currentHole)
+    // OWNERSHIP IS IDENTITY, not the value. A burst that revisits a count —
+    // "+ − +" — leaves the map holding an entry whose value equals an earlier
+    // tap's, so a value comparison lets the FIRST append stamp its id onto the
+    // LAST tap's entry. The key then releases while that tap is still in
+    // flight, the stepper falls back to a derived count mid-burst, and the next
+    // tap re-sends a number already sent or clears a count the user meant to
+    // keep. Comparing the object itself has no such coincidence in it.
+    const entry: { value: number | null; id: string | undefined } = { value, id: undefined }
+    const owns = () => sentPuttsRef.current.get(key) === entry
+    sentPuttsRef.current.set(key, entry)
+    void eventStore
+      .append(round.id, [draft])
+      .then(([event]) => {
+        if (owns()) entry.id = event?.id
+      })
+      // Nothing was written, so nothing is coming to release this — but only
+      // this entry. Deleting whatever sits at the key would drop a later tap's
+      // pending value on the floor because an earlier append failed.
+      .catch(() => {
+        if (owns()) sentPuttsRef.current.delete(key)
+      })
+  }
+
+  const setPutts = (playerId: string, step: 'more' | 'fewer') => {
+    const current = sentPutts(playerId)
+
+    if (step === 'fewer') {
+      // already at nothing — the button is disabled, but the derived count it
+      // is disabled from lags a clear this screen has just sent
+      if (current === null) return
+      // Down off zero is the way back to NOT RECORDED. Without it the only
+      // erase gesture left is entering 0, which does not mean "I mis-tapped" —
+      // it means chip-in, and a junk game pays for one.
+      if (current === 0) {
+        sendPutts(playerId, null, { type: 'score/puttsClear', playerId, hole: currentHole })
+        return
+      }
+      sendPutts(playerId, current - 1, {
+        type: 'score/putts',
+        playerId,
+        hole: currentHole,
+        putts: current - 1,
+      })
+      return
+    }
+
+    // From not-recorded the first tap means ONE, not zero: nearly every hole is
+    // a one- or two-putt, and zero is a chip-in — rare, and reachable with a
+    // step up then down rather than being what a single tap lands on.
+    const next = current === null ? 1 : Math.min(MAX_PUTTS, current + 1)
+    // already at the ceiling: no event, so the log gains nothing to say
+    if (next === current) return
+    sendPutts(playerId, next, {
+      type: 'score/putts',
+      playerId,
+      hole: currentHole,
+      putts: next,
+    })
+  }
+
   const undo = () => {
     const effective = effectiveEvents(view.events)
     const last = effective[effective.length - 1]
@@ -481,6 +572,8 @@ export function ScoringScreen() {
             gross={ctx.gross.get(p.playerId)?.get(currentHole)}
             strokes={dotsGame ? ctx.strokesFor(dotsGame.gameId, p.playerId, currentHole) : 0}
             onScore={(gross) => setScore(p.playerId, gross)}
+            putts={ctx.puttsFor(p.playerId, currentHole)}
+            onPutts={round.trackPutts ? (step) => setPutts(p.playerId, step) : undefined}
           />
         ))}
       </section>

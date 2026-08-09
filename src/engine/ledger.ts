@@ -13,8 +13,27 @@ export interface HoleImpact {
   runningCents: Record<Uuid, number>
 }
 
-function eventHole(e: RoundEvent): number | null {
-  if (e.type === 'score/set' || e.type === 'score/clear') return e.hole
+/**
+ * Which hole an event belongs to, or null for one that belongs to the round as
+ * a whole (completion, and anything unrecognised).
+ *
+ * NULL MEANS "EVERY PREFIX" — the filter below keeps such events in all of
+ * them — so an event that IS about a hole and answers null here silently leaks
+ * backwards: hole 18's fact would be visible while replaying hole 1. Nothing
+ * reads putts yet, so `score/putts` costs nothing today and would have cost
+ * Snake its ledger, where it would have looked like Snake's bug rather than
+ * this function's. A new hole-scoped event kind belongs here the moment it is
+ * added, not when its first consumer arrives.
+ */
+export function eventHole(e: RoundEvent): number | null {
+  if (
+    e.type === 'score/set' ||
+    e.type === 'score/clear' ||
+    e.type === 'score/putts' ||
+    e.type === 'score/puttsClear'
+  ) {
+    return e.hole
+  }
   if (e.type === 'game/event') {
     const h = (e.data as { hole?: unknown } | null)?.hole
     return typeof h === 'number' ? h : null

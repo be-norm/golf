@@ -1,4 +1,5 @@
 import { formatCents, formatCentsSigned } from '../../engine/core/money'
+import { moneyLine } from './summaryCard'
 import type { ScorecardHalf, SummaryCard } from './summaryCard'
 
 /**
@@ -281,6 +282,12 @@ function gameBlock(g: Ctx, game: SummaryCard['games'][number]): Block {
   const NOTE_GAP = 10
   const RULE_H = 2
   const LABEL_W = 96
+  // The money tier sits between the lines and the notes in both size and
+  // colour, because that is where it sits in meaning: brighter than narration,
+  // quieter than the bets themselves.
+  const MONEY_SIZE = 18
+  const MONEY_LINE = 22
+  const MONEY_GAP = 6
   // a ledger is two columns (gold chip left, value right); plain lines are a
   // list and read left-aligned, as they do on screen
   const ledger = game.kind === 'ledger'
@@ -297,11 +304,34 @@ function gameBlock(g: Ctx, game: SummaryCard['games'][number]): Block {
   const wrappedNotes = game.notes
     .map((n) => wrap(g, n, INNER - 28, { size: 17 }))
     .filter((rows) => rows.length > 0)
+  // What the game MOVED, per player — the tier that lets a reader take FINAL
+  // STANDINGS apart (MAI-88). Always present: a game contributing zero in
+  // silence is the whole problem, so it says so in words instead.
+  //
+  // The model fits AND joins this; the painter only supplies the column width
+  // and a way to measure. One owner for the separator, the empty case and the
+  // truncation rule is what keeps this line and the settle screen from drifting
+  // — and it puts all three somewhere jsdom can reach.
+  const moneyOpts: TextOpts = { size: MONEY_SIZE }
+  const moneyCol = INNER - 28
+  const wrappedMoney = wrap(
+    g,
+    moneyLine((t) => width(g, t, moneyOpts), game.money, moneyCol),
+    moneyCol,
+    moneyOpts,
+  )
   const body = wrapped.reduce((h, l) => h + l.rows.length * LINE, 0) || LINE
   const notesBody = wrappedNotes.reduce((h, rows) => h + rows.length * NOTE_LINE, 0)
-  // gap · rule · gap · the notes — mirrors the screen's `mt-2.5 border-t pt-2.5`
-  const notesExtra = wrappedNotes.length > 0 ? NOTE_GAP + RULE_H + NOTE_GAP + notesBody : 0
-  const height = 16 + 22 + body + notesExtra + 12
+  const moneyBody = wrappedMoney.length * MONEY_LINE
+  // gap · rule · gap · money [· gap · notes] — mirrors the screen's
+  // `mt-2.5 border-t pt-2.5` wrapper around the same two tiers.
+  const extra =
+    NOTE_GAP +
+    RULE_H +
+    NOTE_GAP +
+    moneyBody +
+    (wrappedNotes.length > 0 ? MONEY_GAP + notesBody : 0)
+  const height = 16 + 22 + body + extra + 12
   return {
     height,
     draw(g, y) {
@@ -358,11 +388,19 @@ function gameBlock(g: Ctx, game: SummaryCard['games'][number]): Block {
       // screen draws this separator (SettleScreen's `border-t border-stone-800`,
       // which C.rule matches); the card has to as well, or the surface people
       // actually SHARE keeps the ambiguity the channel exists to remove.
+      cursor += NOTE_GAP
+      g.fillStyle = C.rule
+      g.fillRect(PAD + 14, cursor, INNER - 28, RULE_H)
+      cursor += RULE_H + NOTE_GAP
+      wrappedMoney.forEach((row, i) => {
+        text(g, row, PAD + 14, cursor + MONEY_LINE / 2 + i * MONEY_LINE, {
+          ...moneyOpts,
+          color: C.dim,
+        })
+      })
+      cursor += wrappedMoney.length * MONEY_LINE
       if (wrappedNotes.length > 0) {
-        cursor += NOTE_GAP
-        g.fillStyle = C.rule
-        g.fillRect(PAD + 14, cursor, INNER - 28, RULE_H)
-        cursor += RULE_H + NOTE_GAP
+        cursor += MONEY_GAP
         for (const rows of wrappedNotes) {
           rows.forEach((row, i) => {
             text(g, row, PAD + 14, cursor + NOTE_LINE / 2 + i * NOTE_LINE, {

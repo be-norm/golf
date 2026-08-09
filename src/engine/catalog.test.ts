@@ -7,6 +7,7 @@ import {
   type GameCategory,
   type GameFamily,
   type GameShape,
+  type RoundFact,
 } from './catalog'
 import { EventLog, makePlayers, makeRound, TEST_ONLY_ENGINE_TYPES } from './test/harness'
 import type { GameConfig } from './core/types'
@@ -26,15 +27,18 @@ type Covers<Union, Listed extends readonly Union[]> = [Exclude<Union, Listed[num
 const FAMILIES = ['match', 'stroke', 'points', 'pot', 'award', 'wager'] as const satisfies readonly GameFamily[]
 const CATEGORIES = ['main', 'side', 'either'] as const satisfies readonly GameCategory[]
 const SHAPES = ['solo', 'headToHead', 'teams', 'partners'] as const satisfies readonly GameShape[]
+const FACTS = ['putts'] as const satisfies readonly RoundFact[]
 
 type _FamiliesCovered = Covers<GameFamily, typeof FAMILIES>
 type _CategoriesCovered = Covers<GameCategory, typeof CATEGORIES>
 type _ShapesCovered = Covers<GameShape, typeof SHAPES>
-const _exhaustive: [_FamiliesCovered, _CategoriesCovered, _ShapesCovered] = [
-  FAMILIES,
-  CATEGORIES,
-  SHAPES,
-]
+type _FactsCovered = Covers<RoundFact, typeof FACTS>
+const _exhaustive: [
+  _FamiliesCovered,
+  _CategoriesCovered,
+  _ShapesCovered,
+  _FactsCovered,
+] = [FAMILIES, CATEGORIES, SHAPES, FACTS]
 void _exhaustive
 
 /** the registry minus anything a sibling test file registered for its own use */
@@ -100,6 +104,20 @@ describe('engine registry invariants', () => {
    * whatever bucket the renderer falls back to, which is how a side bet ends up
    * presented as somebody's main event (MAI-43).
    */
+  /**
+   * A round collects a shared fact because a game READS it (MAI-90), and setup
+   * is what turns collection on. A typo'd fact would therefore fail silently in
+   * the worst way available: the game derives nothing, setup asks for nothing,
+   * and everything looks healthy.
+   */
+  it('reads only facts the round knows how to collect', () => {
+    for (const engine of shippedEngines()) {
+      for (const fact of engine.meta.reads ?? []) {
+        expect(FACTS, `${engine.type} reads`).toContain(fact)
+      }
+    }
+  })
+
   it('every game declares where it belongs', () => {
     for (const engine of shippedEngines()) {
       expect(CATEGORIES, `${engine.type} category`).toContain(engine.meta.category)

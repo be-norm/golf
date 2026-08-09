@@ -22,6 +22,7 @@ import { GameConfigCard, type GameDraft } from './GameConfigCard'
 import { reconcileRoles } from './roles'
 import { SideBetRow } from './SideBetRow'
 import { GamePickerSheet } from './GamePickerSheet'
+import { gamesReading } from '../../lib/roundFacts'
 import { CourseSourceMark } from '../../components/CourseSourceMark'
 
 interface PlayerDraft {
@@ -84,6 +85,7 @@ export function SetupScreen() {
   const [games, setGames] = useState<GameDraft[]>([])
   const [rulesFor, setRulesFor] = useState<string>()
   const [picker, setPicker] = useState<'main' | 'side'>()
+
   /**
    * Auto-open the picker ONCE, the first time step 2 is reached with nothing
    * chosen — the empty state is otherwise a dead end behind a disabled button.
@@ -279,6 +281,10 @@ export function SetupScreen() {
   const removeGame = (gameId: string) =>
     setGames(reconcileRoles(games.filter((g) => g.gameId !== gameId)))
 
+  // Which chosen games need putts — the round records the answer, nobody is
+  // asked the question. See src/lib/roundFacts.ts.
+  const puttGames = gamesReading('putts', games)
+
   const teeOff = async () => {
     // guard on the RESOLVED tee, not just the id: an unresolvable id would fall
     // through to the un-rated handicap path and drop the tee's par/SI overlay
@@ -334,6 +340,12 @@ export function SetupScreen() {
       holes: playedHoles,
       players: roundPlayers,
       games: gameConfigs,
+      // Stored only when something needs it, so a round that isn't counting
+      // putts looks exactly like every round created before this existed. The
+      // round FREEZES it rather than re-deriving from games later: an imported
+      // round can hold a game this build doesn't ship, and what was collected
+      // is a fact about the round, not about today's registry (MAI-90).
+      ...(puttGames.length > 0 ? { trackPutts: true } : {}),
       status: 'live',
       startedAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -662,6 +674,24 @@ export function SetupScreen() {
               {sideDrafts.length === 0 ? '+ Add a side bet' : '+ More side bets'}
             </button>
           </div>
+
+          {/* NOT AN OPTION — a consequence. A round counts putts because a
+              game in it reads putts, and the group is told which one rather
+              than asked a question they have no way to answer. Offering it
+              freely was the first design and it was wrong: nothing in this app
+              shows putts back to you, so a Skins round was being asked for a
+              number that went into the log and was never seen again (MAI-90). */}
+          {puttGames.length > 0 && (
+            <p className="pixel border-stone-700 bg-stone-900/60 px-4 py-3 text-stone-400">
+              <span className="font-display block text-[10px] uppercase text-felt-300">
+                Putts will be counted
+              </span>
+              <span className="mt-1 block">
+                {puttGames.join(' and ')} {puttGames.length > 1 ? 'need' : 'needs'} them, so each
+                player gets a putts tap while you score.
+              </span>
+            </p>
+          )}
 
           {problems.length > 0 && (
             <ul className="rounded-xl bg-flag-600/10 p-3 text-sm text-flag-500 ring-1 ring-flag-600/40">

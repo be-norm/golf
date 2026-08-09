@@ -20,9 +20,13 @@ import type {
 export const GUARD_ENGINE_TYPE = 'broken'
 /** the engine label.test.ts registers to prove an unpaintable label is refused */
 export const LABEL_PROBE_ENGINE_TYPE = 'fancy'
+/** the stand-in for Snake that roundFacts.test.ts registers, so the round-fact
+ *  rule is proven before its first real reader exists */
+export const PUTTS_PROBE_ENGINE_TYPE = 'putty'
 export const TEST_ONLY_ENGINE_TYPES: readonly string[] = [
   GUARD_ENGINE_TYPE,
   LABEL_PROBE_ENGINE_TYPE,
+  PUTTS_PROBE_ENGINE_TYPE,
 ]
 
 const FIXED_AT = '2026-07-18T12:00:00.000Z'
@@ -53,6 +57,7 @@ export interface MakeRoundOpts {
   course?: Course
   players: RoundPlayer[]
   holes?: RoundHoles
+  trackPutts?: boolean
   games: Array<
     Pick<GameConfig, 'type' | 'config'> & {
       gameId?: Uuid
@@ -71,6 +76,7 @@ export function makeRound(opts: MakeRoundOpts): Round {
     )
   return {
     id: 'round-1',
+    ...(opts.trackPutts !== undefined && { trackPutts: opts.trackPutts }),
     courseId: course.id,
     courseSnapshot: course,
     teeSetId: course.teeSets[0]!.id,

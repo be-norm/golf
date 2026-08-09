@@ -4,12 +4,16 @@ import { deriveRound } from '../../engine/catalog'
 import { doubleNine } from '../../engine/core/tees'
 import type { Round } from '../../engine/core/types'
 import { EventLog, makeCourse, makePlayers, makeRound } from '../../engine/test/harness'
-import { buildSummaryCard } from './summaryCard'
+import { NETS_TO_NOTHING, buildSummaryCard, moneyLine } from './summaryCard'
 
 /**
  * The model is the single derivation behind both the settle screen and the
  * shared image, so these assertions are the regression guard for both.
  */
+
+const NBSP_ = '\u00A0'
+/** one character = one unit, which is what the painter's pixel font approximates */
+const mono = (t: string) => t.length
 
 const card = (round: Round, log: EventLog) => {
   const { ctx, derivations } = deriveRound(round, log.events)
@@ -284,6 +288,227 @@ describe('buildSummaryCard', () => {
       log.scoreByHole(round, { Ben: [3, 4], Al: [4, 4] }, [1, 2])
 
       expect(card(round, log).games).toHaveLength(2)
+    })
+  })
+
+  /**
+   * MAI-88 — THE PROPERTY THE WHOLE TIER EXISTS FOR. Every panel's money must
+   * add up to FINAL STANDINGS, or the decomposition is a lie and the reader is
+   * worse off than with no numbers at all.
+   *
+   * The round is the one that prompted the ticket: a Nassau whose halves
+   * cancel, beside a side bet that moves everything.
+   */
+  it('per-game money sums to the standings, game by game and player by player', () => {
+    const round = makeRound({
+      players: makePlayers([
+        { name: 'John' },
+        { name: 'Ben' },
+        { name: 'Grant' },
+        { name: 'Mike' },
+      ]),
+      holes: 'front9',
+      games: [
+        { type: 'nassau', config: { stakeCents: 500, teams: { a: ['p-john', 'p-ben'], b: ['p-grant', 'p-mike'] }, autoPress: false } },
+        { type: 'ctp', config: { stakeCents: 200 } },
+      ],
+    })
+    const log = new EventLog(round.id)
+    log.scoreByHole(round, {
+      John: [4, 4, 5, 3, 4, 4, 3, 5, 4],
+      Ben: [4, 4, 5, 3, 4, 4, 3, 5, 4],
+      Grant: [4, 4, 5, 3, 4, 4, 3, 5, 4],
+      Mike: [4, 4, 5, 3, 4, 4, 3, 5, 4],
+    })
+    // par 3s on this card are holes 4 and 7
+    log.append({ type: 'game/event', gameId: 'game-2', kind: 'ctp/award', data: { hole: 4, playerId: 'p-john' } })
+    log.append({ type: 'game/event', gameId: 'game-2', kind: 'ctp/award', data: { hole: 7, playerId: 'p-john' } })
+    log.append({ type: 'round/completed' })
+
+    const c = card(round, log)
+
+    const summed = new Map<string, number>()
+    for (const panel of c.games) {
+      for (const m of panel.money) {
+        summed.set(m.playerId, (summed.get(m.playerId) ?? 0) + m.cents)
+      }
+      // never a $0 row — that is what the empty case is for
+      expect(panel.money.every((m) => m.cents !== 0)).toBe(true)
+      // richest first, like the standings above it
+      expect([...panel.money].sort((a, b) => b.cents - a.cents)).toEqual(panel.money)
+    }
+    for (const s of c.standings) {
+      expect(summed.get(s.playerId) ?? 0, `${s.name}`).toBe(s.cents)
+    }
+
+    // and the case that prompted the ticket: every hole halved, so the Nassau
+    // moved nothing at all and has to SAY so rather than sit there silently
+    const nassau = c.games.find((g) => g.name === 'Nassau')!
+    expect(nassau.lines.length).toBeGreaterThan(0)
+    expect(nassau.money).toEqual([])
+    expect(moneyLine(mono, nassau.money)).toBe(NETS_TO_NOTHING)
+
+    const ctp = c.games.find((g) => g.name === 'Closest to the Pin')!
+    expect(ctp.money.map((m) => `${m.name} ${m.cents}`)).toEqual([
+      'John 1200',
+      'Ben -400',
+      'Grant -400',
+      'Mike -400',
+    ])
+  })
+
+  /**
+   * The painter word-wraps on spaces, so a name and its amount must be one
+   * unbreakable token — "John" stranded above "+$10" is worse than showing no
+   * money at all. Same rule `closeMargin` follows for "2 up".
+   */
+  it('never lets a name break away from its amount', () => {
+    const line = moneyLine(mono, [
+      { playerId: 'p-a', name: 'John', cents: 1000 },
+      { playerId: 'p-b', name: 'Mike', cents: -1000 },
+    ])
+    // Spelled with an escape so the assertion is legible: the whole point is a
+    // character you cannot see, and a test that depends on one nobody can read
+    // is a test nobody can maintain.
+    const NBSP = '\u00A0'
+    expect(line).toBe(`John${NBSP}+$10 \u00B7 Mike${NBSP}-$10`)
+    // breaks BETWEEN players, never inside one
+    expect(line.split(' ')).toEqual([`John${NBSP}+$10`, '\u00B7', `Mike${NBSP}-$10`])
+    // a PLAIN space between a name and its amount is the bug this prevents
+    expect(line).not.toMatch(/John \+/)
+    // A NAME WITH A SPACE IN IT is the case that makes the pair — not the
+    // join — the unbreakable unit. Joining only name-to-amount left the wrap
+    // free to break inside the name instead, stranding "Ben" on its own line
+    // above "Norman +$10", which is the same failure one word earlier.
+    const twoWord = moneyLine(mono, [{ playerId: 'p-c', name: 'Ben Norman', cents: 1000 }])
+    expect(twoWord).toBe(`Ben${NBSP}Norman${NBSP}+$10`)
+    expect(twoWord.split(' ')).toHaveLength(1)
+
+    // and never an empty value: `wrapText('')` returns [], so the painter would
+    // reserve zero height and draw the next line straight on top of it
+    expect(moneyLine(mono, []).length).toBeGreaterThan(0)
+  })
+
+  it('sums the grouped side-bets panel across the games it folds', () => {
+    const round = makeRound({
+      players: makePlayers([{ name: 'Ann' }, { name: 'Bob' }]),
+      holes: 'front9',
+      games: [
+        { type: 'nassau', config: { stakeCents: 500, teams: null, autoPress: false } },
+        { type: 'ctp', config: { stakeCents: 200 } },
+        { type: 'ctp', config: { stakeCents: 300 } },
+      ],
+    })
+    const log = new EventLog(round.id)
+    log.scoreByHole(round, { Ann: [4, 4, 5, 3], Bob: [5, 5, 6, 4] }, [1, 2, 3, 4])
+    for (const gameId of ['game-2', 'game-3']) {
+      log.append({ type: 'game/event', gameId, kind: 'ctp/award', data: { hole: 4, playerId: 'p-ann' } })
+    }
+    log.append({ type: 'round/completed' })
+
+    const c = card(round, log)
+    const grouped = c.games.find((g) => g.name === 'Side bets')!
+    // $2 + $3 from Bob, folded into one line rather than two panels
+    expect(grouped.money).toEqual([
+      { playerId: 'p-ann', name: 'Ann', cents: 500 },
+      { playerId: 'p-bob', name: 'Bob', cents: -500 },
+    ])
+  })
+
+  /**
+   * MAI-88, review round 1. Money can MOVE and still leave everyone level, so
+   * the empty case had to stop claiming otherwise: a grouped side-bets panel
+   * whose two games cancel prints both payouts and then this line, and
+   * "nothing moved" directly beneath two payments is simply false.
+   */
+  it('says a panel NETS to nothing, even when it lists real payouts', () => {
+    const round = makeRound({
+      players: makePlayers([{ name: 'Ann' }, { name: 'Bob' }]),
+      holes: 'front9',
+      games: [
+        { type: 'nassau', config: { stakeCents: 500, teams: null, autoPress: false } },
+        { type: 'skins', config: { stakeCents: 200, carryover: false } },
+        { type: 'ctp', config: { stakeCents: 200 } },
+      ],
+    })
+    const log = new EventLog(round.id)
+    // hole 1 (par 4) to Bob outright — that is the skin; hole 4 is the par 3
+    log.scoreByHole(round, { Ann: [5, 4, 5, 3], Bob: [4, 4, 5, 3] }, [1, 2, 3, 4])
+    log.append({ type: 'game/event', gameId: 'game-3', kind: 'ctp/award', data: { hole: 4, playerId: 'p-ann' } })
+    log.append({ type: 'round/completed' })
+
+    const c = card(round, log)
+    const grouped = c.games.find((g) => g.name === 'Side bets')!
+    // Bob took the skin, Ann took the CTP, both $2 — real money, both ways
+    expect(grouped.lines.length).toBeGreaterThan(0)
+    expect(grouped.money).toEqual([])
+    expect(moneyLine(mono, grouped.money)).toBe(NETS_TO_NOTHING)
+    expect(NETS_TO_NOTHING).not.toMatch(/nothing moved/)
+    // the side bets contributed nothing to anyone's total — which is exactly
+    // what the line has to convey, and what 'nothing moved' got wrong
+    for (const m of grouped.money) expect(m.cents).toBe(0)
+    expect(c.games.find((g) => g.name === 'Nassau')!.money.length).toBeGreaterThan(0)
+  })
+
+  /** The unbreakable-pair contract, asserted through the one function
+   *  production actually calls — an unfitted line is just `max = Infinity`. */
+  it('emits one unbreakable token per player, with no break inside it', () => {
+    const line = moneyLine(mono, [
+      { playerId: 'p-a', name: 'Ben Norman', cents: 1000 },
+      { playerId: 'p-b', name: 'Rob', cents: -1000 },
+    ])
+    const tokens = line.split(' ').filter((t) => t !== '\u00B7')
+    expect(tokens).toHaveLength(2)
+    expect(tokens[0]).toBe(`Ben${NBSP_}Norman${NBSP_}+$10`)
+  })
+
+  /**
+   * MAI-88, review round 2. A pair too wide for the column has no break left in
+   * it by construction, so SOMETHING has to give — and it must not be the
+   * money. Truncating the whole token ate the amount from the right and left a
+   * player showing no money at all beside neighbours who had theirs, which is
+   * the exact absence this tier exists to remove.
+   *
+   * Testable at all only because the fitting takes its measurer as an argument,
+   * the same trick `wrapText` uses to stay out of the untestable painter.
+   */
+  describe('fitting a money line to a column', () => {
+    const wide = [
+      { playerId: 'p-a', name: 'Christopher Vandenberghe-Smythe', cents: 1200 },
+      { playerId: 'p-b', name: 'Ann', cents: -1200 },
+    ]
+
+    it('shortens the name and never the amount', () => {
+      const line = moneyLine(mono, wide, 20)
+      for (const token of line.split(' ')) {
+        if (token === '\u00B7') continue
+        expect(token, token).toMatch(/[+-]\$\d+$/)
+      }
+      expect(line).toContain('…')
+      expect(line).toContain(`+$12`)
+      expect(line).toContain(`-$12`)
+    })
+
+    it('keeps every pair inside the column, at every width', () => {
+      for (let max = 6; max <= 60; max++) {
+        for (const token of moneyLine(mono, wide, max).split(' ')) {
+          if (token === '\u00B7') continue
+          expect(token.length, `"${token}" at max=${max}`).toBeLessThanOrEqual(max)
+        }
+      }
+    })
+
+    it('shows the money bare rather than drop a player entirely', () => {
+      // narrower than the amount plus one glyph plus the marker
+      const line = moneyLine(mono, wide, 5)
+      expect(line).toContain('+$12')
+      expect(line).toContain('-$12')
+    })
+
+    it('leaves a pair that already fits completely alone', () => {
+      expect(moneyLine(mono, [{ playerId: 'p-a', name: 'Ann', cents: 500 }], 100)).toBe(
+        `Ann${NBSP_}+$5`,
+      )
     })
   })
 
