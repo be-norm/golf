@@ -71,6 +71,53 @@ describe('wrapText', () => {
 })
 
 /**
+ * MAI-88. The money tier is the one line on this card assembled from pairs that
+ * must not come apart: a player and their amount. `moneyLine` joins each pair
+ * with a non-breaking space and separates players with ordinary ones, so the
+ * half of that contract the PAINTER owns is testable here — `wrapText` splits
+ * on ' ' alone, and takes its measurer as an argument.
+ */
+describe('wrapText over a money line', () => {
+  const NBSP = '\u00A0'
+  const DOT = '\u00B7'
+  // Deliberately unreasonable names: the widest pair is 16 characters, so every
+  // limit at or above that has a legal break for every pair.
+  const pairs = [
+    `Bartholomew${NBSP}+$12`,
+    `Fitzwilliam${NBSP}-$4`,
+    `Cholmondeley${NBSP}-$4`,
+    `Ann${NBSP}-$4`,
+  ]
+  const line = pairs.join(` ${DOT} `)
+  const widest = Math.max(...pairs.map((t) => t.length))
+
+  it('never separates a player from their money', () => {
+    // Every width from "one pair fits" upward. Below that no legal break is
+    // left and `wrapText` chops the token itself — its documented fallback for
+    // any over-long word, and unreachable here: the real panel is ~500px wide
+    // against a pair of maybe 120.
+    for (let max = widest; max <= 120; max++) {
+      for (const row of wrapText(mono, line, max)) {
+        for (const token of row.split(' ')) {
+          if (token === DOT) continue
+          expect(token, `"${token}" at max=${max}`).toMatch(/[+-]\$\d/)
+        }
+      }
+    }
+  })
+
+  it('breaks between players, packing whole pairs onto a row', () => {
+    // At 30 the last two pairs fit together (26) and no earlier combination
+    // does — so the rows are groupings of pairs, never a split one.
+    expect(wrapText(mono, line, 30)).toEqual([
+      `Bartholomew${NBSP}+$12 ${DOT}`,
+      `Fitzwilliam${NBSP}-$4 ${DOT}`,
+      `Cholmondeley${NBSP}-$4 ${DOT} Ann${NBSP}-$4`,
+    ])
+  })
+})
+
+/**
  * The other pure part of the painter. Everything else here measures text in a
  * 2D context, which jsdom does not have — but the retina cliff is arithmetic,
  * and getting it wrong ships the card people actually share at half resolution

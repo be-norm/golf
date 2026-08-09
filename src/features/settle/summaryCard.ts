@@ -4,6 +4,7 @@ import type { RoundContext } from '../../engine/core/context'
 import {
   collectorsFrom,
   combineSettlements,
+  formatCentsSigned,
   minimalTransfers,
 } from '../../engine/core/money'
 import type { Round, Uuid } from '../../engine/core/types'
@@ -74,11 +75,76 @@ export interface GamePanel {
    */
   lines: { label: string; value: string; depth: number }[]
   /**
+   * WHAT THIS GAME MOVED, per player — the tier that decomposes FINAL
+   * STANDINGS (MAI-88).
+   *
+   * Without it a panel says who won each bet and never what it paid, so the
+   * standings total is a number the reader cannot take apart. The round that
+   * prompted this had a Nassau whose two nines cancelled and whose 18 pushed:
+   * three bets listed as won, contributing exactly nothing, with nothing on the
+   * card saying so.
+   *
+   * NON-ZERO ENTRIES ONLY, richest first, matching the standings' order.
+   * EMPTY therefore means the game moved nothing at all — which the renderers
+   * state in words (`ALL_SQUARE`) rather than as a row of "$0"s, the same
+   * reasoning that keeps zero-cent rows out of `settlement.lines` (MAI-40).
+   *
+   * A derived display figure, deliberately separate from `lines`: on a
+   * 'ledger' panel `lines` are bets (a push belongs there and moved nothing),
+   * and on a 'lines' panel they are individual payments. Neither is a per-player
+   * total.
+   */
+  money: MoneyRow[]
+  /**
    * What the game has to say that isn't money — "3 skins died unwon". Rendered
    * apart from `lines` so a note can never be mistaken for a payout, and so
    * `lines` can keep its promise about what it contains.
    */
   notes: string[]
+}
+
+export interface MoneyRow {
+  playerId: Uuid
+  name: string
+  cents: number
+}
+
+/** A game that settled to nothing, in words — see `GamePanel.money`. */
+export const ALL_SQUARE = 'all square — nothing moved'
+
+/**
+ * The per-game money tier as one line, for renderers that lay out text rather
+ * than elements.
+ *
+ * A NON-BREAKING SPACE joins each name to its amount, and ordinary spaces
+ * surround the separators — so the line breaks BETWEEN players and never
+ * between a player and their money. The painter word-wraps on spaces, and
+ * "John" stranded above "+$10" would be worse than not showing the money at
+ * all; `closeMargin` writes "2 up" with one for exactly this reason.
+ */
+export function moneyLine(money: readonly MoneyRow[]): string {
+  if (money.length === 0) return ALL_SQUARE
+  // Escaped rather than typed: a load-bearing invisible character is one a
+  // later edit silently replaces with a plain space.
+  return money.map((m) => `${m.name}\u00A0${formatCentsSigned(m.cents)}`).join(` \u00B7 `)
+}
+
+/**
+ * Per-player totals for one game, richest first. Zero entries are dropped: they
+ * are what "this player was not involved" and "this player came out level" both
+ * look like, and neither is worth a column on a shared card.
+ *
+ * Ties keep roster order, so two players sitting level cannot swap places
+ * between re-derives.
+ */
+function moneyRowsFrom(
+  perPlayerCents: Record<Uuid, number>,
+  players: readonly { playerId: Uuid; name: string }[],
+): MoneyRow[] {
+  return players
+    .map((p) => ({ playerId: p.playerId, name: p.name, cents: perPlayerCents[p.playerId] ?? 0 }))
+    .filter((m) => m.cents !== 0)
+    .sort((a, b) => b.cents - a.cents)
 }
 
 export interface ScorecardHalf {
@@ -139,8 +205,30 @@ function groupSideBets(panels: readonly GamePanel[]): GamePanel {
         depth: l.depth,
       }))
     }),
+    // The group's money is its members' summed, so the per-panel tier still
+    // decomposes FINAL STANDINGS exactly when side bets are folded together.
+    // Re-filtered after summing: a player up $5 in one side bet and down $5 in
+    // another moved nothing overall, and a "$0" would be noise.
+    money: sumMoney(panels),
     notes: panels.flatMap((p) => p.notes.map((n) => `${p.name}: ${n}`)),
   }
+}
+
+/** Per-player totals across several panels, richest first, non-zero only. */
+function sumMoney(panels: readonly GamePanel[]): MoneyRow[] {
+  const byPlayer = new Map<Uuid, MoneyRow>()
+  for (const p of panels) {
+    for (const m of p.money) {
+      const seen = byPlayer.get(m.playerId)
+      if (seen) seen.cents += m.cents
+      else byPlayer.set(m.playerId, { ...m })
+    }
+  }
+  // Insertion order is whatever the panels were built in — not roster order,
+  // since each panel is already sorted by cents. It is DETERMINISTIC, though,
+  // and `sort` is stable, so two players sitting level cannot swap places
+  // between re-derives. That is the property this needs; roster order is not.
+  return [...byPlayer.values()].filter((m) => m.cents !== 0).sort((a, b) => b.cents - a.cents)
 }
 
 export function buildSummaryCard(
@@ -194,6 +282,9 @@ export function buildSummaryCard(
         lines: ledger
           ? d.detailLines!.map((l) => ({ label: l.label, value: l.value, depth: l.depth ?? 0 }))
           : d.settlement.lines.map((l) => ({ label: '', value: l.label, depth: 0 })),
+        // Off `perPlayerCents`, NOT off `lines`: a ledger's lines are bets
+        // rather than payments, so summing them would miss a game entirely.
+        money: moneyRowsFrom(d.settlement.perPlayerCents, round.players),
         notes: d.notes ?? [],
       },
     ]

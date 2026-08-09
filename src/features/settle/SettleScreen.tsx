@@ -10,7 +10,7 @@ import { enqueueDeleteRound } from '../../remote/outbox'
 import { useRound } from '../scoring/useRound'
 import { BigButton } from '../../components/BigButton'
 import { DetailLines } from '../../components/DetailLines'
-import { buildSummaryCard } from './summaryCard'
+import { ALL_SQUARE, buildSummaryCard } from './summaryCard'
 import { ShareSheet } from './ShareSheet'
 
 export function SettleScreen() {
@@ -157,19 +157,34 @@ export function SettleScreen() {
                 ))}
               </ul>
             )}
-            {/* Below the money and visibly apart from it: a note is something
-                the game has to say, not a payout. The rule divides the two so
-                "3 skins died unwon" can never be read as a line where cash
-                changed hands. */}
-            {g.notes.length > 0 && (
-              <div className="mt-2.5 border-t border-stone-800 pt-2.5">
-                {g.notes.map((note, i) => (
-                  <p key={i} className="text-stone-500">
-                    {note}
-                  </p>
-                ))}
-              </div>
-            )}
+            {/* Below a rule: what the game MOVED, then what it has to SAY.
+                The money tier answers "where did my total come from" — the
+                lines above are bets, and a pushed bet is still a bet (MAI-88).
+                Notes keep their place beneath it and their dimmer weight, so
+                "3 skins died unwon" can still never be read as a payout. */}
+            <div className="mt-2.5 space-y-1 border-t border-stone-800 pt-2.5">
+              {g.money.length === 0 ? (
+                <p className="text-stone-500">{ALL_SQUARE}</p>
+              ) : (
+                <p className="flex flex-wrap gap-x-2 gap-y-0.5">
+                  {g.money.map((m) => (
+                    <span key={m.playerId} className="whitespace-nowrap text-stone-300">
+                      {m.name}{' '}
+                      <span
+                        className={m.cents > 0 ? 'text-felt-300' : 'text-flag-500'}
+                      >
+                        {formatCentsSigned(m.cents)}
+                      </span>
+                    </span>
+                  ))}
+                </p>
+              )}
+              {g.notes.map((note, i) => (
+                <p key={i} className="text-stone-500">
+                  {note}
+                </p>
+              ))}
+            </div>
           </div>
         ))}
       </section>

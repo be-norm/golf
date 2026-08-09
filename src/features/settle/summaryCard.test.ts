@@ -4,7 +4,7 @@ import { deriveRound } from '../../engine/catalog'
 import { doubleNine } from '../../engine/core/tees'
 import type { Round } from '../../engine/core/types'
 import { EventLog, makeCourse, makePlayers, makeRound } from '../../engine/test/harness'
-import { buildSummaryCard } from './summaryCard'
+import { ALL_SQUARE, buildSummaryCard, moneyLine } from './summaryCard'
 
 /**
  * The model is the single derivation behind both the settle screen and the
@@ -285,6 +285,122 @@ describe('buildSummaryCard', () => {
 
       expect(card(round, log).games).toHaveLength(2)
     })
+  })
+
+  /**
+   * MAI-88 — THE PROPERTY THE WHOLE TIER EXISTS FOR. Every panel's money must
+   * add up to FINAL STANDINGS, or the decomposition is a lie and the reader is
+   * worse off than with no numbers at all.
+   *
+   * The round is the one that prompted the ticket: a Nassau whose halves
+   * cancel, beside a side bet that moves everything.
+   */
+  it('per-game money sums to the standings, game by game and player by player', () => {
+    const round = makeRound({
+      players: makePlayers([
+        { name: 'John' },
+        { name: 'Ben' },
+        { name: 'Grant' },
+        { name: 'Mike' },
+      ]),
+      holes: 'front9',
+      games: [
+        { type: 'nassau', config: { stakeCents: 500, teams: { a: ['p-john', 'p-ben'], b: ['p-grant', 'p-mike'] }, autoPress: false } },
+        { type: 'ctp', config: { stakeCents: 200 } },
+      ],
+    })
+    const log = new EventLog(round.id)
+    log.scoreByHole(round, {
+      John: [4, 4, 5, 3, 4, 4, 3, 5, 4],
+      Ben: [4, 4, 5, 3, 4, 4, 3, 5, 4],
+      Grant: [4, 4, 5, 3, 4, 4, 3, 5, 4],
+      Mike: [4, 4, 5, 3, 4, 4, 3, 5, 4],
+    })
+    // par 3s on this card are holes 4 and 7
+    log.append({ type: 'game/event', gameId: 'game-2', kind: 'ctp/award', data: { hole: 4, playerId: 'p-john' } })
+    log.append({ type: 'game/event', gameId: 'game-2', kind: 'ctp/award', data: { hole: 7, playerId: 'p-john' } })
+    log.append({ type: 'round/completed' })
+
+    const c = card(round, log)
+
+    const summed = new Map<string, number>()
+    for (const panel of c.games) {
+      for (const m of panel.money) {
+        summed.set(m.playerId, (summed.get(m.playerId) ?? 0) + m.cents)
+      }
+      // never a $0 row — that is what the empty case is for
+      expect(panel.money.every((m) => m.cents !== 0)).toBe(true)
+      // richest first, like the standings above it
+      expect([...panel.money].sort((a, b) => b.cents - a.cents)).toEqual(panel.money)
+    }
+    for (const s of c.standings) {
+      expect(summed.get(s.playerId) ?? 0, `${s.name}`).toBe(s.cents)
+    }
+
+    // and the case that prompted the ticket: every hole halved, so the Nassau
+    // moved nothing at all and has to SAY so rather than sit there silently
+    const nassau = c.games.find((g) => g.name === 'Nassau')!
+    expect(nassau.lines.length).toBeGreaterThan(0)
+    expect(nassau.money).toEqual([])
+    expect(moneyLine(nassau.money)).toBe(ALL_SQUARE)
+
+    const ctp = c.games.find((g) => g.name === 'Closest to the Pin')!
+    expect(ctp.money.map((m) => `${m.name} ${m.cents}`)).toEqual([
+      'John 1200',
+      'Ben -400',
+      'Grant -400',
+      'Mike -400',
+    ])
+  })
+
+  /**
+   * The painter word-wraps on spaces, so a name and its amount must be one
+   * unbreakable token — "John" stranded above "+$10" is worse than showing no
+   * money at all. Same rule `closeMargin` follows for "2 up".
+   */
+  it('never lets a name break away from its amount', () => {
+    const line = moneyLine([
+      { playerId: 'p-a', name: 'John', cents: 1000 },
+      { playerId: 'p-b', name: 'Mike', cents: -1000 },
+    ])
+    // Spelled with an escape so the assertion is legible: the whole point is a
+    // character you cannot see, and a test that depends on one nobody can read
+    // is a test nobody can maintain.
+    const NBSP = '\u00A0'
+    expect(line).toBe(`John${NBSP}+$10 \u00B7 Mike${NBSP}-$10`)
+    // breaks BETWEEN players, never inside one
+    expect(line.split(' ')).toEqual([`John${NBSP}+$10`, '\u00B7', `Mike${NBSP}-$10`])
+    // a PLAIN space between a name and its amount is the bug this prevents
+    expect(line).not.toMatch(/John \+/)
+    // and never an empty value: `wrapText('')` returns [], so the painter would
+    // reserve zero height and draw the next line straight on top of it
+    expect(moneyLine([]).length).toBeGreaterThan(0)
+  })
+
+  it('sums the grouped side-bets panel across the games it folds', () => {
+    const round = makeRound({
+      players: makePlayers([{ name: 'Ann' }, { name: 'Bob' }]),
+      holes: 'front9',
+      games: [
+        { type: 'nassau', config: { stakeCents: 500, teams: null, autoPress: false } },
+        { type: 'ctp', config: { stakeCents: 200 } },
+        { type: 'ctp', config: { stakeCents: 300 } },
+      ],
+    })
+    const log = new EventLog(round.id)
+    log.scoreByHole(round, { Ann: [4, 4, 5, 3], Bob: [5, 5, 6, 4] }, [1, 2, 3, 4])
+    for (const gameId of ['game-2', 'game-3']) {
+      log.append({ type: 'game/event', gameId, kind: 'ctp/award', data: { hole: 4, playerId: 'p-ann' } })
+    }
+    log.append({ type: 'round/completed' })
+
+    const c = card(round, log)
+    const grouped = c.games.find((g) => g.name === 'Side bets')!
+    // $2 + $3 from Bob, folded into one line rather than two panels
+    expect(grouped.money).toEqual([
+      { playerId: 'p-ann', name: 'Ann', cents: 500 },
+      { playerId: 'p-bob', name: 'Bob', cents: -500 },
+    ])
   })
 
   it('splits 18 holes into two halves with pars, totals and stroke flags', () => {
