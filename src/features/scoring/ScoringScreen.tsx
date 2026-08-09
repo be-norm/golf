@@ -85,7 +85,9 @@ export function ScoringScreen() {
     // still in flight, so the key releases early and the next tap re-sends. The
     // value is never wrong — if the two agree, stepping from either gives the
     // same answer — but the duplicate outlives the round in every export.
-    // Waiting for the id removes the coincidence entirely.
+    // Waiting for the id removes that coincidence; the entry is owned by
+    // IDENTITY rather than by its value, which removes the mirror of it that
+    // lived in the stamping itself (see `sendPutts`).
     for (const [key, sent] of sentPuttsRef.current) {
       if (sent.id !== undefined && view.events.some((e) => e.id === sent.id)) {
         sentPuttsRef.current.delete(key)
@@ -256,17 +258,27 @@ export function ScoringScreen() {
 
   const sendPutts = (playerId: string, value: number | null, draft: EventDraft) => {
     const key = puttKey(playerId, currentHole)
-    sentPuttsRef.current.set(key, { value, id: undefined })
+    // OWNERSHIP IS IDENTITY, not the value. A burst that revisits a count —
+    // "+ − +" — leaves the map holding an entry whose value equals an earlier
+    // tap's, so a value comparison lets the FIRST append stamp its id onto the
+    // LAST tap's entry. The key then releases while that tap is still in
+    // flight, the stepper falls back to a derived count mid-burst, and the next
+    // tap re-sends a number already sent or clears a count the user meant to
+    // keep. Comparing the object itself has no such coincidence in it.
+    const entry: { value: number | null; id: string | undefined } = { value, id: undefined }
+    const owns = () => sentPuttsRef.current.get(key) === entry
+    sentPuttsRef.current.set(key, entry)
     void eventStore
       .append(round.id, [draft])
       .then(([event]) => {
-        // a later tap may already own this key — only stamp the id onto the
-        // entry this append actually created
-        const held = sentPuttsRef.current.get(key)
-        if (held && held.value === value && held.id === undefined) held.id = event?.id
+        if (owns()) entry.id = event?.id
       })
-      // nothing was written, so nothing is coming to release this
-      .catch(() => sentPuttsRef.current.delete(key))
+      // Nothing was written, so nothing is coming to release this — but only
+      // this entry. Deleting whatever sits at the key would drop a later tap's
+      // pending value on the floor because an earlier append failed.
+      .catch(() => {
+        if (owns()) sentPuttsRef.current.delete(key)
+      })
   }
 
   const setPutts = (playerId: string, step: 'more' | 'fewer') => {
