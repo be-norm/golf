@@ -212,10 +212,21 @@ export function ScoringScreen() {
     void eventStore.append(round.id, [{ type: 'score/set', playerId, hole: currentHole, gross }])
   }
 
+  // The last emitter on this screen without a same-frame guard, and it needs
+  // one for the reason all the others do: the header button survives its own
+  // tap, so two quick taps read the same `view` closure, compute the same
+  // `last`, and append two retracts of the same event. Replay shrugs (targets
+  // collect into a Set) but the duplicate outlives the round in every export.
+  //
+  // `undoneRef` is the right set to share with `giveBack`, and permanent is
+  // right here: `effectiveEvents` strips retracted events, so an id that has
+  // been retracted can never be `last` again.
   const undo = () => {
     const effective = effectiveEvents(view.events)
     const last = effective[effective.length - 1]
-    if (last) void eventStore.append(round.id, [{ type: 'meta/retract', targetEventId: last.id }])
+    if (!last || undoneRef.current.has(last.id)) return
+    undoneRef.current.add(last.id)
+    void eventStore.append(round.id, [{ type: 'meta/retract', targetEventId: last.id }])
   }
 
   /**

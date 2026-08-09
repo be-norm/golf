@@ -98,6 +98,41 @@ describe('ScoringScreen', () => {
   })
 
   /**
+   * The header ↩ Undo survives its own tap, so two quick taps read the same
+   * render closure, compute the same `last` event, and retract it twice.
+   * Replay shrugs — retract targets collect into a Set — but the duplicate
+   * outlives the round in every export and archive, which is the harm every
+   * other guard on this screen exists to prevent.
+   */
+  it('two taps on undo retract once, not twice', async () => {
+    const round = makeRound({
+      players: makePlayers([{ name: 'Cal' }, { name: 'Dee' }]),
+      holes: 'front9',
+      games: [{ type: 'skins', config: { stakeCents: 100, carryover: true } }],
+    })
+    round.id = 'round-undo-twice'
+    await db.rounds.put(round)
+
+    const router = createMemoryRouter(routes, { initialEntries: [`/round/${round.id}`] })
+    render(<RouterProvider router={router} />)
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Cal score' }))
+    await waitFor(async () => {
+      expect(await eventStore.list(round.id)).toHaveLength(1)
+    })
+
+    const undoButton = await screen.findByRole('button', { name: 'undo' })
+    fireEvent.click(undoButton)
+    fireEvent.click(undoButton)
+
+    await waitFor(async () => {
+      expect(await eventStore.list(round.id)).toHaveLength(2)
+    })
+    const events = await eventStore.list(round.id)
+    expect(events.filter((e) => e.type === 'meta/retract')).toHaveLength(1)
+  })
+
+  /**
    * The press affordance (MAI-34). The button is PULL — always tappable, never
    * interrupting — and only turns gold when the 2-down convention says act.
    * `holesWon` scripts Ann beating Bob on the given holes so a deficit builds.
@@ -681,8 +716,14 @@ describe('ScoringScreen — input chips', () => {
   it('lets a corrected answer through, and keeps the correction', async () => {
     const round = await wolfRound('round-input-corrected')
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Bob' }))
-    fireEvent.click(await screen.findByRole('button', { name: /Lone Wolf/ }))
+    // BOTH resolved before either is clicked. An `await` between the two taps
+    // lets the first append re-derive and unmount the prompt, so the second
+    // query races the teardown — which is a flake, not the scenario. The
+    // scenario is two taps in ONE frame, and this is what that looks like.
+    const partner = await screen.findByRole('button', { name: 'Bob' })
+    const lone = screen.getByRole('button', { name: /Lone Wolf/ })
+    fireEvent.click(partner)
+    fireEvent.click(lone)
 
     await waitFor(async () => {
       expect(await eventStore.list(round.id)).toHaveLength(2)
