@@ -219,14 +219,22 @@ export function ScoringScreen() {
   // collect into a Set) but the duplicate outlives the round in every export.
   //
   // `undoneRef` is the right set to share with `giveBack`, and permanent is
-  // right here: `effectiveEvents` strips retracted events, so an id that has
-  // been retracted can never be `last` again.
+  // right — with one condition. `effectiveEvents` strips RETRACTED events, so
+  // an id whose retract was written can never be `last` again; but that says
+  // nothing about an id whose retract was never written at all. A rejected
+  // append (quota, a DatabaseClosedError during another tab's upgrade, an
+  // aborted transaction) would otherwise leave the event live, still `last`,
+  // and permanently un-undoable — the scorekeeper tapping ↩ Undo on a wrong
+  // score and getting silence. So a failure releases, exactly as `emitOnce`
+  // below does and for the same reason.
   const undo = () => {
     const effective = effectiveEvents(view.events)
     const last = effective[effective.length - 1]
     if (!last || undoneRef.current.has(last.id)) return
     undoneRef.current.add(last.id)
-    void eventStore.append(round.id, [{ type: 'meta/retract', targetEventId: last.id }])
+    void eventStore
+      .append(round.id, [{ type: 'meta/retract', targetEventId: last.id }])
+      .catch(() => undoneRef.current.delete(last.id))
   }
 
   /**
@@ -321,14 +329,18 @@ export function ScoringScreen() {
   // every export and archive. Guard on what's already been sent, not on render
   // state. The award grid needs this for exactly the same reason — its cells
   // stay mounted through their own tap.
+  // A failed append releases, same as `undo` and `emitOnce`: nothing was
+  // written, so the bet is still running and has to stay takeable back.
   const giveBack = (offer: GameEventOffer) => {
     const targets = (offer.undoEventIds ?? []).filter((id) => !undoneRef.current.has(id))
     if (targets.length === 0) return
     targets.forEach((id) => undoneRef.current.add(id))
-    void eventStore.append(
-      round.id,
-      targets.map((targetEventId) => ({ type: 'meta/retract' as const, targetEventId })),
-    )
+    void eventStore
+      .append(
+        round.id,
+        targets.map((targetEventId) => ({ type: 'meta/retract' as const, targetEventId })),
+      )
+      .catch(() => targets.forEach((id) => undoneRef.current.delete(id)))
   }
 
   const takeAction = (action: GameAction) => {

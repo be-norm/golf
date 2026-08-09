@@ -1,5 +1,5 @@
 import 'fake-indexeddb/auto'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { createMemoryRouter, RouterProvider } from 'react-router'
@@ -98,6 +98,53 @@ describe('ScoringScreen', () => {
   })
 
   /**
+   * The failure path, which is the one that would hurt most: the guard marks
+   * an id undone BEFORE the append is known to have landed. A rejected append
+   * (quota, a DatabaseClosedError while another tab upgrades, an aborted
+   * transaction) writes no retract at all — so the event is still live, still
+   * `last`, and a permanent mark would make ↩ Undo silently dead for it, on
+   * exactly the wrong score the scorekeeper is trying to fix.
+   */
+  it('stays undoable when the retract fails to write', async () => {
+    const round = makeRound({
+      players: makePlayers([{ name: 'Cal' }, { name: 'Dee' }]),
+      holes: 'front9',
+      games: [{ type: 'skins', config: { stakeCents: 100, carryover: true } }],
+    })
+    round.id = 'round-undo-failed'
+    await db.rounds.put(round)
+
+    const router = createMemoryRouter(routes, { initialEntries: [`/round/${round.id}`] })
+    render(<RouterProvider router={router} />)
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Cal score' }))
+    await waitFor(async () => {
+      expect(await eventStore.list(round.id)).toHaveLength(1)
+    })
+
+    const undoButton = await screen.findByRole('button', { name: 'undo' })
+    const failing = vi
+      .spyOn(eventStore, 'append')
+      .mockRejectedValueOnce(new Error('QuotaExceededError'))
+    await userEvent.click(undoButton)
+    await waitFor(() => {
+      expect(failing).toHaveBeenCalledTimes(1)
+    })
+    // nothing was written, so the score is still there to undo
+    expect(await eventStore.list(round.id)).toHaveLength(1)
+    failing.mockRestore()
+
+    // …and the next tap works, rather than hitting a guard holding an id whose
+    // retract never landed
+    await userEvent.click(undoButton)
+    await waitFor(async () => {
+      expect(await eventStore.list(round.id)).toHaveLength(2)
+    })
+    const events = await eventStore.list(round.id)
+    expect(events[1]).toMatchObject({ type: 'meta/retract', targetEventId: events[0]!.id })
+  })
+
+  /**
    * The other half of guarding undo, and the one that would hurt: a PERMANENT
    * set must not suppress a legitimate later undo. It cannot, because
    * `effectiveEvents` strips retracted events — so a retracted id can never be
@@ -161,8 +208,13 @@ describe('ScoringScreen', () => {
     render(<RouterProvider router={router} />)
 
     await userEvent.click(await screen.findByRole('button', { name: 'Cal score' }))
-    await waitFor(async () => {
-      expect(await eventStore.list(round.id)).toHaveLength(1)
+    // Wait for the SCREEN, not the database. `undo` reads the last event off
+    // the rendered view, so clicking while the live query is still catching up
+    // finds no event, returns early, and lands no retract at all — which is a
+    // flake, not the race under test. The chip drops "par?" once its score is
+    // in the derivation.
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Cal score' })).not.toHaveTextContent('par?')
     })
 
     const undoButton = await screen.findByRole('button', { name: 'undo' })
