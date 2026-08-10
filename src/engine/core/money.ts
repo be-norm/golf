@@ -50,7 +50,24 @@ export function emptySettlement(playerIds: readonly Uuid[]): Settlement {
  * payment is what unbalances it. A game that cannot say who is paying moves no
  * money at all, which is the same rule `deriveRound` applies to a game whose
  * config its engine rejects, and the same one `ctp` applies to an award naming
- * a player who isn't playing.
+ * a player who isn't playing (ctp/engine.ts).
+ *
+ * THAT IS ONLY SAFE BECAUSE EVERY LINE BUILT HERE IS INDIVIDUALLY BALANCED —
+ * a winner's credit and the matching debits arrive together, so dropping the
+ * whole thing leaves the settlement exactly where it was. It is not a property
+ * the type enforces. Wolf itemises per PLAYER (`{ [id]: total }`), lines that
+ * balance only in aggregate, and refusing one of those WOULD unbalance the
+ * game; it is unaffected only because it writes `perPlayerCents` directly and
+ * never comes through here. A future engine emitting aggregate-only lines has
+ * to reckon with this rather than inherit it.
+ *
+ * `Object.hasOwn`, not `=== undefined`: `perPlayerCents` is a plain object, so
+ * `[id]` walks the prototype chain and an id of `toString` or `valueOf`
+ * resolves to the inherited FUNCTION — never undefined, straight past the
+ * guard. Worse than a bypass, because `?? 0` doesn't fall back on a function
+ * either: the accrual becomes the string "function toString() { [native
+ * code] }-500", `minimalTransfers` drops the NaN row, and the settle screen
+ * renders a creditor with no debtor.
  *
  * Silently, and deliberately — throwing here would white-screen a round the
  * user can still open, which is exactly what `malformed.test.ts` exists to
@@ -58,7 +75,7 @@ export function emptySettlement(playerIds: readonly Uuid[]): Settlement {
  */
 export function addLine(settlement: Settlement, line: SettlementLine): void {
   const ids = Object.keys(line.perPlayerCents)
-  if (ids.some((id) => settlement.perPlayerCents[id] === undefined)) return
+  if (ids.some((id) => !Object.hasOwn(settlement.perPlayerCents, id))) return
   settlement.lines.push(line)
   for (const [id, cents] of Object.entries(line.perPlayerCents)) {
     settlement.perPlayerCents[id] = (settlement.perPlayerCents[id] ?? 0) + cents

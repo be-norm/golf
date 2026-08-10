@@ -155,10 +155,11 @@ describe('a malformed game never takes a screen down', () => {
      * non-empty, disjoint, and made of players who are actually in the round —
      * `sides[loseSide].map` debits nobody when a side is empty, and
      * `Object.fromEntries` collapses a duplicated id to one credit while the
-     * opponent is charged for two. Those are three different gates in three
-     * different files (`teamsSchema`, `addLine`, and `nonEmptyPartitionProblems`
-     * behind `validateSetup`, which never runs on an import at all), and a test
-     * naming any one of them stops guarding the moment that one moves.
+     * opponent is charged for two. Those are three separate gates —
+     * `teamsSchema` and `nonEmptyPartitionProblems` in `core/teams.ts` (the
+     * second behind `validateSetup`, which never runs on an import at all), and
+     * `addLine` in `core/money.ts` — and a test naming any one of them stops
+     * guarding the moment that one moves.
      *
      * So say the thing that has to stay true however they are arranged:
      * whatever sides a game arrives carrying, it either does not settle, or it
@@ -181,10 +182,16 @@ describe('a malformed game never takes a screen down', () => {
         { a: ['p-a'], b: ['p-b', 'p-b'] },
         { a: ['p-a'], b: ['p-a'] },
         { a: ['p-a', 'p-b'], b: ['p-a'] },
-        // the only malformed shape that still DERIVES — non-empty and disjoint,
-        // so the schema has nothing to say about it, and the roster check in
-        // `addLine` is what keeps it from paying
+        // The two malformed shapes that still DERIVE — non-empty and disjoint,
+        // so the schema has nothing to say about either, and the roster check
+        // in `addLine` is the only thing keeping them from paying.
         { a: ['p-ghost'], b: ['p-b'] },
+        // …and the one that gets past a roster check written as
+        // `perPlayerCents[id] === undefined`, because that walks the prototype
+        // chain and `toString` resolves to the inherited function. It does not
+        // merely slip through: `?? 0` won't fall back on a function either, so
+        // the accrued value becomes a STRING.
+        { a: ['toString'], b: ['p-b'] },
       ]
       let derived = 0
       for (const teams of SHAPES) {
@@ -202,11 +209,15 @@ describe('a malformed game never takes a screen down', () => {
           where,
         ).toBe(0)
       }
-      // Without this the loop is silently skippable: today 7 of the 9 shapes
-      // are refused and assert nothing, so a change that stopped the other two
-      // deriving — a renamed type, a new required config field — would leave a
-      // test that runs zero expectations and still reads as full coverage.
-      expect(derived, 'no shape settled — the loop asserted nothing').toBeGreaterThan(0)
+      // An EXACT count, because "at least one" is unconditionally satisfied by
+      // the well-formed shape and so guards nothing. The two that matter are
+      // the ghost and the prototype id: they are the only ones reaching a live
+      // settlement, and therefore the only coverage the `addLine` roster check
+      // has anywhere in the repo. Refuse either earlier — a roster rule added
+      // to `teamsSchema`, say — and this drops to 1 while staying green, after
+      // which reverting that check goes undetected. Pinning the number forces
+      // the next person to re-reason it rather than absorb it.
+      expect(derived, 'expected the well-formed, ghost and prototype-id shapes to settle').toBe(3)
     })
   })
 
