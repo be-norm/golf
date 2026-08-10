@@ -295,7 +295,13 @@ function gameBlock(g: Ctx, game: SummaryCard['games'][number]): Block {
   const wrapped = game.lines.map((l) => {
     const indent = l.depth ? 16 : 0
     const max = INNER - 28 - indent - (ledger ? LABEL_W : 0)
-    return { ...l, indent, rows: wrap(g, l.value, max, { size: 19 }) }
+    // The amount rides INSIDE the wrapped string rather than being drawn in its
+    // own colour: this painter draws every money figure in one weight (see the
+    // per-player row below), and a second colour here would make the panel
+    // disagree with its own totals. The screen colours it; the card states it.
+    const value =
+      l.amountCents === undefined ? l.value : `${l.value} (${formatCentsSigned(l.amountCents)})`
+    return { ...l, indent, rows: wrap(g, value, max, { size: 19 }) }
   })
   // Notes are full-width regardless of `kind` — they belong to the game, not to
   // a column, so they never take the ledger's right-aligned value treatment.

@@ -210,11 +210,16 @@ export function GameConfigCard({
                 onChange={(v) => setConfigValue(field.key, v)}
               />
             ))}
-            <HandicapControls
-              handicap={draft.handicap}
-              gameName={label}
-              onChange={(handicap) => onChange({ ...draft, handicap })}
-            />
+            {/* Nothing at all when strokes cannot decide the game — not the
+                control, and not a line explaining its absence either. See
+                `meta.grossOnly`. */}
+            {!engine.meta.grossOnly && (
+              <HandicapControls
+                handicap={draft.handicap}
+                gameName={label}
+                onChange={(handicap) => onChange({ ...draft, handicap })}
+              />
+            )}
             <button
               aria-label={`${label} rules`}
               onClick={onRules}

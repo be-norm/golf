@@ -466,6 +466,29 @@ describe('SetupScreen — choosing games', () => {
   })
 
   /** The main card gains the affordance it never had: it can be put away too. */
+  /**
+   * A game strokes cannot decide offers no handicap control at all — closest to
+   * the pin, long drive and the snake are contests of one shot, and a toggle
+   * that changes nothing is worse than no toggle. Nothing takes its place
+   * either: a line explaining the absence is one more thing to read on a screen
+   * whose job is the settings you DO have.
+   */
+  it('offers no handicap control to a game strokes cannot decide', async () => {
+    await toStepTwo()
+    await pickGame('Skins')
+    await pickGame('Closest to the Pin', 'side')
+
+    const [skins, ctp] = gameCards()
+    // Skins keeps its own — gross vs net Skins is the round the discriminator
+    // ladder exists for
+    expect(within(skins!).getByText('Handicaps')).toBeInTheDocument()
+    expect(within(ctp!).queryByText('Handicaps')).toBeNull()
+    // …and nothing in its place. Anchored on CTP's own field, so this cannot
+    // pass by the card simply being folded shut.
+    expect(within(ctp!).getByRole('button', { name: /^increase Per par 3/ })).toBeInTheDocument()
+    expect(within(ctp!).queryByText(/handicap/i)).toBeNull()
+  })
+
   it('folds one card away without touching its neighbour', async () => {
     await toStepTwo()
     await pickGame('Skins')
@@ -480,8 +503,12 @@ describe('SetupScreen — choosing games', () => {
       within(skins!).getByRole('button', { name: /^Skins/, expanded: false }),
     ).toBeInTheDocument()
     expect(within(skins!).getByText('$1')).toBeInTheDocument()
-    // and the one beside it is untouched
-    expect(within(ctp!).getByText('Handicaps')).toBeInTheDocument()
+    // and the one beside it is untouched — anchored on its OWN config field
+    // rather than on the handicap control, which a game strokes cannot decide
+    // no longer renders at all (`meta.grossOnly`)
+    expect(
+      within(ctp!).getByRole('button', { name: /^increase Per par 3/ }),
+    ).toBeInTheDocument()
   })
 
   /**
@@ -784,6 +811,7 @@ describe('SetupScreen — choosing games', () => {
     // and the round is byte-identical to one created before any of this existed
     expect((await roundFor('penmar'))!.trackPutts).toBeUndefined()
   })
+
 
   /**
    * MAI-57. A bet can name the holes it runs on, and the grid it names them

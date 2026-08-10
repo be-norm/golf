@@ -18,6 +18,21 @@ export function formatCentsSigned(cents: number): string {
 export interface SettlementLine {
   label: string
   perPlayerCents: Record<Uuid, number>
+  /**
+   * THE MOVEMENT THIS LINE IS ABOUT — the signed swing for the one player its
+   * label names, so a surface can colour it: green for the winner of a hole,
+   * red for whoever is left holding the snake.
+   *
+   * Declared by the engine rather than derived from `perPlayerCents`, because
+   * no rule over the numbers alone can find it. "Biggest movement" is right for
+   * a winner collecting from three others and for a holder paying them, and
+   * WRONG heads-up, where the two are equal and opposite and the tie-break
+   * would put a green +$5 on a line reading "A pays $5".
+   *
+   * Optional: a line with no single subject (a team game's, where two players
+   * win together) simply says nothing rather than picking one of them.
+   */
+  headlineCents?: number
 }
 
 export interface Settlement {
@@ -76,6 +91,32 @@ export function emptySettlement(playerIds: readonly Uuid[]): Settlement {
 export function addLine(settlement: Settlement, line: SettlementLine): void {
   const ids = Object.keys(line.perPlayerCents)
   if (ids.some((id) => !Object.hasOwn(settlement.perPlayerCents, id))) return
+  /**
+   * …AND A LINE THAT MOVES NOTHING IS NOT A MOVEMENT.
+   *
+   * `settlement.lines` is the record of money that MOVED, and `lines.length === 0`
+   * is the settle panel's "No money moved." signal — so a row of zeroes makes
+   * that signal false on a round where nothing happened, and hands every
+   * consumer that counts or sums lines a phantom entry (MAI-40). `notes` is
+   * where a game says something without moving money.
+   *
+   * ENFORCED HERE RATHER THAN PER ENGINE, because it is not one game's mistake.
+   * A one-player round — refused by every `validateSetup` but accepted by
+   * `importRound`, which validates a roster with `.min(1)` — makes
+   * `stake * (players - 1)` zero for EVERY engine at once: Skins pushes one
+   * empty row per hole, the award kit one per awarded hole, Snake one at the
+   * end. Guarding them one at a time is three chances to miss the fourth, and
+   * `replay.test.ts` asserts this property over the fuzz, which never deals a
+   * single-player round.
+   *
+   * Dropping it is safe for the same reason dropping a ghost line is: every
+   * line built here is individually balanced, so a line of zeroes contributes
+   * nothing to `perPlayerCents` and removing it changes no total. Wolf's
+   * aggregate-only rows are unaffected — it writes `perPlayerCents` directly
+   * and never comes through here (its zero rows are MAI-75's, and the test
+   * naming them still passes).
+   */
+  if (Object.values(line.perPlayerCents).every((c) => c === 0)) return
   settlement.lines.push(line)
   for (const [id, cents] of Object.entries(line.perPlayerCents)) {
     settlement.perPlayerCents[id] = (settlement.perPlayerCents[id] ?? 0) + cents

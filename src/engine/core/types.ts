@@ -267,12 +267,22 @@ export interface Round {
    * it, sync carries the whole round as a blob, and `importRound` validates the
    * round with `z.looseObject`.
    *
-   * OPEN QUESTION FOR SNAKE (MAI-58): a game cannot require this. `validateSetup`
-   * sees config, players and siblings — never the round — so an engine that
-   * reads putts cannot refuse a round with tracking off, and would derive
-   * nothing while looking healthy. Resolve it there, either with an
-   * engine-declared need that setup reads to switch this on, or by widening
-   * validation to see the round. Don't let it stay implicit.
+   * A GAME CANNOT REQUIRE IT, and does not have to. `validateSetup` sees
+   * config, players and siblings — never the round — so an engine reading putts
+   * can never refuse a round with tracking off. The answer is the other way
+   * round: the engine DECLARES the need (`meta.reads`), setup reads that
+   * declaration and switches this on, and the group is told which game asked
+   * rather than being offered a question they have no way to answer.
+   *
+   * NOTHING DECLARES IT TODAY. Snake was to be the first reader and moved to
+   * the award channel instead (MAI-58) — the snake is a judgement about who
+   * three-putted LAST, which a count cannot express — so this whole path is
+   * dormant until Dots or Trouble, which want the count itself. One thing is
+   * therefore still untested by any live game: a round that arrives holding a
+   * fact-reading game WITHOUT this flag (an import, or a build predating the
+   * game) renders no entry control, and that game derives nothing while looking
+   * healthy. Whoever ships the first reader should close it — the scoring
+   * screen ORing this with `roundReads` is the shape that works.
    */
   trackPutts?: boolean
   /**

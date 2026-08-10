@@ -78,6 +78,24 @@ export interface RoundContext {
    */
   anyScored(hole: number): boolean
   /**
+   * THE LAST HOLE ANYBODY ACTUALLY PLAYED, or undefined if nobody played one.
+   *
+   * The hole a completed round's money and narration both belong to: completion
+   * finalizes everything at once, and an early-finished round must not report
+   * anything happening on a hole nobody reached.
+   *
+   * IT LIVES HERE BECAUSE FOUR PLACES WANTED IT AND EACH HAD ITS OWN COPY —
+   * `buildHoleLedger`'s completion hole, Skins' dead carry, Snake's payment,
+   * and `finalizedAt`'s last clause. `finalizedAt`'s own docstring already
+   * warned that a caller re-deriving this "gets a subtly different answer —
+   * money landing on one ledger row while the sentence explaining it sits on
+   * another", and that is exactly what happened: the ledger's copy read raw
+   * `score/set` events, so an undone last score left a completed round's money
+   * on a hole every engine agreed was unplayed (MAI-38, MAI-58). Four copies
+   * that agree today are four chances to disagree tomorrow, so there is one.
+   */
+  lastPlayedHole: number | undefined
+  /**
    * WHERE a hole's outcome becomes visible: the hole at which `hole` first
    * counts as final, which is the hole a prefix replay first settles it on and
    * therefore the hole any money riding on it lands on. Undefined if it isn't
@@ -209,6 +227,7 @@ export function buildRoundContext(round: Round, effective: readonly RoundEvent[]
   holesPlayed.forEach((h, i) => {
     if (anyScored(h)) lastTouchedIdx = i
   })
+  const lastPlayedHole = lastTouchedIdx === -1 ? undefined : holesPlayed[lastTouchedIdx]
   const allScored = (hole: number): boolean =>
     round.players.every((p) => gross.get(p.playerId)?.get(hole) !== undefined)
 
@@ -229,7 +248,7 @@ export function buildRoundContext(round: Round, effective: readonly RoundEvent[]
     if (allScored(hole)) return hole
     const movedOnTo = holesPlayed.find((h, i) => i > idx && anyScored(h))
     if (movedOnTo !== undefined) return movedOnTo
-    return holesPlayed.filter(anyScored).pop()
+    return lastPlayedHole
   }
 
   return {
@@ -245,6 +264,7 @@ export function buildRoundContext(round: Round, effective: readonly RoundEvent[]
     finalized,
     completed,
     anyScored,
+    lastPlayedHole,
     finalizedAt,
   }
 }

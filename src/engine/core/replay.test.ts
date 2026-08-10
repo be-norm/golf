@@ -42,6 +42,19 @@ describe('replay invariants (fast-check)', () => {
    * Skins broke this reaching for somewhere to say "3 skins died unwon"; the
    * fix was a `notes` channel on the derivation, and this is the guard that
    * keeps the next game from reaching for the same shortcut (MAI-40).
+   *
+   * READ THIS BEFORE TRUSTING IT: `addLine` now refuses a line that moves
+   * nothing, and every engine this loop actually checks settles through it — so
+   * over TODAY'S catalog this property is VACUOUS. It cannot fail, and deleting
+   * `addLine`'s guard would not turn it red. (Wolf is the one direct writer of
+   * `settlement.lines`, and it is skipped below for its own known violation, so
+   * it is not the exception that rescues this.)
+   *
+   * It is kept as a FORWARD guard, for the next engine that writes
+   * `settlement.lines` directly the way Wolf does — the choke point cannot see
+   * a line it is never handed. That is the whole of what it buys, and pretending
+   * otherwise is how somebody weakens `addLine`, sees green here, and believes
+   * they were covered.
    */
   it('every settlement line moves money', () => {
     fc.assert(
@@ -160,6 +173,24 @@ describe('replay invariants (fast-check)', () => {
         `${name} always finish`,
       ).toBe(true)
     }
+
+    /**
+     * …and the dealt facts actually reach a settlement. Snake settles only on a
+     * completed round on which somebody three-putted, so every property above
+     * — zero-sum, determinism, retraction equivalence, the rotation pair —
+     * would hold VACUOUSLY over a Snake that never moved a cent. This is the
+     * same question `catalog.test.ts` asks with "moved no money — the guard
+     * proves nothing", asked of the generator instead of the fixture.
+     */
+    const settled = fc
+      .sample(arbitraryRoundAndEvents(), { numRuns: 200 })
+      .some(({ round, log }) => {
+        const gameId = round.games.find((g) => g.type === 'snake')?.gameId
+        if (!gameId) return false
+        const d = deriveRound(round, log.events).derivations.get(gameId)
+        return Object.values(d?.settlement.perPlayerCents ?? {}).some((c) => c !== 0)
+      })
+    expect(settled, 'the fuzz never makes a putt-driven game settle').toBe(true)
   })
 
   /**

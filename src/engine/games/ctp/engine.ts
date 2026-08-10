@@ -46,7 +46,12 @@ function derive(
     eligible: (hole) => ctx.par(hole) === 3,
     group: GROUP,
     eventKind: 'ctp/award',
-    lineLabel: (hole, winner) => `Hole ${hole} — ${winner} closest to the pin`,
+    // JUST THE HOLE AND THE NAME. Every surface that renders a settlement
+    // line puts the game's own label directly above it — the settle panel and
+    // the share card both head the block with `gameLabel` — so spelling the
+    // game out again gave three lines reading "closest to the pin" under a
+    // heading reading CLOSEST TO THE PIN.
+    lineLabel: (hole, winner) => `Hole ${hole} — ${winner}`,
   })
 
   const unclaimed = holeResults.filter((r) => r.kind === 'unclaimed').map((r) => r.hole)
@@ -56,7 +61,11 @@ function derive(
   const notes =
     unclaimed.length > 0
       ? [
-          `${GROUP} went unclaimed on ${unclaimed.length === 1 ? 'hole' : 'holes'} ` +
+          // NOT PREFIXED WITH THE GAME. Every surface renders a note inside
+          // the game's own block, and the grouped side-bets panel prefixes it
+          // with the name itself — so naming it here produced "Closest to the
+          // Pin: Closest to the pin went unclaimed on hole 7".
+          `Unclaimed on ${unclaimed.length === 1 ? 'hole' : 'holes'} ` +
             `${unclaimed.join(', ')} — nobody was given ` +
             `${unclaimed.length === 1 ? 'it' : 'them'}, so nothing was paid`,
         ]
@@ -86,15 +95,20 @@ function derive(
     if (!r || r.kind === 'pending') return []
     if (r.kind === 'unclaimed') {
       return [
-        `${GROUP} — unclaimed`,
+        'Unclaimed',
         '↳ nobody was given it by the end of the round, so the hole paid nothing',
       ]
     }
     // The non-obvious part of a CTP is never who won it — it is what a small
-    // stake actually swings once every other player pays it.
+    // stake actually swings once every other player pays it. With nobody to
+    // pay it (a one-player round, which `importRound` accepts) there is no
+    // swing to explain, and the settlement has no line either.
     const others = playerIds.length - 1
+    // The hole ledger heads its list with the game, and the standings sheet
+    // heads the block with it — so this says who, not what game it was.
+    if (others === 0) return [`${nameOf.get(r.winnerId)} closest`]
     return [
-      `${nameOf.get(r.winnerId)} closest to the pin`,
+      `${nameOf.get(r.winnerId)} closest`,
       `↳ ${formatCents(stakeCents)} from each of ${others} other player${others === 1 ? '' : 's'}` +
         ` — ${formatCents(stakeCents * others)}`,
     ]
@@ -130,6 +144,8 @@ export const ctpEngine: GameEngine<CtpConfig> = {
     category: 'side',
     family: 'award',
     shapes: ['solo'],
+    // Handicaps have nothing to say here, so setup does not offer them.
+    grossOnly: true,
     rules: {
       tagline: 'Every par 3 is worth money to whoever stiffs it.',
       howToPlay: [

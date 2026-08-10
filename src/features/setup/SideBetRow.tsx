@@ -122,11 +122,17 @@ export function SideBetRow({
               onChange={(v) => setConfigValue(field.key, v)}
             />
           ))}
-          <HandicapControls
-            handicap={draft.handicap}
-            gameName={label}
-            onChange={(handicap) => onChange({ ...draft, handicap })}
-          />
+          {/* Nothing at all when strokes cannot decide the game — not the
+              control, and not a line explaining its absence either. Nobody
+              misses a setting they were never shown, and the rules sheet says
+              handicaps do not apply. See `meta.grossOnly`. */}
+          {!engine.meta.grossOnly && (
+            <HandicapControls
+              handicap={draft.handicap}
+              gameName={label}
+              onChange={(handicap) => onChange({ ...draft, handicap })}
+            />
+          )}
           <button
             aria-label={`${label} rules`}
             onClick={onRules}

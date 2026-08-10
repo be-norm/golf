@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  addLine,
   collectorsFrom,
   combineSettlements,
   formatCents,
@@ -81,5 +82,47 @@ describe('collectorsFrom', () => {
       expect(c.totalCents).toBe(combined[c.toPlayerId])
       expect(c.from.reduce((sum, f) => sum + f.cents, 0)).toBe(c.totalCents)
     }
+  })
+})
+
+/**
+ * `addLine` is the choke point for the two things `settlement.lines` promises:
+ * every row names players in this round, and every row moved money. Both are
+ * refusals rather than throws — `deriveRound` has no try/catch, and a malformed
+ * import must not white-screen a round the user can still open.
+ */
+describe('addLine', () => {
+  const fresh = (): Settlement => ({ perPlayerCents: { 'p-a': 0, 'p-b': 0 }, lines: [] })
+
+  it('accrues a line that moves money', () => {
+    const s = fresh()
+    addLine(s, { label: 'A wins', perPlayerCents: { 'p-a': 100, 'p-b': -100 } })
+    expect(s.lines).toHaveLength(1)
+    expect(s.perPlayerCents).toEqual({ 'p-a': 100, 'p-b': -100 })
+  })
+
+  it('refuses a line naming somebody outside the round', () => {
+    const s = fresh()
+    addLine(s, { label: 'ghost', perPlayerCents: { 'p-a': 100, 'p-nobody': -100 } })
+    expect(s.lines).toHaveLength(0)
+    expect(s.perPlayerCents).toEqual({ 'p-a': 0, 'p-b': 0 })
+  })
+
+  /**
+   * A ONE-PLAYER ROUND makes `stake * (players - 1)` zero for every engine at
+   * once — refused by every `validateSetup`, accepted by `importRound`, which
+   * validates a roster with `.min(1)`. Skins would push one empty row per hole,
+   * the award kit one per awarded hole, Snake one at the end, and
+   * `lines.length === 0` — the settle panel's "No money moved." signal — would
+   * be false on a round where nothing moved (MAI-40).
+   */
+  it('refuses a line that moves nothing', () => {
+    const s = fresh()
+    addLine(s, { label: 'nothing happened', perPlayerCents: { 'p-a': 0, 'p-b': 0 } })
+    expect(s.lines).toHaveLength(0)
+
+    const solo: Settlement = { perPlayerCents: { 'p-a': 0 }, lines: [] }
+    addLine(solo, { label: 'A collects from nobody', perPlayerCents: { 'p-a': 0 } })
+    expect(solo.lines).toHaveLength(0)
   })
 })

@@ -134,6 +134,8 @@ export function deriveAwardPot(
     // each of the others.
     addLine(settlement, {
       label: lineLabel(hole, nameOf.get(winnerId) ?? ''),
+      // the line names the winner, so the money it shows is what they made
+      headlineCents: stakeCents * (playerIds.length - 1),
       perPlayerCents: Object.fromEntries(
         playerIds.map((id) => [
           id,

@@ -7,6 +7,7 @@ import { vegasEngine } from './vegas/engine'
 import { sixPointEngine } from './sixPoint/engine'
 import { ctpEngine } from './ctp/engine'
 import { longDriveEngine } from './longDrive/engine'
+import { snakeEngine } from './snake/engine'
 
 registerEngine(skinsEngine)
 registerEngine(nassauEngine)
@@ -16,6 +17,7 @@ registerEngine(vegasEngine)
 registerEngine(sixPointEngine)
 registerEngine(ctpEngine)
 registerEngine(longDriveEngine)
+registerEngine(snakeEngine)
 
 export {
   skinsEngine,
@@ -26,4 +28,5 @@ export {
   sixPointEngine,
   ctpEngine,
   longDriveEngine,
+  snakeEngine,
 }

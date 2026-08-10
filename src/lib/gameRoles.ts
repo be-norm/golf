@@ -1,4 +1,4 @@
-import { roleOf } from '../engine/catalog'
+import { getEngine, roleOf } from '../engine/catalog'
 import type { GameConfig, Round } from '../engine/core/types'
 
 /**
@@ -49,7 +49,16 @@ export function primaryGame(round: Round): GameConfig | undefined {
  */
 export function strokeGame(round: Round): GameConfig | undefined {
   const game = primaryGame(round)
-  return game?.handicap?.mode === 'net' ? game : undefined
+  if (game?.handicap?.mode !== 'net') return undefined
+  // …and never a game strokes cannot decide. Setup no longer offers those a
+  // handicap control at all (`meta.grossOnly`), but the stored value is what
+  // this reads, and a round can arrive with one: an import, a hand-edited log,
+  // or a round written before the game declared it. In a round of nothing but
+  // side bets `primaryGame` falls through to `games[0]`, so a net CTP would
+  // draw stroke dots on the scorecard and print "underline = handicap stroke:
+  // Closest to the Pin" onto the share card for an allocation no engine ever
+  // reads. Undefined is the honest answer, and every consumer handles it.
+  return getEngine(game.type)?.meta.grossOnly ? undefined : game
 }
 
 export interface RolePartition {
