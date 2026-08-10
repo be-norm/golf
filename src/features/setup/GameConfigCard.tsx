@@ -99,16 +99,22 @@ export function GameConfigCard({
   const setConfigValue = (key: string, value: unknown) =>
     onChange({ ...draft, config: { ...config, [key]: value } })
   // A game can be stranded after the fact — chosen with four players, then a
-  // player dropped on the way back through step 1. The red problems list blocks
-  // tee-off, but the card should say why on its own rather than leaving the
-  // reason somewhere else on the screen.
+  // player dropped on the way back through step 1. The card should say so on
+  // its own rather than leaving the reason somewhere else on the screen.
   //
-  // It REPLACES the engine's own complaints rather than joining them, because
-  // it is their cause: Nassau with five players reports an unassigned player,
-  // which is true, fixable only by dropping one, and not what the card should
-  // lead with.
+  // It LEADS the engine's own complaints, because it is usually their cause:
+  // Nassau with five players reports an unassigned player, which is true and
+  // fixable only by dropping one. It never REPLACES them — a duplicate-settings
+  // problem is independent of the roster, and hiding it until the roster is
+  // fixed makes the user solve one problem to discover the next (the rule
+  // wolf's `validateSetup` states in prose, and this used to break).
+  //
+  // Not all of these block tee-off, so this says what is WRONG with the game
+  // rather than what is stopping you: `meta.minPlayers/maxPlayers` is the
+  // card's own reading, and Skins declares 2–8 while validating only the lower
+  // bound. The list beside the Tee off button is the one that speaks for it.
   const stranded = !isPlayable(engine, players.length)
-  const blocking = stranded ? [playerCountNote(engine)] : problems
+  const wrong = stranded ? [playerCountNote(engine), ...problems] : problems
   const stake = stakeSummary(engine, config)
   // scoped per instance: the screen renders several of these, and two panels
   // sharing an id would point every aria-controls at the same element
@@ -125,7 +131,7 @@ export function GameConfigCard({
           blurb underneath and leaves the title clipped against the card edge. */}
       <div
         className={`flex items-start justify-between gap-3 px-4 pt-4 ${
-          open || blocking.length > 0 ? 'pb-1' : 'pb-4'
+          open || wrong.length > 0 ? 'pb-1' : 'pb-4'
         }`}
       >
         <button
@@ -151,10 +157,11 @@ export function GameConfigCard({
         </button>
       </div>
 
-      {/* OUTSIDE the fold: these are why tee-off is blocked, so they must not
-          be a thing you can hide by tidying the screen up. The deduped list by
-          the Tee off button says WHAT is wrong; this says which card to open. */}
-      {blocking.map((problem) => (
+      {/* OUTSIDE the fold: what is wrong here is fixed by controls inside the
+          card, so it must not be a thing you can hide by tidying the screen up.
+          The deduped list by the Tee off button says what is blocking it; this
+          says which card to open. */}
+      {wrong.map((problem) => (
         <p key={problem} className="px-4 pb-3 text-sm text-flag-500">
           {problem}
         </p>

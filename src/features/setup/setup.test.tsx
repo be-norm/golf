@@ -533,6 +533,37 @@ describe('SetupScreen — choosing games', () => {
   })
 
   /**
+   * The roster note LEADS the engine's own problems and does not replace them.
+   * It replaced them at first, which quietly reintroduced the thing wolf's
+   * `validateSetup` states in prose: a duplicate is independent of the roster,
+   * so hiding it until the roster is fixed makes you solve one problem to
+   * discover the next. Two Wolfs at three players is that case exactly — the
+   * summary listed the duplicate while neither card would admit to it.
+   */
+  it('states a duplicate on the card even while the roster is wrong', async () => {
+    await pickPenmar()
+    await cont() // → players
+    for (const name of ['Ann', 'Ben', 'Cal', 'Dee']) await addPlayer(name, 10)
+    await cont() // → games
+    await pickGame('Wolf')
+    await pickGame('Wolf')
+
+    // stranded after the fact — the picker won't offer a game the roster can't
+    // play, so this is the only way into that state
+    await userEvent.click(screen.getByText('← Back'))
+    await userEvent.click(await screen.findByRole('button', { name: 'remove Dee' }))
+    await cont()
+
+    expect(gameCards()).toHaveLength(2)
+    for (const card of gameCards()) {
+      // the roster first, because it is why the rest of the card is unusable
+      expect(within(card).getByText(/Needs 4 players/)).toBeInTheDocument()
+      // …and the duplicate too, which no number of players fixes
+      expect(within(card).getByText(/identical settings/)).toBeInTheDocument()
+    }
+  })
+
+  /**
    * Why the fold is state on SetupScreen and not inside the cards: this step is
    * a conditional branch of one component, so `← Back` unmounts every card on
    * it. Held locally, a screen the user had just tidied would silently spring

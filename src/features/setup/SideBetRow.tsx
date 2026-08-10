@@ -63,8 +63,8 @@ export function SideBetRow({
     onChange({ ...draft, config: { ...config, [key]: value } })
   const stake = stakeSummary(engine, config)
   const stranded = !isPlayable(engine, players.length)
-  // roster first, then the engine's own — see the main card
-  const blocking = stranded ? [playerCountNote(engine)] : problems
+  // roster first, then the engine's own — never instead of them, see the main card
+  const wrong = stranded ? [playerCountNote(engine), ...problems] : problems
   // scoped per instance — see GameConfigCard's `panelId`
   const panelId = useId()
 
@@ -94,7 +94,7 @@ export function SideBetRow({
       </div>
 
       {/* outside the fold — see the main card */}
-      {blocking.map((problem) => (
+      {wrong.map((problem) => (
         <p key={problem} className="px-3 pb-2 text-xs text-flag-500">
           {problem}
         </p>
