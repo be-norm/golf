@@ -134,15 +134,25 @@ export function ConfigField({
        * fixable. Stated, not blocked — MAI-57 is explicit that an inert bet is
        * surfaced rather than refused.
        */
-      const stale = picked.filter((h) => !offered.includes(h))
+      // Sorted for the sentence, because `picked` is in the PREVIOUS range's
+      // play order: a round started on 13 nominating 14 and 10 would otherwise
+      // read "Holes 14, 10 are not in this round", which looks like a bug.
+      const stale = picked.filter((h) => !offered.includes(h)).sort((a, b) => a - b)
       const toggle = (hole: number) => {
-        const next = picked.includes(hole)
-          ? picked.filter((h) => h !== hole)
-          : // KEEP PLAY ORDER, not tap order: the list is read back as prose
-            // ("Holes 3, 8") and settled hole by hole, and a set that
-            // remembered which chip was tapped first would read as a jumble.
-            offered.filter((h) => picked.includes(h) || h === hole)
-        onChange(next)
+        // REBUILT FROM THE ROUND'S HOLES ON EVERY TAP, both branches. Two
+        // things fall out of that and neither is optional:
+        //
+        // KEEP PLAY ORDER, not tap order — the list is read back as prose
+        // ("Holes 3, 8") and settled hole by hole, and a set remembering which
+        // chip was tapped first would read as a jumble.
+        //
+        // AND DROP STRAYS, which the message below promises. Filtering `picked`
+        // on the remove branch kept holes this round no longer plays, so
+        // deselecting one left the bet inert with `Tee off` still enabled —
+        // `validateSetup` only refuses an EMPTY list — reached by the very tap
+        // the warning recommends.
+        const on = picked.includes(hole)
+        onChange(offered.filter((h) => (h === hole ? !on : picked.includes(h))))
       }
       return (
         <div>

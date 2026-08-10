@@ -100,6 +100,9 @@ function derive(
    * the settle panel's "No money moved." signal, and a zero-cent row makes it
    * false on precisely the round it was written for (MAI-40).
    */
+  /** "3 long drives" — the counted form of `GROUP`, so a rename reaches both. */
+  const driveLabel = (n: number) => `${n} ${GROUP.toLowerCase()}${n === 1 ? '' : 's'}`
+
   const notes: string[] = []
   if (designated.length === 0) {
     notes.push(
@@ -119,15 +122,15 @@ function derive(
     // to eighteen, and a group that tapped three of them would get a
     // fifteen-number sentence wrapped over four lines of the PAINTED share
     // card. Past a handful the list stops being something anybody reads.
+    const them = unclaimed.length === 1 ? 'it' : 'them'
     notes.push(
       unclaimed.length > 4
-        ? `${unclaimed.length} long drives went unclaimed — nobody was given them, so nothing was paid`
+        ? `${driveLabel(unclaimed.length)} went unclaimed — nobody was given ${them}, so nothing was paid`
         : `${GROUP} went unclaimed on ${unclaimed.length === 1 ? 'hole' : 'holes'} ` +
-          `${unclaimed.join(', ')} — nobody was given it, so nothing was paid`,
+          `${unclaimed.join(', ')} — nobody was given ${them}, so nothing was paid`,
     )
   }
 
-  const driveLabel = (n: number) => `${n} long drive${n === 1 ? '' : 's'}`
   const standings = standingsFromSettlement(players, settlement, (p) =>
     driveLabel(wonByPlayer.get(p.playerId) ?? 0),
   )

@@ -895,6 +895,36 @@ describe('SetupScreen — choosing games', () => {
     })
 
     /**
+     * ANY hole, including one being turned OFF — which is the tap the message
+     * recommends and the one the first fix missed. Deselecting rebuilt the list
+     * from `picked` rather than from the round's holes, so the strays survived,
+     * the warning re-rendered immediately after the user did what it asked, and
+     * `Tee off` stayed enabled over a bet that could never pay (`validateSetup`
+     * refuses only an EMPTY list).
+     */
+    it('drops strays when a hole is turned off, not only when one is turned on', async () => {
+      await toLongDrive()
+      for (const h of [4, 12, 15]) {
+        await userEvent.click(screen.getByRole('button', { name: new RegExp(`^hole ${h} —`) }))
+      }
+      const back = () => userEvent.click(screen.getByRole('button', { name: /Back/ }))
+      await back()
+      await back()
+      await userEvent.click(screen.getByRole('button', { name: 'Front 9' }))
+      await cont()
+      await cont()
+
+      // hole 4 survives the range change; 12 and 15 do not
+      expect(screen.getByText(/Holes 12, 15 are not in this round/)).toBeInTheDocument()
+      await userEvent.click(screen.getByRole('button', { name: /^hole 4 —/ }))
+
+      expect(screen.queryByText(/not in this round/)).not.toBeInTheDocument()
+      // nothing is selected now, so it is refused out loud rather than teed off
+      expect(screen.getAllByText('Long Drive needs at least one hole')).toHaveLength(2)
+      expect(screen.getByRole('button', { name: /Tee off/ })).toBeDisabled()
+    })
+
+    /**
      * Entering custom mode selects NOTHING rather than expanding the preset it
      * replaces — holes the group never chose must not look chosen — so the
      * empty state is reachable, and it is refused out loud rather than teeing

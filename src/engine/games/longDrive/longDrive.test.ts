@@ -118,6 +118,47 @@ describe('longDrive — golden fixtures (hand-verified)', () => {
     expect(ldOf(round, log).notes).toHaveLength(1)
   })
 
+  /**
+   * L1b: two unclaimed holes, which is where the ≤4 branch has to say "them".
+   * L1 covers the one-hole form; both are prose the settle screen and the
+   * PAINTED share card render verbatim.
+   */
+  it('L1b: two unclaimed holes read as a plural sentence', () => {
+    const round = ldRound()
+    const log = new EventLog()
+    scoreHoles(round, log, [1, 2, 3, 4, 5, 6, 7, 8, 9])
+    log.append({ type: 'round/completed' })
+
+    expect(ldOf(round, log).notes).toEqual([
+      'Long drive went unclaimed on holes 3, 8 — nobody was given them, so nothing was paid',
+    ])
+  })
+
+  /**
+   * L1c: "every hole" can leave up to eighteen unclaimed, and a fifteen-number
+   * sentence wraps over several lines of the share card nobody reads. Past four
+   * it counts instead — the one place the note stops naming holes.
+   */
+  it('L1c: past four unclaimed holes the note counts them', () => {
+    const round = ldRound(FOUR(), { holes: 'all' })
+    const log = new EventLog()
+    scoreHoles(round, log, [1, 2, 3, 4, 5, 6, 7, 8, 9])
+    award(log, 4, 'p-a')
+    log.append({ type: 'round/completed' })
+
+    expect(ldOf(round, log).notes).toEqual([
+      '8 long drives went unclaimed — nobody was given them, so nothing was paid',
+    ])
+    // …and four still name themselves, so the threshold is a threshold
+    const four = new EventLog()
+    scoreHoles(round, four, [1, 2, 3, 4])
+    for (const h of [1, 2]) award(four, h, 'p-a')
+    four.append({ type: 'round/completed' })
+    expect(ldOf(round, four).notes).toEqual([
+      'Long drive went unclaimed on holes 3, 4 — nobody was given them, so nothing was paid',
+    ])
+  })
+
   it('L3: holes "all" puts a cell on every hole of the round', () => {
     const round = ldRound(FOUR(), { holes: 'all' })
     const log = new EventLog()
