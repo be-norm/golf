@@ -2,7 +2,13 @@ import { z } from 'zod'
 import type { Award, GameEngine, GameDerivation } from '../../catalog'
 import type { RoundContext } from '../../core/context'
 import type { GameScopedEvent } from '../../core/events'
-import { addLine, emptySettlement, formatCents, type Settlement } from '../../core/money'
+import {
+  addLine,
+  emptySettlement,
+  formatCents,
+  formatCentsSigned,
+  type Settlement,
+} from '../../core/money'
 import { duplicateInstanceProblems } from '../../core/setup'
 import { standingsFromSettlement } from '../../core/standings'
 import { latestHoleSummary, summaryString } from '../../core/summary'
@@ -180,22 +186,31 @@ function derive(
   /**
    * THE LIVE POSITION, and only while it is live.
    *
-   * `detailLines` is what makes a panel render as a LEDGER instead of its money
-   * lines (`summaryCard.ts`), so shipping this on a settled round put "Snake ·
-   * Mike · $32" on the share card where the payment belonged — a number a
-   * reader could not tell the sign of. Once the money moves the settlement line
-   * says it properly, so this stands down.
+   * WHAT IT IS COSTING THE HOLDER, not what the pot is worth. "Mike · $2" is a
+   * number whose sign a reader has to guess, and guessing wrong is the natural
+   * reading — every other figure on the bar is somebody's winnings. He is down
+   * the pot to EACH of the others, so the exposure is the stake times the field:
+   * "Mike · -$2 x 3". The multiplier stays rather than collapsing to -$6
+   * because the stake is the number that climbs on a doubling pot, and it is
+   * what the group agreed to.
+   *
+   * One string for both channels — the bar row and the standings sheet say the
+   * same thing about the same bet, so they cannot word it differently.
+   *
+   * `detailLines` is also what makes a panel render as a LEDGER instead of its
+   * money lines (`summaryCard.ts`), so shipping it on a settled round put the
+   * live position on the share card where the payment belonged. Once the money
+   * moves the settlement line says it properly, so this stands down.
    */
+  const exposure =
+    held === undefined
+      ? undefined
+      : others === 1
+        ? `${nameOf.get(held.holderId)} · ${formatCentsSigned(-held.potCents)}`
+        : `${nameOf.get(held.holderId)} · ${formatCentsSigned(-held.potCents)} x ${others}`
   const detailLines = owes
     ? undefined
-    : [
-        {
-          label: 'Snake',
-          value: held
-            ? `${nameOf.get(held.holderId)} · ${formatCents(held.potCents)}`
-            : 'nobody has it',
-        },
-      ]
+    : [{ label: 'Snake', value: exposure ?? 'nobody has it' }]
 
   // The bar recaps the hole it last changed hands on — "H7 · Ben has it · $4"
   // — which is both what just happened and who is carrying it now.
@@ -282,7 +297,7 @@ function derive(
     // something to somebody right now, and settles nothing until the round
     // ends. Dropped once it IS money — the aggregate reports that itself, and
     // two rows saying it would just disagree about the phrasing.
-    ...(held && !owes && { openBet: `${nameOf.get(held.holderId)} · ${formatCents(held.potCents)}` }),
+    ...(exposure && !owes && { openBet: exposure }),
     holeSummary,
     requiredInputs: () => [],
     awards,

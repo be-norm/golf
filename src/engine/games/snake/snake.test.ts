@@ -251,7 +251,12 @@ describe('snake — golden fixtures (hand-verified)', () => {
     expect(Object.values(snake.settlement.perPlayerCents).every((c) => c === 0)).toBe(true)
     expect(snake.notes).toBeUndefined()
     expect(snake.summaryParts).toEqual([{ label: 'H2', value: 'B has it' }])
-    expect(snake.detailLines).toEqual([{ label: 'Snake', value: 'B · $1' }])
+    // WHAT IT COSTS HIM, not what the pot is worth — "B · $1" is a number
+    // whose sign the reader has to guess, and every other figure on the bar is
+    // somebody's winnings. The multiplier stays rather than collapsing to -$3:
+    // the stake is what climbs on a doubling pot, and what the group agreed to.
+    expect(snake.detailLines).toEqual([{ label: 'Snake', value: 'B · -$1 x 3' }])
+    expect(snake.openBet).toBe('B · -$1 x 3')
   })
 
   /**
@@ -350,8 +355,16 @@ describe('snake — golden fixtures (hand-verified)', () => {
     const snake = snakeOf(round, log)
 
     expect(snake.settlement.perPlayerCents).toEqual({ 'p-a': -500, 'p-b': 500 })
-    // heads-up needs no "to each of 1 others"
+    // heads-up needs no "to each of 1 others" — nor an "x 1" on the bar
     expect(snake.settlement.lines[0]!.label).toBe('A pays $5')
+
+    // …and no "x 1" on the bar while it is still live. A LIVE log, not an
+    // empty one: with no bite there is no holder, so an empty log would pass
+    // this whatever the format did.
+    const live = new EventLog()
+    scoreHoles(round, live, [1, 2, 3])
+    bite(live, 3, 'p-a')
+    expect(snakeOf(round, live).openBet).toBe('A · -$5')
     expect(snake.holeSummary(9)).toEqual([
       'A is left holding the snake',
       '↳ pays $5 to each of 1 other player — $5',
