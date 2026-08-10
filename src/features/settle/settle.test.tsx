@@ -57,6 +57,56 @@ describe('SettleScreen', () => {
   })
 
   /**
+   * WHO COLLECTED AND WHO PAID, on the line itself. A side-bet block listed the
+   * bets and left the reader to add the stakes up: "Hole 4 — Ben" says nothing
+   * about the money, and "Mike pays $32 to each of 3 others" gives a figure
+   * whose sign you have to work out. Both now carry what the line did to the
+   * player it names, in the same green/red as the totals beneath.
+   */
+  it('colours what each settlement line did to the player it names', async () => {
+    const round = makeRound({
+      players: makePlayers([{ name: 'Ben' }, { name: 'Alice' }, { name: 'Cy' }]),
+      holes: 'front9',
+      games: [
+        { type: 'ctp', config: { stakeCents: 200 } },
+        { type: 'snake', config: { potCents: 500, doubling: false } },
+      ],
+    })
+    round.id = 'round-settle-line-money'
+    round.status = 'completed'
+    const log = new EventLog(round.id)
+    log.scoreByHole(round, { Ben: [4, 4, 4, 3], Alice: [4, 4, 4, 3], Cy: [4, 4, 4, 3] }, [1, 2, 3, 4])
+    log.append({
+      type: 'game/event',
+      gameId: round.games[0]!.gameId,
+      kind: 'ctp/award',
+      data: { hole: 4, playerId: 'p-ben' },
+    })
+    log.append({
+      type: 'game/event',
+      gameId: round.games[1]!.gameId,
+      kind: 'snake/bite',
+      data: { hole: 2, playerId: 'p-cy' },
+    })
+    log.append({ type: 'round/completed' })
+    await db.rounds.put(round)
+    await db.round_events.bulkAdd(log.events)
+
+    render(
+      <RouterProvider
+        router={createMemoryRouter(routes, { initialEntries: [`/round/${round.id}/settle`] })}
+      />,
+    )
+
+    // the winner of the par 3 made $2 from each of the other two — green
+    const won = await screen.findByText('(+$4)')
+    expect(won).toHaveClass('text-felt-300')
+    // and the snake cost Cy $5 to each of them — red
+    const paid = screen.getByText('(-$10)')
+    expect(paid).toHaveClass('text-flag-500')
+  })
+
+  /**
    * A dead skins pot is something the game SAYS, not money that moved. It has
    * to reach the settle screen — it is the group's stake — without pretending
    * to be a payout, and without making "No money moved." a lie (MAI-40).
