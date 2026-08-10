@@ -247,14 +247,13 @@ describe('wolf — golden fixture (hand-verified)', () => {
 
     const d = deriveRound(round, log.events).derivations.get('game-1')!
     expect(d.holeSummary(1)).toEqual(['A (W) & B win with A\'s 4'])
-    // the teams, not a verdict
-    // `vs.` is the same token the scoring panel stacks — one wording for one fact
-    expect(d.holeSummary(2)).toEqual([':wolf: B (lone) vs. A & C & D'])
-    // no pick either: just whose tee it is
-    expect(d.holeSummary(3)).toEqual(['Wolf: C'])
-    // …and the SCREEN is asked to state none of it. A hole nobody played has
-    // nothing to show once the round is over — answered or not, so a pre-pick
-    // made off a tee the group then walked away from doesn't linger either.
+    // NOTHING AT ALL about the holes they never played — not a verdict, not the
+    // teams someone pre-picked off the 2nd tee before the group walked in, not
+    // even whose tee it was. Mid-round "Wolf: C" is useful (it is where you are
+    // walking); after the walk-in there is nowhere to walk.
+    expect(d.holeSummary(2)).toEqual([])
+    expect(d.holeSummary(3)).toEqual([])
+    // …and the screen is asked to state none of it either
     expect(d.requiredInputs().map((i) => i.hole)).toEqual([1])
     // AND THE BAR, which is the half that was missed the first time round: the
     // fix belongs in `derive` (an unplayed hole is pending, not halved), not in
@@ -411,6 +410,36 @@ describe('wolf — golden fixture (hand-verified)', () => {
     expect(d.notes).toEqual(['Hole 1: no wolf declared — nothing settled there.'])
     // …and it is NOT a settlement line: "No money moved." must stay honest (MAI-40)
     expect(d.settlement.lines.every((l) => !l.label.includes('no wolf'))).toBe(true)
+  })
+
+  /**
+   * …AND IT DOES NOT ACCUSE A GROUP OF FORGETTING SOMETHING THEY DID. A pick can
+   * be refused rather than absent — a partner pick naming the hole's own wolf,
+   * reachable on a log written before the stamp existed. "No wolf declared"
+   * would be a false statement about that group, so the log decides which
+   * sentence is true: `picks` still holds the event even when it was refused.
+   */
+  it('says which happened when a pick was refused rather than never made', () => {
+    const players = makePlayers([{ name: 'A' }, { name: 'B' }, { name: 'C' }, { name: 'D' }])
+    const round = makeRound({
+      players,
+      holes: 'front9',
+      games: [
+        { type: 'wolf', config: { pointCents: 100, rotation: ['p-a', 'p-b', 'p-c', 'p-d'] } },
+      ],
+    })
+    const log = new EventLog()
+    log.scoreByHole(round, { A: [4, 4], B: [5, 5], C: [5, 5], D: [5, 5] }, [1, 2])
+    // hole 1 is A's tee, and this rides A with A — refused
+    pick(log, 1, 'p-a')
+    // hole 2 is B's tee and simply never got a pick
+    log.append({ type: 'round/completed' })
+
+    const d = deriveRound(round, log.events).derivations.get('game-1')!
+    expect(d.notes).toEqual([
+      'Hole 2: no wolf declared — nothing settled there.',
+      'Hole 1: the wolf pick names no valid partner — nothing settled there.',
+    ])
   })
 
   /**

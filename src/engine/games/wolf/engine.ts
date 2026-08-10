@@ -418,6 +418,13 @@ function derive(
   const holeSummary = (hole: number): string[] => {
     const r = holeResults.find((h) => h.hole === hole)
     if (!r) return []
+    // ONCE THE ROUND IS OVER A HOLE NOBODY PLAYED HAS NOTHING TO SAY. Mid-round
+    // the line is useful on an unplayed hole — "Wolf: C" is whose tee you are
+    // walking to — but after the group has walked in there is no tee to walk
+    // to, and the standings sheet would state teams for a hole that never
+    // happened. `buildHoleLedger` gates on `hasScore`; this is the same rule,
+    // put where every consumer gets it (MAI-38).
+    if (ctx.completed && !ctx.anyScored(hole)) return []
     // Pending covers a hole nobody played, because `derive` files it that way
     // rather than as a halve — see the nobody-posted branch.
     if (r.outcome === 'pending') {
@@ -466,11 +473,13 @@ function derive(
    * only place that said so was the hole's own panel — one hole out of
    * eighteen, on a screen you have to already be standing on.
    *
-   * It always meant the same thing — nobody declared — and the wording says
-   * exactly that. (An earlier draft dropped declarations that HAD been made,
-   * when the derived wolf moved on a trailing hole; the stamp now pins the wolf
-   * instead, so this note never has to accuse a group of forgetting something
-   * they did.)
+   * TWO REASONS A HOLE HAS NO PICK, and the note must not confuse them. Nobody
+   * declared, or a declaration was DROPPED as stale — a partner pick naming
+   * this hole's own wolf, which is reachable on a pre-MAI-84 log whose derived
+   * wolf has since moved. Telling that group "no wolf declared" would be a
+   * false statement about something they did do, so the log itself decides
+   * which sentence is true: `picks` still holds the event even when `pick` was
+   * refused.
    *
    * `notes` is the round-level channel for exactly this, it renders on both the
    * standings sheet and the settle screen, and it is NOT money (MAI-40), so the
@@ -488,14 +497,20 @@ function derive(
    * here would reach the share card's painter as a literal token.
    */
   const missed = ctx.completed
-    ? holeResults.filter((r) => !r.pick && ctx.anyScored(r.hole)).map((r) => r.hole)
+    ? holeResults.filter((r) => !r.pick && ctx.anyScored(r.hole))
     : []
-  const notes =
-    missed.length > 0
-      ? [
-          `${missed.length === 1 ? 'Hole' : 'Holes'} ${missed.join(', ')}: no wolf declared — nothing settled there.`,
-        ]
-      : undefined
+  const holeList = (holes: number[]) =>
+    `${holes.length === 1 ? 'Hole' : 'Holes'} ${holes.join(', ')}`
+  const never = missed.filter((r) => !picks.has(r.hole)).map((r) => r.hole)
+  const dropped = missed.filter((r) => picks.has(r.hole)).map((r) => r.hole)
+  const notes = [
+    ...(never.length > 0
+      ? [`${holeList(never)}: no wolf declared — nothing settled there.`]
+      : []),
+    ...(dropped.length > 0
+      ? [`${holeList(dropped)}: the wolf pick names no valid partner — nothing settled there.`]
+      : []),
+  ]
 
   return {
     standings,
@@ -504,7 +519,7 @@ function derive(
     holeSummary,
     requiredInputs,
     settlement,
-    ...(notes && { notes }),
+    ...(notes.length > 0 && { notes }),
   }
 }
 
