@@ -321,24 +321,36 @@ export function SetupScreen() {
   const mainDrafts = games.filter((g) => g.section === 'main')
   const sideDrafts = games.filter((g) => g.section === 'side')
 
-  const problems =
+  /**
+   * Each chosen game's own problems, kept PER GAME rather than flattened
+   * straight into the list below.
+   *
+   * A card can be folded away now (MAI-89), and every one of these is a reason
+   * tee-off is blocked whose fix lives inside the card. Told only at the foot
+   * of the screen, "every player must be on exactly one Nassau side" points at
+   * a Team A/B control the reader cannot see and has no reason to look for —
+   * so each card also states its own, outside its fold.
+   */
+  const problemsByGame = new Map<string, string[]>(
     step === LAST_STEP
-      ? // DEDUPED: two drafts with identical settings each report the same
-        // duplicate string, and the list below keys on the message.
-        [
-          ...new Set(
-            games.flatMap((g) => {
-              const engine = getEngine(g.type)
-              if (!engine) return []
-              return engine.validateSetup(
-                g,
-                draftRoundPlayers,
-                draftGames.filter((s) => s.gameId !== g.gameId),
-              )
-            }),
-          ),
-        ]
-      : []
+      ? games.map((g) => {
+          const engine = getEngine(g.type)
+          return [
+            g.gameId,
+            engine
+              ? engine.validateSetup(
+                  g,
+                  draftRoundPlayers,
+                  draftGames.filter((s) => s.gameId !== g.gameId),
+                )
+              : [],
+          ]
+        })
+      : [],
+  )
+  // DEDUPED: two drafts with identical settings each report the same
+  // duplicate string, and the list below keys on the message.
+  const problems = [...new Set([...problemsByGame.values()].flat())]
 
   const addGame = (engine: GameEngine, section: 'main' | 'side') => {
     setGames(
@@ -773,6 +785,7 @@ export function SetupScreen() {
                       label={gameLabel(draft, draftGames)}
                       players={players}
                       draft={draft}
+                      problems={problemsByGame.get(draft.gameId) ?? []}
                       open={!collapsed.has(draft.gameId)}
                       onToggle={() => toggleCollapsed(draft.gameId)}
                       onChange={updateGame}
@@ -803,6 +816,7 @@ export function SetupScreen() {
                   label={gameLabel(draft, draftGames)}
                   players={players}
                   draft={draft}
+                  problems={problemsByGame.get(draft.gameId) ?? []}
                   open={!collapsed.has(draft.gameId)}
                   onToggle={() => toggleCollapsed(draft.gameId)}
                   onChange={updateGame}
@@ -837,8 +851,14 @@ export function SetupScreen() {
             </p>
           )}
 
+          {/* The SUMMARY, beside the button it disables — deduped, because two
+              drafts with identical settings each report the same sentence.
+              Which card to open is the card's own job (MAI-89). */}
           {problems.length > 0 && (
-            <ul className="rounded-xl bg-flag-600/10 p-3 text-sm text-flag-500 ring-1 ring-flag-600/40">
+            <ul
+              aria-label="Blocking tee off"
+              className="rounded-xl bg-flag-600/10 p-3 text-sm text-flag-500 ring-1 ring-flag-600/40"
+            >
               {problems.map((p) => (
                 <li key={p}>{p}</li>
               ))}

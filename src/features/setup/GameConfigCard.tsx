@@ -55,6 +55,12 @@ interface Props {
   label: string
   players: FieldPlayer[]
   draft: GameDraft
+  /**
+   * This game's own `validateSetup` problems — see SetupScreen's
+   * `problemsByGame`. Stated on the card because the fold would otherwise hide
+   * both the reason tee-off is blocked and the control that fixes it.
+   */
+  problems: string[]
   /** Whether the settings are showing. Owned by SetupScreen — see `collapsed`. */
   open: boolean
   onToggle: () => void
@@ -82,6 +88,7 @@ export function GameConfigCard({
   label,
   players,
   draft,
+  problems,
   open,
   onToggle,
   onChange,
@@ -95,7 +102,13 @@ export function GameConfigCard({
   // player dropped on the way back through step 1. The red problems list blocks
   // tee-off, but the card should say why on its own rather than leaving the
   // reason somewhere else on the screen.
+  //
+  // It REPLACES the engine's own complaints rather than joining them, because
+  // it is their cause: Nassau with five players reports an unassigned player,
+  // which is true, fixable only by dropping one, and not what the card should
+  // lead with.
   const stranded = !isPlayable(engine, players.length)
+  const blocking = stranded ? [playerCountNote(engine)] : problems
   const stake = stakeSummary(engine, config)
   // scoped per instance: the screen renders several of these, and two panels
   // sharing an id would point every aria-controls at the same element
@@ -107,7 +120,14 @@ export function GameConfigCard({
     // `gameName` keeps the CONTROLS apart (ConfigField); this is what gives the
     // card itself a boundary to navigate by.
     <div role="group" aria-label={label} className="pixel border-felt-500 bg-felt-900/60">
-      <div className="flex items-start justify-between gap-3 px-4 pb-1 pt-4">
+      {/* The bottom padding belongs to whatever follows the title, and when the
+          card is folded and healthy nothing does — `pb-1` was sized for the
+          blurb underneath and leaves the title clipped against the card edge. */}
+      <div
+        className={`flex items-start justify-between gap-3 px-4 pt-4 ${
+          open || blocking.length > 0 ? 'pb-1' : 'pb-4'
+        }`}
+      >
         <button
           className="flex min-w-0 flex-1 items-center justify-between gap-3 text-left"
           aria-expanded={open}
@@ -131,13 +151,18 @@ export function GameConfigCard({
         </button>
       </div>
 
-      {/* OUTSIDE the fold: it is why tee-off is blocked, so it must not be a
-          thing you can hide by tidying the screen up. */}
-      {stranded && <p className="px-4 pb-3 text-sm text-flag-500">{playerCountNote(engine)}</p>}
+      {/* OUTSIDE the fold: these are why tee-off is blocked, so they must not
+          be a thing you can hide by tidying the screen up. The deduped list by
+          the Tee off button says WHAT is wrong; this says which card to open. */}
+      {blocking.map((problem) => (
+        <p key={problem} className="px-4 pb-3 text-sm text-flag-500">
+          {problem}
+        </p>
+      ))}
 
       {open && (
         <div id={panelId}>
-          {!stranded && <p className="px-4 pb-3 text-sm text-stone-400">{engine.meta.blurb}</p>}
+          <p className="px-4 pb-3 text-sm text-stone-400">{engine.meta.blurb}</p>
           <div className="space-y-4 border-t border-felt-800/60 px-4 py-4">
             {engine.configFields.map((field) => (
               <ConfigField

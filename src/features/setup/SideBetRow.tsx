@@ -17,6 +17,8 @@ interface Props {
   label: string
   players: FieldPlayer[]
   draft: GameDraft
+  /** This game's own `validateSetup` problems — see GameConfigCard's `problems`. */
+  problems: string[]
   /** Whether the settings are showing. Owned by SetupScreen — see `collapsed`. */
   open: boolean
   onToggle: () => void
@@ -49,6 +51,7 @@ export function SideBetRow({
   label,
   players,
   draft,
+  problems,
   open,
   onToggle,
   onChange,
@@ -60,6 +63,8 @@ export function SideBetRow({
     onChange({ ...draft, config: { ...config, [key]: value } })
   const stake = stakeSummary(engine, config)
   const stranded = !isPlayable(engine, players.length)
+  // roster first, then the engine's own — see the main card
+  const blocking = stranded ? [playerCountNote(engine)] : problems
   // scoped per instance — see GameConfigCard's `panelId`
   const panelId = useId()
 
@@ -89,7 +94,11 @@ export function SideBetRow({
       </div>
 
       {/* outside the fold — see the main card */}
-      {stranded && <p className="px-3 pb-2 text-xs text-flag-500">{playerCountNote(engine)}</p>}
+      {blocking.map((problem) => (
+        <p key={problem} className="px-3 pb-2 text-xs text-flag-500">
+          {problem}
+        </p>
+      ))}
 
       {open && (
         <div id={panelId} className="space-y-4 border-t border-felt-800/60 px-3 py-3">

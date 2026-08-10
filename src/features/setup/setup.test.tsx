@@ -421,10 +421,15 @@ describe('SetupScreen — choosing games', () => {
     await pickGame('Skins')
     await pickGame('Skins', 'side')
 
-    const problem = await screen.findByText(/identical settings/)
-    expect(problem).toBeInTheDocument()
-    // ONE message, not one per instance — both report it and the caller dedupes
-    expect(screen.getAllByText(/identical settings/)).toHaveLength(1)
+    // ONE message in the summary, not one per instance — both drafts report it
+    // and the caller dedupes. The CARDS each say it too, which is the point of
+    // saying it there: with two identical Skins, both of them are the offender.
+    const summary = within(await screen.findByRole('list', { name: 'Blocking tee off' }))
+    expect(summary.getAllByText(/identical settings/)).toHaveLength(1)
+    expect(gameCards()).toHaveLength(2)
+    for (const card of gameCards()) {
+      expect(within(card).getByText(/identical settings/)).toBeInTheDocument()
+    }
     expect(screen.getByRole('button', { name: /Tee off/ })).toBeDisabled()
   })
 
@@ -496,6 +501,35 @@ describe('SetupScreen — choosing games', () => {
     expect(
       within(ctp!).getByRole('button', { name: /Closest to the Pin/, expanded: true }),
     ).toBeInTheDocument()
+  })
+
+  /**
+   * A folded card still has to own up. Every `validateSetup` problem is a
+   * reason Tee off is disabled whose fix lives INSIDE the card, so told only at
+   * the foot of the screen, "every player must be on exactly one Nassau side"
+   * points at a Team A/B control the reader cannot see and has no reason to
+   * look for. Before the fold reached the main card this was self-fixing.
+   */
+  it('says on the card itself that a folded game is the one blocking tee-off', async () => {
+    await pickPenmar()
+    await cont() // → players
+    for (const name of ['Ann', 'Ben', 'Cal']) await addPlayer(name, 10)
+    await cont() // → games
+    await pickGame('Nassau') // 2v1 across three players: legal
+
+    const card = () => within(gameCards()[0]!)
+    await userEvent.click(card().getByRole('button', { name: /^Nassau/, expanded: true }))
+    expect(card().queryByText(/exactly one nassau side/)).toBeNull()
+
+    // a fourth player lands on neither side, and the teams control that would
+    // fix it is folded away
+    await userEvent.click(screen.getByText('← Back'))
+    await addPlayer('Dee', 10)
+    await cont()
+
+    expect(screen.getByRole('button', { name: /Tee off/ })).toBeDisabled()
+    expect(card().getByRole('button', { name: /^Nassau/, expanded: false })).toBeInTheDocument()
+    expect(card().getByText(/exactly one nassau side/)).toBeInTheDocument()
   })
 
   /**
