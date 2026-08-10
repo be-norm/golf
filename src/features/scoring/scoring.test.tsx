@@ -540,17 +540,17 @@ describe('ScoringScreen — a live bet the money aggregate cannot show', () => {
     expect(screen.getByText('no money yet')).toBeInTheDocument()
     // …and the snake still says who has it and what it is worth
     expect(screen.getByText('Snake')).toBeInTheDocument()
-    expect(screen.getByText('Bob · $5')).toBeInTheDocument()
+    expect(screen.getByText('Bob · -$5')).toBeInTheDocument()
   })
 
   it('drops that row once the money actually moves', async () => {
     const round = await collapsedRound('round-open-bet-done')
-    await screen.findByText('Bob · $5')
+    await screen.findByText('Bob · -$5')
 
     await eventStore.append(round.id, [{ type: 'round/completed' }])
 
     // the aggregate now carries it, so a second row would say it twice
-    await waitFor(() => expect(screen.queryByText('Bob · $5')).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByText('Bob · -$5')).not.toBeInTheDocument())
     expect(screen.getByText(/Ann \+\$5/)).toBeInTheDocument()
   })
 })
