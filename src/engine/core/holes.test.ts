@@ -109,6 +109,36 @@ describe('holesForRound', () => {
   })
 
   /**
+   * The block is the holes the range NAMES, intersected with the card — never
+   * "the lowest nine at or above the floor".
+   *
+   * The two only differ on a card whose numbering isn't 1..n, which no
+   * course-building path mints but a hand-edited export can carry. Counting
+   * would put hole 10 inside a front nine on a card numbered 2–19, and would
+   * let a back nine on a card missing hole 10 run all the way to 19. Both are
+   * holes the range does not name, and both would then be labelled by
+   * `stretchLabel` off a block that straddles the turn.
+   */
+  it('takes the holes the range names, not a count from the floor', () => {
+    const shifted = makeCourse(
+      Array.from({ length: 18 }, () => 4),
+      Array.from({ length: 18 }, (_, i) => i + 1),
+    )
+    // renumber 2..19 — the shape `normalizeHoles` would never produce
+    shifted.holes = shifted.holes.map((h, i) => ({ ...h, number: i + 2 }))
+    expect(holesForRound(range('front9', undefined, shifted))).toEqual(seq(2, 8))
+    expect(holesForRound(range('back9', undefined, shifted))).toEqual(seq(10, 9))
+
+    const gapped = makeCourse(
+      Array.from({ length: 18 }, () => 4),
+      Array.from({ length: 18 }, (_, i) => i + 1),
+    )
+    // an 18-hole card with no hole 10 at all
+    gapped.holes = gapped.holes.filter((h) => h.number !== 10)
+    expect(holesForRound(range('back9', undefined, gapped))).toEqual(seq(11, 8))
+  })
+
+  /**
    * A nine played twice arrives as an 18-hole snapshot numbered 1–18, so it
    * takes the ordinary 18 path. Setup doesn't offer a start hole here (the loop
    * stamps would mislabel which time round you were on), but the derivation

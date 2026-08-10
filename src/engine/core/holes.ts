@@ -58,8 +58,12 @@ type HoleRange = Pick<Round, 'holes' | 'startHole' | 'courseSnapshot'>
 export function holesForRound(round: HoleRange): number[] {
   const card = round.courseSnapshot.holes.map((h) => h.number).sort((a, b) => a - b)
   const from = round.holes === 'back9' ? 10 : 1
-  const count = round.holes === 'full18' ? 18 : 9
-  const block = card.filter((h) => h >= from).slice(0, count)
+  const to = round.holes === 'full18' ? 18 : from + 8
+  // The holes this range NAMES, intersected with the card — not "the lowest N
+  // at or above the floor". On a card numbered 2–19 the two disagree: a count
+  // would put hole 10 inside the front nine, and a back nine on a card missing
+  // hole 10 would reach hole 19. The window is what the range has always meant.
+  const block = card.filter((h) => h >= from && h <= to)
   // `?? -1` rather than the block's head: an absent start hole and one that
   // isn't in this block are the same answer, and both are "start at the head".
   const asked = block.indexOf(round.startHole ?? -1)

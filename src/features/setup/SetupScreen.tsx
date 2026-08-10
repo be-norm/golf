@@ -525,11 +525,18 @@ export function SetupScreen() {
                   {holeOptions.map(([value, label]) => (
                     <button
                       key={value}
-                      // Re-head the start when the range changes. `playedStart`
-                      // would correct it anyway, but leaving the raw state
-                      // behind means tapping back to 18 silently restores a
-                      // hole the user last saw two taps ago.
+                      // Re-head the start when the range CHANGES — and only
+                      // then. Re-tapping the range you already chose is not a
+                      // new choice (the same rule `selectCourse` follows), and
+                      // resetting on it would throw away a start hole the user
+                      // picked one tap ago: Back 9, then 13, then a confirming
+                      // tap on Back 9 would tee off on 10.
+                      //
+                      // The reset can't just be dropped either — `playedStart`
+                      // only corrects a hole the new block LACKS, so a 14 held
+                      // from an eighteen would survive a tap on Back 9.
                       onClick={() => {
+                        if (value === playedHoles) return
                         setHoles(value)
                         setStartHole(value === 'back9' ? 10 : 1)
                       }}

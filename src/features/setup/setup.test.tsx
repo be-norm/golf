@@ -633,9 +633,28 @@ describe('SetupScreen — choosing games', () => {
     })
 
     /**
-     * Changing the range re-heads the start. `playedStart` would correct a
-     * stale 14 anyway, but leaving the raw state behind means tapping back to
-     * 18 holes silently restores a hole chosen two taps ago — and stamps it.
+     * A CONFIRMING TAP IS NOT A NEW CHOICE — the rule `selectCourse` already
+     * follows for the course itself.
+     *
+     * Back 9, then 13, then a reassuring tap back on Back 9: the range hasn't
+     * changed, so the start hole must survive it. Re-heading unconditionally
+     * discarded the user's pick on a tap that changed nothing, and the round
+     * quietly teed off on 10.
+     */
+    it('keeps the start hole when you re-tap the range you already chose', async () => {
+      await toTeeStep()
+      await userEvent.click(screen.getByRole('button', { name: 'Back 9' }))
+      await userEvent.click(screen.getByRole('button', { name: '13' }))
+      await userEvent.click(screen.getByRole('button', { name: 'Back 9' }))
+      expect(screen.getByText("You'll play 13–18, 10–12.")).toBeInTheDocument()
+
+      expect((await finish()).startHole).toBe(13)
+    })
+
+    /**
+     * Changing the range re-heads the start. The reset cannot simply be
+     * dropped in favour of `playedStart`: that only corrects a hole the new
+     * block LACKS, and 14 is absent from the front nine but 4 would not be.
      */
     it('re-heads the start when the range changes, and stores nothing', async () => {
       await toTeeStep()

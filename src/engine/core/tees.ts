@@ -55,10 +55,14 @@ export function applyTee(course: Course, tee: TeeSet | undefined): Course {
  * Nassau's two nines, Wolf's rotation — works unchanged; both read positions in
  * `ctx.holesPlayed`, and a doubled nine is walked 1–18 like any other card).
  *
- * A doubled nine is the one 18 that CANNOT take a start hole (MAI-41): the loop
- * stamps below say which time round each number is, and an offset would leave
- * the closing holes labelled "1st time round" when they were the second. Setup
- * offers the picker on 18-hole CARDS only, which excludes this by construction.
+ * A doubled nine is the one round that CANNOT take a start hole (MAI-41): the
+ * loop stamps below say which time round each number is, and an offset would
+ * leave the closing holes labelled "1st time round" when they were the second.
+ *
+ * NOTHING HERE ENFORCES THAT. `holesForRound` will rotate a doubled-nine
+ * snapshot as happily as any other eighteen — the guard is a single expression
+ * in setup (`canPickStart = !playTwice`), which is the only reason such a round
+ * cannot be built. Don't drop it on the strength of this comment.
  */
 export function doubleNine(course: Course): Course {
   if (course.holeCount !== 9 || course.holes.length !== 9) return course

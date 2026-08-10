@@ -164,6 +164,17 @@ describe('stretchLabel', () => {
   })
 
   /**
+   * `>= 10`, not `=== 10`. A back nine on a card missing hole 10 — the
+   * loosely-validated import this file keeps citing — starts at 11 and is
+   * still unambiguously the back nine. An equality test would call it the
+   * FRONT, turning a hole the card lacks into a false claim about which nine
+   * the group played.
+   */
+  it('still knows the back nine when the card is missing hole 10', () => {
+    expect(stretchLabel([11, 12, 13, 14, 15, 16, 17, 18])).toBe('B9')
+  })
+
+  /**
    * A round with no playable holes at all is reachable — a back-nine round
    * whose course snapshot has nine holes leaves `holesPlayed` empty
    * (`holesForRound`), and `importRound` validates loosely enough to restore

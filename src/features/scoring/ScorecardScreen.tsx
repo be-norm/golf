@@ -145,7 +145,7 @@ export function ScorecardScreen() {
       {front.length > 0 && half(front)}
       {back.length > 0 && half(back)}
       {/* The tables are in WALK order, so a round that teed off elsewhere puts
-          hole 10 at the top left — or, for a wrapped NINE, runs 14…18,1…4
+          hole 10 at the top left — or, for a rotated NINE, runs 13…18,10,11,12
           across one table. Either way this is the surface that would otherwise
           reorder silently; `loopOf` only titles a doubled nine. Gated on the
           WRAP, not on there being two tables, and the tail only applies when
