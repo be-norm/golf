@@ -257,12 +257,32 @@ export function SetupScreen() {
       ? undefined
       : `You'll play ${holeRangeLabel(willPlay)}.`
 
+  /**
+   * THE one door onto the roster, because every change to it has to reach the
+   * chosen games' participant fields — and the two directions are not the same
+   * problem. See `syncParticipants`.
+   *
+   * Every `setPlayers` goes through here, including the handicap-index edit
+   * that changes no ids at all: a second door is how the first half of this
+   * shipped without the other.
+   */
+  const changeRoster = (next: PlayerDraft[]) => {
+    setPlayers(next)
+    const synced = games.map((g) => {
+      const config = syncParticipants(g, players, next)
+      return config === g.config ? g : { ...g, config }
+    })
+    // identity-compared, so the per-keystroke handicap edit doesn't replace
+    // every game object on the way past
+    if (synced.some((g, i) => g !== games[i])) setGames(synced)
+  }
+
   const addPlayer = (name: string) => {
     const trimmed = name.trim()
     if (!trimmed || players.some((p) => p.name.toLowerCase() === trimmed.toLowerCase())) return
     // returning players default to their stored index (or legacy course handicap)
     const known = roster?.find((r) => r.name.toLowerCase() === trimmed.toLowerCase())
-    setPlayers([
+    changeRoster([
       ...players,
       {
         draftId: nextDraftId(),
@@ -276,7 +296,7 @@ export function SetupScreen() {
   const addPlayerFromGhin = (hit: GhinPlayerHit) => {
     const name = hit.fullName.trim()
     if (!name || players.some((p) => p.name.toLowerCase() === name.toLowerCase())) return
-    setPlayers([
+    changeRoster([
       ...players,
       {
         draftId: nextDraftId(),
@@ -701,13 +721,7 @@ export function SetupScreen() {
                   <button
                     aria-label={`remove ${p.name}`}
                     className="text-stone-500"
-                    onClick={() => {
-                      const gone = p.draftId
-                      setPlayers(players.filter((_, j) => j !== i))
-                      setGames(
-                        games.map((g) => ({ ...g, config: dropPlayer(g.config, gone) })),
-                      )
-                    }}
+                    onClick={() => changeRoster(players.filter((_, j) => j !== i))}
                   >
                     ✕
                   </button>
@@ -726,7 +740,7 @@ export function SetupScreen() {
                       onFocus={selectOnFocus}
                       aria-label={`${p.name} handicap index`}
                       onChange={(e) =>
-                        setPlayers(
+                        changeRoster(
                           players.map((pl, j) =>
                             j === i ? { ...pl, handicapIndex: Number(e.target.value) || 0 } : pl,
                           ),
@@ -917,6 +931,53 @@ export function SetupScreen() {
  * (`teams`, `rotation`). A scalar that happens to equal the id has no safe
  * generic answer, and `validateSetup` still catches that.
  */
+/**
+ * One game's participant fields, brought back into step with the roster.
+ *
+ * THE TWO DIRECTIONS ARE NOT THE SAME PROBLEM, which is why only one of them
+ * existed for so long. Removal has a single truthful answer — a config must not
+ * mention someone who is gone — and `dropPlayer` gives it generically.
+ *
+ * Addition does not, so it is driven off `configFields` instead of guessed:
+ *
+ * - `rotation` is an order over EVERY player, so a newcomer is appended. Last
+ *   off the tee is the only defensible spot for someone who joined after the
+ *   order was set, and appending is what makes the field legal again.
+ * - `teams` is a partition, and no rule picks a side. Left alone deliberately:
+ *   its editor draws a row per CURRENT player, so the newcomer is already one
+ *   tap from assigned, and `validateSetup` says so in the meantime.
+ *
+ * The rotation half is the bug this exists for. Its editor draws the CONFIG's
+ * list, not the roster — so a player absent from it has no row, no ↑/↓ and no
+ * way in. Add a player to a round that already has a Wolf in it and the card
+ * reads "Wolf order must include every player exactly once" over a list that
+ * doesn't contain them, with Tee off disabled and nothing on the screen able to
+ * fix it. Found smoke-testing MAI-89; the dead end predates it.
+ */
+function syncParticipants(
+  game: GameDraft,
+  before: readonly PlayerDraft[],
+  after: readonly PlayerDraft[],
+): unknown {
+  const live = new Set(after.map((p) => p.draftId))
+  let config = game.config
+  // one id at a time, keeping `dropPlayer`'s targeted semantics: a walk that
+  // filtered every array element NOT in the roster would empty the arrays that
+  // hold no player ids at all
+  for (const p of before) if (!live.has(p.draftId)) config = dropPlayer(config, p.draftId)
+
+  const fields = getEngine(game.type)?.configFields ?? []
+  for (const field of fields) {
+    if (field.kind !== 'rotation') continue
+    const current = (config as Record<string, unknown> | undefined)?.[field.key]
+    if (!Array.isArray(current)) continue
+    const missing = after.map((p) => p.draftId).filter((id) => !current.includes(id))
+    if (missing.length === 0) continue
+    config = { ...(config as object), [field.key]: [...current, ...missing] }
+  }
+  return config
+}
+
 function dropPlayer(config: unknown, draftId: string): unknown {
   const walk = (value: unknown): unknown => {
     if (Array.isArray(value)) return value.filter((v) => v !== draftId).map(walk)

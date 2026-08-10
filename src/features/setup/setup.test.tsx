@@ -734,6 +734,37 @@ describe('SetupScreen — choosing games', () => {
   })
 
   /**
+   * The other half of `dropPlayer`, missing until MAI-89's smoke test walked
+   * into it. Removal had a generic answer and got one; addition never did, so
+   * nothing put a new player into a Wolf rotation.
+   *
+   * That one is a DEAD END rather than an annoyance: the rotation editor draws
+   * the config's own list, so a player absent from it has no row and no ↑/↓.
+   * The card read "Wolf order must include every player exactly once" over a
+   * list that didn't contain them, with Tee off disabled and nothing on the
+   * screen able to fix it — the only way out was deleting the game.
+   */
+  it('puts a player added later into a rotation that was already set', async () => {
+    await pickPenmar()
+    await cont() // → players
+    for (const name of ['Ann', 'Ben', 'Cal', 'Dee']) await addPlayer(name, 10)
+    await cont() // → games
+    await pickGame('Wolf')
+
+    await userEvent.click(screen.getByText('← Back'))
+    await userEvent.click(await screen.findByRole('button', { name: 'remove Dee' }))
+    await addPlayer('Eve', 10)
+    await cont()
+
+    const card = within(gameCards()[0]!)
+    expect(card.queryByText(/order must include every player/)).toBeNull()
+    // last off the tee: the order was set before she joined
+    expect(card.getByText('Eve')).toBeInTheDocument()
+    expect(card.getByRole('button', { name: 'move Eve down' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /Tee off/ })).toBeEnabled()
+  })
+
+  /**
    * MAI-90. A round counts putts because a game in it READS putts — the group
    * is never offered the choice. Offering it was the first design and it was
    * wrong: nothing in this app shows putts back to you, so a Skins round was
