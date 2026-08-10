@@ -161,6 +161,28 @@ describe('deriveAwardPot — the money', () => {
 
   /** An award naming somebody outside the round can only come from a corrupt or
    *  hand-edited log. It must move no money rather than pay a ghost. */
+  /**
+   * A ONE-PLAYER ROUND, which every `validateSetup` refuses and `importRound`
+   * accepts (`.min(1)` on the roster). The winner collects from nobody, so the
+   * line is every-entry-zero — and a zero row would make `lines.length === 0`,
+   * the settle panel's "No money moved." signal, false on a round where nothing
+   * moved (MAI-40). `addLine` refuses it at the choke point, which is where a
+   * bug that zeroes every engine at once belongs; this pins that the kit
+   * inherits the refusal rather than working around it.
+   */
+  it('a winner with nobody to collect from moves no money and files no line', () => {
+    const round = potRound(makePlayers([{ name: 'A' }]))
+    const log = new EventLog()
+    scoreHoles(round, log, [1, 2, 3])
+    award(log, 2, 'p-a')
+    log.append({ type: 'round/completed' })
+    const pot = potOf(round, log)
+
+    expect(pot.holeResults[0]).toEqual({ hole: 2, kind: 'won', winnerId: 'p-a' })
+    expect(pot.settlement.lines).toHaveLength(0)
+    expect(pot.settlement.perPlayerCents).toEqual({ 'p-a': 0 })
+  })
+
   it('an award naming a non-player is inert', () => {
     const round = potRound()
     const log = new EventLog()

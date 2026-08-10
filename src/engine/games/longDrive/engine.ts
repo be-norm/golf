@@ -157,8 +157,11 @@ function derive(
       ]
     }
     // The non-obvious part is never who won it — it is what a small stake
-    // actually swings once every other player pays it.
+    // actually swings once every other player pays it. With nobody to pay it
+    // (a one-player round, which `importRound` accepts) there is no swing to
+    // explain, and the settlement has no line either.
     const others = playerIds.length - 1
+    if (others === 0) return [`${nameOf.get(r.winnerId)} longest drive`]
     return [
       `${nameOf.get(r.winnerId)} longest drive`,
       `↳ ${formatCents(stakeCents)} from each of ${others} other player${others === 1 ? '' : 's'}` +

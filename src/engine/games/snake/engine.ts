@@ -134,12 +134,12 @@ function derive(
    *
    * AND THERE HAS TO BE SOMEBODY TO PAY. `validateSetup` refuses a one-player
    * round, but `importRound` validates a roster with `.min(1)`, so one can
-   * arrive from an export. With nobody to collect from, the settlement line
-   * would be every-entry-zero and still pushed — making `lines.length === 0`,
-   * the settle panel's "No money moved." signal, false on a round where nothing
-   * moved (MAI-40). Guarding only the settlement was the first attempt and left
-   * the mirror of that bug: the panel said "No money moved." while the ledger
-   * row underneath it read "pays $1 to each of 0 other players — $0".
+   * arrive from an export, and every entry of the line would be zero. `addLine`
+   * now refuses such a line itself — that belongs at the choke point, since a
+   * one-player round zeroes every engine at once — so what this guard is FOR is
+   * the other half: the sentence. Guarding only the settlement was the first
+   * attempt and left the mirror of the bug, with the panel saying "No money
+   * moved." over a ledger row reading "pays $1 to each of 0 other players — $0".
    */
   const others = playerIds.length - 1
   const owes = ctx.completed && held !== undefined && others > 0

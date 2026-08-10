@@ -91,8 +91,11 @@ function derive(
       ]
     }
     // The non-obvious part of a CTP is never who won it — it is what a small
-    // stake actually swings once every other player pays it.
+    // stake actually swings once every other player pays it. With nobody to
+    // pay it (a one-player round, which `importRound` accepts) there is no
+    // swing to explain, and the settlement has no line either.
     const others = playerIds.length - 1
+    if (others === 0) return [`${nameOf.get(r.winnerId)} closest to the pin`]
     return [
       `${nameOf.get(r.winnerId)} closest to the pin`,
       `↳ ${formatCents(stakeCents)} from each of ${others} other player${others === 1 ? '' : 's'}` +

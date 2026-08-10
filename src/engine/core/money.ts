@@ -76,6 +76,32 @@ export function emptySettlement(playerIds: readonly Uuid[]): Settlement {
 export function addLine(settlement: Settlement, line: SettlementLine): void {
   const ids = Object.keys(line.perPlayerCents)
   if (ids.some((id) => !Object.hasOwn(settlement.perPlayerCents, id))) return
+  /**
+   * …AND A LINE THAT MOVES NOTHING IS NOT A MOVEMENT.
+   *
+   * `settlement.lines` is the record of money that MOVED, and `lines.length === 0`
+   * is the settle panel's "No money moved." signal — so a row of zeroes makes
+   * that signal false on a round where nothing happened, and hands every
+   * consumer that counts or sums lines a phantom entry (MAI-40). `notes` is
+   * where a game says something without moving money.
+   *
+   * ENFORCED HERE RATHER THAN PER ENGINE, because it is not one game's mistake.
+   * A one-player round — refused by every `validateSetup` but accepted by
+   * `importRound`, which validates a roster with `.min(1)` — makes
+   * `stake * (players - 1)` zero for EVERY engine at once: Skins pushes one
+   * empty row per hole, the award kit one per awarded hole, Snake one at the
+   * end. Guarding them one at a time is three chances to miss the fourth, and
+   * `replay.test.ts` asserts this property over the fuzz, which never deals a
+   * single-player round.
+   *
+   * Dropping it is safe for the same reason dropping a ghost line is: every
+   * line built here is individually balanced, so a line of zeroes contributes
+   * nothing to `perPlayerCents` and removing it changes no total. Wolf's
+   * aggregate-only rows are unaffected — it writes `perPlayerCents` directly
+   * and never comes through here (its zero rows are MAI-75's, and the test
+   * naming them still passes).
+   */
+  if (Object.values(line.perPlayerCents).every((c) => c === 0)) return
   settlement.lines.push(line)
   for (const [id, cents] of Object.entries(line.perPlayerCents)) {
     settlement.perPlayerCents[id] = (settlement.perPlayerCents[id] ?? 0) + cents
