@@ -529,6 +529,38 @@ describe('ScoringScreen — putts', () => {
     expect(screen.queryByRole('button', { name: /putts/ })).not.toBeInTheDocument()
   })
 
+  /**
+   * MAI-58, closing the open question `types.ts` carried. A round can hold a
+   * putt-reading game with `trackPutts` absent — an import, a hand-edited log,
+   * a round written by a build that predates the game — and setup is the only
+   * thing that ever stamps the flag. Without the fallback the scorekeeper gets
+   * no putts control at all, so the one fact Snake is made of cannot be
+   * entered, and the game derives nothing while looking perfectly healthy.
+   * `validateSetup` cannot catch it: it sees config, players and siblings,
+   * never the round.
+   */
+  it('counts putts for a game that reads them even with no flag on the round', async () => {
+    const round = makeRound({
+      players: makePlayers([{ name: 'Ann' }, { name: 'Bob' }]),
+      holes: 'front9',
+      // deliberately NOT set — this is what an imported round looks like
+      games: [{ type: 'snake', config: { potCents: 100, doubling: false } }],
+    })
+    round.id = 'round-putts-derived'
+    expect(round.trackPutts).toBeUndefined()
+    await db.rounds.put(round)
+    render(
+      <RouterProvider
+        router={createMemoryRouter(routes, { initialEntries: ['/round/round-putts-derived'] })}
+      />,
+    )
+
+    await screen.findByText('Ann')
+    expect(await count('Ann')).toHaveTextContent('putts?')
+    await userEvent.click(await more('Ann'))
+    await waitFor(async () => expect(await count('Ann')).toHaveTextContent('1 putts'))
+  })
+
   it('records a count, and one tap is one event', async () => {
     const round = await puttsRound('round-putts-on', true)
 

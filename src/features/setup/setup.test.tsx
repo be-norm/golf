@@ -786,6 +786,30 @@ describe('SetupScreen — choosing games', () => {
   })
 
   /**
+   * …and the positive, which MAI-58 makes real: a game that DECLARES it reads
+   * putts turns collection on and the group is TOLD, by name, rather than being
+   * offered a switch they have no way to answer. This is the only route by
+   * which a game can require a round-level fact — `validateSetup` never sees
+   * the round.
+   */
+  it('counts putts, and says which game asked, when a chosen game reads them', async () => {
+    await pickPenmar()
+    await cont()
+    await addPlayer('Ann', 10)
+    await addPlayer('Bo', 10)
+    await cont()
+    await pickGame('Skins')
+    await pickGame('Snake', 'side')
+
+    expect(screen.getByText('Putts will be counted')).toBeInTheDocument()
+    expect(screen.getByText(/Snake needs them/)).toBeInTheDocument()
+
+    await teeOff()
+    await waitFor(async () => expect(await roundFor('penmar')).toBeDefined())
+    expect((await roundFor('penmar'))!.trackPutts).toBe(true)
+  })
+
+  /**
    * MAI-57. A bet can name the holes it runs on, and the grid it names them
    * from is THE ROUND'S — `willPlay`, the same `holesForRound` answer the
    * engine derives by at tee-off. Nothing else on this screen could supply it:
