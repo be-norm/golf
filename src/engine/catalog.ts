@@ -163,7 +163,6 @@ export interface GameDerivation {
    * the first tee and must not wait for the settle screen to be read out,
    * which is the one moment the group can no longer act on it.
    *
-
    * This channel exists so narration never has to be smuggled into
    * `settlement.lines`. That field is the record of money that MOVED; a
    * zero-cent row in it makes `lines.length === 0` — the model's "No money

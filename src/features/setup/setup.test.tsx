@@ -858,6 +858,43 @@ describe('SetupScreen — choosing games', () => {
     })
 
     /**
+     * Holes nominated for a round that no longer plays them.
+     *
+     * Going back to the tees step keeps the chosen games — nothing resets them
+     * — so an eighteen's holes 12 and 15 survive a tap on Front 9, where the
+     * grid can only paint 1–9. They would otherwise render as NOTHING PRESSED,
+     * which reads as "we picked no holes" while `Tee off` stays enabled and the
+     * round is written with a bet that can never pay. `validateSetup` cannot
+     * see the course; this screen can.
+     */
+    it('says when nominated holes are no longer in the round', async () => {
+      await toLongDrive()
+      for (const h of [12, 15]) {
+        await userEvent.click(screen.getByRole('button', { name: new RegExp(`^hole ${h} —`) }))
+      }
+      // …and now the round becomes a front nine: games → players → tees
+      const back = () => userEvent.click(screen.getByRole('button', { name: /Back/ }))
+      await back()
+      await back()
+      await userEvent.click(screen.getByRole('button', { name: 'Front 9' }))
+      await cont()
+      await cont()
+
+      expect(holeButtons()).toEqual(['1', '2', '3', '4', '5', '6', '7', '8', '9'])
+      expect(
+        screen.getByText(/Holes 12, 15 are not in this round — nothing here will be played for/),
+      ).toBeInTheDocument()
+
+      // tapping any hole drops the strays, exactly as it says
+      await userEvent.click(screen.getByRole('button', { name: /^hole 4 —/ }))
+      expect(screen.queryByText(/not in this round/)).not.toBeInTheDocument()
+      await teeOff()
+      await waitFor(async () => expect(await roundFor('eighteen')).toBeDefined())
+      const ld = (await roundFor('eighteen'))!.games.find((g) => g.type === 'longDrive')!
+      expect((ld.config as { holes: unknown }).holes).toEqual([4])
+    })
+
+    /**
      * Entering custom mode selects NOTHING rather than expanding the preset it
      * replaces — holes the group never chose must not look chosen — so the
      * empty state is reachable, and it is refused out loud rather than teeing

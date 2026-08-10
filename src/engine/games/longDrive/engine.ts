@@ -114,9 +114,16 @@ function derive(
     )
   }
   if (unclaimed.length > 0) {
+    // NAME THEM WHILE NAMING THEM HELPS, then count them. CTP can enumerate
+    // freely because a card holds about four par 3s; "every hole" here means up
+    // to eighteen, and a group that tapped three of them would get a
+    // fifteen-number sentence wrapped over four lines of the PAINTED share
+    // card. Past a handful the list stops being something anybody reads.
     notes.push(
-      `${GROUP} went unclaimed on ${unclaimed.length === 1 ? 'hole' : 'holes'} ` +
-        `${unclaimed.join(', ')} — nobody was given it, so nothing was paid`,
+      unclaimed.length > 4
+        ? `${unclaimed.length} long drives went unclaimed — nobody was given them, so nothing was paid`
+        : `${GROUP} went unclaimed on ${unclaimed.length === 1 ? 'hole' : 'holes'} ` +
+          `${unclaimed.join(', ')} — nobody was given it, so nothing was paid`,
     )
   }
 

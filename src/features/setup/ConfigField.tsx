@@ -120,6 +120,21 @@ export function ConfigField({
       const picked = Array.isArray(value) ? (value as number[]) : []
       const custom = Array.isArray(value)
       const offered = holes ?? []
+      /**
+       * Holes chosen for a round that no longer plays them — pick 12 and 15 on
+       * an eighteen, go back and tap Front 9, and the games are kept (nothing
+       * resets them) while the grid can only paint holes 1–9.
+       *
+       * SAYING SO IS THE WHOLE POINT. Without it those picks render as nothing
+       * pressed, which reads as "we chose no holes" — and the engine's own
+       * fallback only speaks on the first-tee screen, after the round is
+       * written. `validateSetup` cannot catch it either: it sees config,
+       * players and siblings, never the course. This component is handed the
+       * round's holes, so it is the one place that can say it while it is still
+       * fixable. Stated, not blocked — MAI-57 is explicit that an inert bet is
+       * surfaced rather than refused.
+       */
+      const stale = picked.filter((h) => !offered.includes(h))
       const toggle = (hole: number) => {
         const next = picked.includes(hole)
           ? picked.filter((h) => h !== hole)
@@ -186,6 +201,14 @@ export function ConfigField({
                 </button>
               ))}
             </div>
+          )}
+          {custom && stale.length > 0 && (
+            <p className="mt-2 text-sm text-flag-500">
+              {stale.length === 1 ? 'Hole' : 'Holes'} {stale.join(', ')}{' '}
+              {stale.length === 1 ? 'is' : 'are'} not in this round
+              {picked.length === stale.length ? ' — nothing here will be played for' : ''}. Tapping
+              any hole drops {stale.length === 1 ? 'it' : 'them'}.
+            </p>
           )}
         </div>
       )
