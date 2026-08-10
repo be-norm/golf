@@ -1,5 +1,5 @@
 import type { RoundContext } from './context'
-import type { Uuid } from './types'
+import type { RoundHoles, Uuid } from './types'
 
 /**
  * The match-play kit — hole-by-hole matches, close-outs, and golf's own
@@ -88,6 +88,23 @@ export function segmentSpans(holesPlayed: readonly number[]): Record<MatchSegmen
     back: holesPlayed.filter((h) => h > 9),
     overall: [...holesPlayed],
   }
+}
+
+/**
+ * What to call the whole stretch: '18', or the nine that was actually played.
+ *
+ * The naming half of `segmentSpans`' collapse rule, and it lives beside it for
+ * that reason: the same `<= 9` that folds a nine into one bet is what makes
+ * "18" the wrong word for it. Nassau needed this for its `overall` segment;
+ * Match Play needs it for its only bet, and Best Ball, Sixes and Defender will
+ * each need it too. Two copies would disagree about a back nine long before
+ * anyone noticed — the drift MAI-48 exists to prevent.
+ *
+ * Not to be confused with BET naming (Nassau's `betLabel`, "Press @5"), which
+ * is a game's own vocabulary and stays in the game.
+ */
+export function stretchLabel(holesPlayed: readonly number[], holes: RoundHoles): string {
+  return holesPlayed.length <= 9 ? (holes === 'back9' ? 'B9' : 'F9') : '18'
 }
 
 /**
@@ -268,8 +285,10 @@ export function matchWonLabel(match: MatchState, sides: MatchSides): string | nu
  * A full side collectively wagers ONE stake (the 1v1/2v2 convention: a $5 bet
  * swings $5 per player). An outnumbered lone player instead plays that stake
  * against EACH opponent, so their swing scales with the other side's size —
- * this keeps an uneven 2v1 zero-sum and mirrors Wolf's lone-wolf math. With
- * ≤4 players the only uneven split is a lone side, so it stays integer.
+ * this keeps an uneven 2v1 zero-sum and mirrors Wolf's lone-wolf math. Every
+ * caller caps itself at four players, where the only uneven split IS a lone
+ * side, so it stays integer — a fifth-player game would have to check that
+ * again rather than inherit it.
  */
 export function sideStake(
   // `stake`, not `stakeCents`: Nassau passes cents, Wolf passes dimensionless

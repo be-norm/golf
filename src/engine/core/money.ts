@@ -32,7 +32,50 @@ export function emptySettlement(playerIds: readonly Uuid[]): Settlement {
   }
 }
 
+/**
+ * Add a money movement — and refuse one that names somebody who is not in the
+ * round.
+ *
+ * `emptySettlement` seeds the roster, so an id it did not seed is a player the
+ * round does not have: a team config carrying a stale id, restored from an
+ * export `importRound` validated loosely. Accruing it was silently fatal in a
+ * way nothing downstream could see. The line still balances against the ghost,
+ * so `assertZeroSum` — which sums the settlement's OWN keys — stays happy; but
+ * `buildSummaryCard` builds standings from `round.players` (summaryCard.ts), so
+ * the share card and the settle screen show the real player's credit with no
+ * matching debit. Five dollars out of nothing, on the surfaces that are the
+ * whole point of the app.
+ *
+ * Refusing the WHOLE line, not just the ghost's share: dropping one side of a
+ * payment is what unbalances it. A game that cannot say who is paying moves no
+ * money at all, which is the same rule `deriveRound` applies to a game whose
+ * config its engine rejects, and the same one `ctp` applies to an award naming
+ * a player who isn't playing (ctp/engine.ts).
+ *
+ * THAT IS ONLY SAFE BECAUSE EVERY LINE BUILT HERE IS INDIVIDUALLY BALANCED —
+ * a winner's credit and the matching debits arrive together, so dropping the
+ * whole thing leaves the settlement exactly where it was. It is not a property
+ * the type enforces. Wolf itemises per PLAYER (`{ [id]: total }`), lines that
+ * balance only in aggregate, and refusing one of those WOULD unbalance the
+ * game; it is unaffected only because it writes `perPlayerCents` directly and
+ * never comes through here. A future engine emitting aggregate-only lines has
+ * to reckon with this rather than inherit it.
+ *
+ * `Object.hasOwn`, not `=== undefined`: `perPlayerCents` is a plain object, so
+ * `[id]` walks the prototype chain and an id of `toString` or `valueOf`
+ * resolves to the inherited FUNCTION — never undefined, straight past the
+ * guard. Worse than a bypass, because `?? 0` doesn't fall back on a function
+ * either: the accrual becomes the string "function toString() { [native
+ * code] }-500", `minimalTransfers` drops the NaN row, and the settle screen
+ * renders a creditor with no debtor.
+ *
+ * Silently, and deliberately — throwing here would white-screen a round the
+ * user can still open, which is exactly what `malformed.test.ts` exists to
+ * prevent.
+ */
 export function addLine(settlement: Settlement, line: SettlementLine): void {
+  const ids = Object.keys(line.perPlayerCents)
+  if (ids.some((id) => !Object.hasOwn(settlement.perPlayerCents, id))) return
   settlement.lines.push(line)
   for (const [id, cents] of Object.entries(line.perPlayerCents)) {
     settlement.perPlayerCents[id] = (settlement.perPlayerCents[id] ?? 0) + cents
@@ -53,6 +96,15 @@ export function assertZeroSum(settlement: Settlement): void {
  * import — money.ts is the bottom of the engine, not a consumer of it.
  * Players with no money movement stay in the map at 0, so the round's full
  * roster survives into standings.
+ *
+ * Skips a balance for anyone not in `playerIds`, for the same reason `addLine`
+ * refuses a line naming them — and it is a SEPARATE hole, because `addLine` is
+ * not the only way a settlement gets its keys (wolf assigns `perPlayerCents`
+ * directly). Left as `(combined[id] ?? 0) + cents` this had the identical
+ * prototype trap: an id of `toString` resolves to the inherited function,
+ * `??` does not rescue it, and the ROUND total silently becomes a string that
+ * `minimalTransfers` then drops from the settle screen. Unreachable with the
+ * engines shipped today; the point is that it stops being one line's problem.
  */
 export function combineSettlements(
   playerIds: readonly Uuid[],
@@ -61,7 +113,11 @@ export function combineSettlements(
   const combined: Record<Uuid, number> = Object.fromEntries(playerIds.map((id) => [id, 0]))
   for (const s of settlements) {
     for (const [id, cents] of Object.entries(s.perPlayerCents)) {
-      combined[id] = (combined[id] ?? 0) + cents
+      // `!` because `hasOwn` does not narrow an index signature under
+      // noUncheckedIndexedAccess — the guard above is what makes it true, and
+      // a `?? 0` here would read as the fallback doing the work it no longer does
+      if (!Object.hasOwn(combined, id)) continue
+      combined[id] = combined[id]! + cents
     }
   }
   return combined

@@ -9,6 +9,7 @@ import {
   scoreMatchHole,
   segmentSpans,
   sideStake,
+  stretchLabel,
   toPlayAfterIn,
   type MatchHoleResult,
   type MatchSides,
@@ -79,6 +80,39 @@ describe('segmentSpans', () => {
     expect(spans.front).toEqual([])
     expect(spans.back).toEqual([])
     expect(spans.overall).toHaveLength(9)
+  })
+})
+
+describe('stretchLabel', () => {
+  it('names the whole card 18, and a nine by which nine it was', () => {
+    expect(stretchLabel(Array.from({ length: 18 }, (_, i) => i + 1), 'full18')).toBe('18')
+    expect(stretchLabel([1, 2, 3, 4, 5, 6, 7, 8, 9], 'front9')).toBe('F9')
+    expect(stretchLabel([10, 11, 12, 13, 14, 15, 16, 17, 18], 'back9')).toBe('B9')
+  })
+
+  /**
+   * The holes played win over the round's declared range. A round set to
+   * `full18` on a 9-hole course plays nine (context.ts filters `holesPlayed`
+   * against the snapshot), and calling that "18" would be a bet named after
+   * holes that do not exist.
+   */
+  it('reads the holes actually played, not the range the round declared', () => {
+    expect(stretchLabel([1, 2, 3, 4, 5, 6, 7, 8, 9], 'full18')).toBe('F9')
+  })
+
+  /**
+   * A round with no playable holes at all is reachable — a back-nine round
+   * whose course snapshot has nine holes leaves `holesPlayed` empty
+   * (context.ts), and `importRound` validates games loosely enough to restore
+   * one. An empty span falls into the `<= 9` branch, so it is named as a NINE
+   * either way: B9 when the round said back nine, F9 otherwise — including for
+   * `full18`, where that is the swallowed empty case rather than a reading of
+   * the range. Such a round moves no money, so nothing rides on the label;
+   * pinning it keeps the next reader from "restoring" a rule this never had.
+   */
+  it('names an unplayable round as a nine, whatever range it declared', () => {
+    expect(stretchLabel([], 'back9')).toBe('B9')
+    expect(stretchLabel([], 'full18')).toBe('F9')
   })
 })
 

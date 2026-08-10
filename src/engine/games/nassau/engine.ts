@@ -12,6 +12,7 @@ import {
   scoreMatchHole,
   segmentSpans,
   sideStake,
+  stretchLabel,
   toPlayAfterIn,
   type MatchSegment,
   type MatchSide,
@@ -22,7 +23,7 @@ import { addLine, emptySettlement, formatCents, type Settlement } from '../../co
 import { duplicateInstanceProblems } from '../../core/setup'
 import { standingsFromSettlement } from '../../core/standings'
 import { firstName } from '../../core/summary'
-import { teamsSchema, nonEmptyPartitionProblems } from '../../core/teams'
+import { teamsSchema, nonEmptyPartitionProblems, rawTeams } from '../../core/teams'
 import type { GameConfig, HandicapSettings, RoundPlayer, Uuid } from '../../core/types'
 
 export const nassauConfigSchema = z.object({
@@ -220,13 +221,10 @@ function derive(
   // who's up, by how much, holes left; dormie/closed-out/final when apt.
   const sideShort = sides.short
   const segLabel = (seg: Segment): string =>
-    // a collapsed 9-hole nassau's single bet is the nine that was played
+    // a collapsed 9-hole nassau's single bet is the nine that was played, which
+    // is core/match's rule to name (every match game's single bet needs it)
     seg === 'overall'
-      ? ctx.holesPlayed.length <= 9
-        ? ctx.round.holes === 'back9'
-          ? 'B9'
-          : 'F9'
-        : '18'
+      ? stretchLabel(ctx.holesPlayed, ctx.round.holes)
       : seg === 'front'
         ? 'F9'
         : 'B9'
@@ -527,11 +525,15 @@ function derive(
   }
 
   const holeSummary = (hole: number): string[] => {
-    const r = holeResult.get(hole)
-    if (r === null || r === undefined) return []
     const notes = holeNotes.get(hole) ?? []
-    // an unplayed hole finalized by round completion carries only its notes
-    if (!ctx.anyScored(hole)) return notes
+    const r = holeResult.get(hole)
+    // Notes first, and NOT gated on the hole being decided. `finalizedAt` can
+    // land a close note on the live frontier — h6 finalizes because somebody
+    // teed off on h7, so the money appears on h7's ledger row while h7 itself
+    // is still half-scored and undecided. Returning [] there is the exact
+    // failure the close note exists to prevent: a delta with no sentence.
+    // An unplayed hole finalized by round completion carries only its notes too.
+    if (r === null || r === undefined || !ctx.anyScored(hole)) return notes
     const side = r === 1 ? sideA : r === -1 ? sideB : null
     const winnerLine = side
       ? `${side.map((id) => nameOf.get(id)).join(' & ')} ${side.length > 1 ? 'win' : 'wins'} the hole`
@@ -592,7 +594,7 @@ export const nassauEngine: GameEngine<NassauConfig> = {
         'A bet is won the moment a side is up more holes than the bet has left — 3 up with 2 to play is won 3&2, the margin stops moving there, and the money settles on that hole.',
         'Otherwise the bet runs to the end of its stretch: whoever is up wins its stake, and a tied bet pushes.',
         'Every player pays or collects the stake — a $5 bet swings $5 per player, in singles or 2v2.',
-        'In a 2-v-1, the solo player plays each opponent for the stake: a $5 bet swings $10 for them, $5 for each of the pair.',
+        'Outnumbered, a lone player plays the stake against each opponent: a $5 bet swings $10 against two of them, $15 against three, while each of them swings $5.',
         'A hole where only one side posts a score goes to that side; no scores at all halves it.',
       ],
       terms: [
@@ -617,7 +619,7 @@ export const nassauEngine: GameEngine<NassauConfig> = {
   configFields: [
     { key: 'stakeCents', kind: 'money', label: 'Stake per bet', min: 100, step: 100 },
     { key: 'autoPress', kind: 'boolean', label: 'Auto-press', hint: 'New press at 2 down' },
-    { key: 'teams', kind: 'teams', label: 'Teams (best ball · 2v2 or 2v1)' },
+    { key: 'teams', kind: 'teams', label: 'Teams (best ball · two sides)' },
   ],
   defaultConfig: (players) => ({
     stakeCents: 500,
@@ -640,7 +642,14 @@ export const nassauEngine: GameEngine<NassauConfig> = {
   ) => {
     const dupes = duplicateInstanceProblems(config, siblings, NASSAU_NAME)
     const parsed = nassauConfigSchema.safeParse(config.config)
-    if (!parsed.success) return [...dupes, 'Invalid nassau configuration']
+    if (!parsed.success) {
+      // An empty or double-booked side is now a SCHEMA failure (core/teams.ts),
+      // and setup reaches the empty one by accident — so say which side needs a
+      // player rather than falling through to the generic sentence.
+      const raw = rawTeams(config.config)
+      const problems = raw ? nonEmptyPartitionProblems(raw, players, NASSAU_NAME) : []
+      return problems.length > 0 ? [...dupes, ...problems] : [...dupes, 'Invalid nassau configuration']
+    }
     const teams = parsed.data.teams
     if (teams === null) {
       return players.length === 2

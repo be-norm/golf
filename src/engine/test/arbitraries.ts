@@ -85,6 +85,35 @@ const nassauFuzz: GameFuzz = {
     })),
 }
 
+const matchPlayFuzz: GameFuzz = {
+  type: 'matchPlay',
+  eligible: (n) => n >= 2,
+  arbitrary: () =>
+    // 2 → singles. At 4 the boolean picks between an even 2v2 and a 3v1, and
+    // the 3v1 is the point: nassau's fuzz never deals it, and it drives
+    // `sideStake`'s lone branch at a ×3 multiplier rather than ×2, which is
+    // where an uneven settlement would stop summing to zero if it were going
+    // to. At 3 there is no even split to pick — both branches are a lone side,
+    // and the boolean only chooses WHICH side is the lone one. That is worth
+    // dealing anyway: side A and side B take different paths through the
+    // settlement, so a multiplier applied to the wrong one shows up here.
+    fc.boolean().map((lopsided) => (ids: readonly Uuid[]) => ({
+      config: {
+        stakeCents: 500,
+        teams:
+          ids.length === 4
+            ? lopsided
+              ? { a: [ids[0]!, ids[1]!, ids[2]!], b: [ids[3]!] }
+              : { a: [ids[0]!, ids[1]!], b: [ids[2]!, ids[3]!] }
+            : ids.length === 3
+              ? lopsided
+                ? { a: [ids[0]!], b: [ids[1]!, ids[2]!] }
+                : { a: [ids[0]!, ids[1]!], b: [ids[2]!] }
+              : null,
+      },
+    })),
+}
+
 const sixPointFuzz: GameFuzz = {
   type: 'sixPoint',
   // threesome-only, but it joins the fuzz like every other money game
@@ -172,6 +201,7 @@ export const GAME_FUZZ: readonly GameFuzz[] = [
   vegasFuzz,
   wolfFuzz,
   ctpFuzz,
+  matchPlayFuzz,
 ]
 
 const PLAYER_NAMES = ['A', 'B', 'C', 'D'] as const

@@ -9,11 +9,25 @@ import type { RoundEvent } from './events'
 import { effectiveEvents } from './replay'
 
 describe('replay invariants (fast-check)', () => {
-  it('settlements are always zero-sum', () => {
+  it('settlements are always zero-sum, and only ever pay the round', () => {
     fc.assert(
       fc.property(arbitraryRoundAndEvents(), ({ round, log }) => {
+        const roster = new Set(round.players.map((p) => p.playerId))
         const { derivations } = deriveRound(round, log.events)
-        for (const d of derivations.values()) assertZeroSum(d.settlement)
+        for (const d of derivations.values()) {
+          assertZeroSum(d.settlement)
+          // …and to somebody who is actually playing. `assertZeroSum` sums the
+          // settlement's OWN keys, so a payment to a player who isn't in the
+          // round balances against them and reads as zero — while the surfaces
+          // that show the money build from `round.players` and see a credit
+          // with no debit. `addLine` refuses such a line, but it is not the
+          // only write path (wolf assigns `perPlayerCents` directly), so the
+          // rule is asserted over every registered engine here rather than
+          // trusted to one helper.
+          for (const id of Object.keys(d.settlement.perPlayerCents)) {
+            expect(roster.has(id), `settlement pays "${id}", who is not in the round`).toBe(true)
+          }
+        }
       }),
     )
   })
@@ -106,7 +120,11 @@ describe('replay invariants (fast-check)', () => {
         .flatMap(({ round }) => round.games.map((g) => g.type)),
     )
     expect(seen).toEqual(
-      new Set(listEngines().map((e) => e.type).filter((t) => !TEST_ONLY_ENGINE_TYPES.includes(t))),
+      new Set(
+        listEngines()
+          .map((e) => e.type)
+          .filter((t) => !TEST_ONLY_ENGINE_TYPES.includes(t)),
+      ),
     )
   })
 
@@ -131,9 +149,7 @@ describe('replay invariants (fast-check)', () => {
     const { derivations } = deriveRound(round, new EventLog().events)
     const lines = derivations.get('game-1')!.settlement.lines
     expect(lines.length).toBeGreaterThan(0)
-    expect(
-      lines.every((l) => Object.values(l.perPlayerCents).every((c) => c === 0)),
-    ).toBe(true)
+    expect(lines.every((l) => Object.values(l.perPlayerCents).every((c) => c === 0))).toBe(true)
   })
 
   it('replay is deterministic: same events, same result', () => {
@@ -180,38 +196,47 @@ describe('replay invariants (fast-check)', () => {
 
   it('correction equivalence: a corrected score equals having entered it right initially', () => {
     fc.assert(
-      fc.property(arbitraryRoundAndEvents(), fc.integer({ min: 1, max: 12 }), ({ round, log }, corrected) => {
-        const scoreEvents = log.events.filter((e) => e.type === 'score/set')
-        if (scoreEvents.length === 0) return
-        const target = scoreEvents[0]!
-        const correctionLog = new EventLog()
-        for (const e of log.events) {
-          if (e.type !== 'score/set') continue
-          correctionLog.append({ type: 'score/set', playerId: e.playerId, hole: e.hole, gross: e.gross })
-        }
-        correctionLog.append({
-          type: 'score/set',
-          playerId: target.playerId,
-          hole: target.hole,
-          gross: corrected,
-        })
+      fc.property(
+        arbitraryRoundAndEvents(),
+        fc.integer({ min: 1, max: 12 }),
+        ({ round, log }, corrected) => {
+          const scoreEvents = log.events.filter((e) => e.type === 'score/set')
+          if (scoreEvents.length === 0) return
+          const target = scoreEvents[0]!
+          const correctionLog = new EventLog()
+          for (const e of log.events) {
+            if (e.type !== 'score/set') continue
+            correctionLog.append({
+              type: 'score/set',
+              playerId: e.playerId,
+              hole: e.hole,
+              gross: e.gross,
+            })
+          }
+          correctionLog.append({
+            type: 'score/set',
+            playerId: target.playerId,
+            hole: target.hole,
+            gross: corrected,
+          })
 
-        const directLog = new EventLog()
-        for (const e of log.events) {
-          if (e.type !== 'score/set') continue
-          directLog.append(
-            e.id === target.id
-              ? { type: 'score/set', playerId: e.playerId, hole: e.hole, gross: corrected }
-              : { type: 'score/set', playerId: e.playerId, hole: e.hole, gross: e.gross },
+          const directLog = new EventLog()
+          for (const e of log.events) {
+            if (e.type !== 'score/set') continue
+            directLog.append(
+              e.id === target.id
+                ? { type: 'score/set', playerId: e.playerId, hole: e.hole, gross: corrected }
+                : { type: 'score/set', playerId: e.playerId, hole: e.hole, gross: e.gross },
+            )
+          }
+
+          const a = deriveRound(round, correctionLog.events)
+          const b = deriveRound(round, directLog.events)
+          expect([...a.derivations.values()].map((d) => d.settlement)).toEqual(
+            [...b.derivations.values()].map((d) => d.settlement),
           )
-        }
-
-        const a = deriveRound(round, correctionLog.events)
-        const b = deriveRound(round, directLog.events)
-        expect([...a.derivations.values()].map((d) => d.settlement)).toEqual(
-          [...b.derivations.values()].map((d) => d.settlement),
-        )
-      }),
+        },
+      ),
     )
   })
 })

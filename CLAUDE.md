@@ -1,9 +1,9 @@
 # Golf — game tracker for golf money games between friends
 
 Installable offline-first PWA. One scorekeeper phone per group enters hole-by-hole scores;
-the app computes all game standings/payouts. Six games ship today — Skins, Nassau, Wolf,
-Vegas, Six Point and Closest to the Pin; `docs/games-catalog.md` holds those plus every game
-still to come, with implementation-grade scoring math.
+the app computes all game standings/payouts. Seven games ship today — Skins, Nassau, Match
+Play, Wolf, Vegas, Six Point and Closest to the Pin; `docs/games-catalog.md` holds those plus
+every game still to come, with implementation-grade scoring math.
 
 **The architecture of record is the invariants below** — there is no separate plan history to
 consult, and this line used to promise one. `docs/` carries exactly two standing design notes
