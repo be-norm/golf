@@ -77,34 +77,61 @@ describe('a malformed game never takes a screen down', () => {
       ])
 
     /**
+     * Scored AND FINISHED, unlike the rest of this file. A match only pays when
+     * it is decided, so a three-hole prefix of a nine settles nothing whatever
+     * its teams look like — a guard test written against one would pass on a
+     * broken schema and prove precisely nothing. Completing the round finalizes
+     * the remaining holes (halved, nobody posted) and closes the match.
+     */
+    const settled = (round: Round) => {
+      const log = new EventLog()
+      log.scoreByHole(round, { A: [4, 5, 3], B: [5, 4, 4] }, [1, 2, 3])
+      log.append({ type: 'round/completed' })
+      return deriveRound(round, log.events)
+    }
+
+    /**
      * An EMPTY side posts no score, so it loses every hole and the match
-     * closes — and the settlement credits the winner while debiting nobody.
-     * Left unguarded this conjures the full stake per winner out of nothing.
+     * closes — and the settlement credits the winners while `sides[loser].map`
+     * debits nobody. Verified against the loosened schema: this exact config
+     * pays `{p-a: +500, p-b: +500}`, a thousand cents out of nothing.
+     *
+     * TWO players against nobody, deliberately. A lone player against an empty
+     * side hits `sideStake`'s outnumbered branch and multiplies by the other
+     * side's size — zero — so 1v0 quietly pays nothing and would hide this.
      */
     it('refuses a side with nobody on it', () => {
-      const { derivations } = scored(twoSided({ a: ['p-a'], b: [] }))
+      const { derivations } = settled(twoSided({ a: ['p-a', 'p-b'], b: [] }))
       expect(derivations.has('game-1')).toBe(false)
     })
 
     /**
      * A DUPLICATED id is counted twice and paid once: the lone opponent is
-     * debited `stake × side.length` while the side's two entries collapse to a
-     * single key in `Object.fromEntries`, leaving the ledger a stake short.
+     * debited `stake × 2` while the side's two entries collapse to a single key
+     * in `Object.fromEntries`. Verified against the loosened schema: this pays
+     * `{p-a: +500, p-b: -1000}`, five hundred cents short.
      */
     it('refuses a player booked onto a side twice', () => {
-      const { derivations } = scored(twoSided({ a: ['p-a', 'p-a'], b: ['p-b'] }))
+      const { derivations } = settled(twoSided({ a: ['p-a', 'p-a'], b: ['p-b'] }))
       expect(derivations.has('game-1')).toBe(false)
     })
 
+    /**
+     * This one moves no money — a player is their own opponent, so every hole
+     * halves and the match pushes. Refused anyway: it is the same broken input,
+     * and a schema that admitted it would be relying on the settlement to stay
+     * accidentally balanced.
+     */
     it('refuses a player on both sides at once', () => {
-      const { derivations } = scored(twoSided({ a: ['p-a'], b: ['p-a'] }))
+      const { derivations } = settled(twoSided({ a: ['p-a'], b: ['p-a'] }))
       expect(derivations.has('game-1')).toBe(false)
     })
 
-    // …while the shape setup actually produces still derives and still balances
+    // …while the shape setup actually produces still derives, and balances
     it('still settles a well-formed 1v1', () => {
-      const { derivations } = scored(twoSided({ a: ['p-a'], b: ['p-b'] }))
+      const { derivations } = settled(twoSided({ a: ['p-a'], b: ['p-b'] }))
       const cents = Object.values(derivations.get('game-1')!.settlement.perPlayerCents)
+      expect(cents.some((c) => c !== 0)).toBe(true)
       expect(cents.reduce((a, b) => a + b, 0)).toBe(0)
     })
   })
