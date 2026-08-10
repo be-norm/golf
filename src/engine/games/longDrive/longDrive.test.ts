@@ -73,7 +73,7 @@ describe('longDrive — golden fixtures (hand-verified)', () => {
     })
     assertZeroSum(ld.settlement)
     expect(ld.settlement.lines).toHaveLength(1)
-    expect(ld.settlement.lines[0]!.label).toBe('Hole 3 — B longest drive')
+    expect(ld.settlement.lines[0]!.label).toBe('Hole 3 — B')
 
     expect(ld.designated).toEqual([3, 8])
     expect(ld.holeResults).toEqual([

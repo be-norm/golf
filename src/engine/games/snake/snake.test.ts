@@ -94,7 +94,13 @@ describe('snake — golden fixtures (hand-verified)', () => {
     })
     assertZeroSum(snake.settlement)
     expect(snake.settlement.lines).toHaveLength(1)
-    expect(snake.settlement.lines[0]!.label).toBe('C holds the snake')
+    // THE LINE SAYS WHAT HAPPENS TO THE MONEY. "C holds the snake" under a
+    // heading reading SNAKE named the game twice and the payment never — and
+    // a reader seeing "C · $1" cannot tell whether C won or lost it.
+    expect(snake.settlement.lines[0]!.label).toBe('C pays $1 to each of 3 others')
+    // …and the live position stands down once the money moves, or the card
+    // renders that instead of the payment (`summaryCard`'s ledger/lines split)
+    expect(snake.detailLines).toBeUndefined()
     expect(snake.standings[3]).toMatchObject({ label: 'C', detail: 'holds the snake' })
 
     expect(snake.holeSummary(2)).toEqual([
@@ -344,6 +350,8 @@ describe('snake — golden fixtures (hand-verified)', () => {
     const snake = snakeOf(round, log)
 
     expect(snake.settlement.perPlayerCents).toEqual({ 'p-a': -500, 'p-b': 500 })
+    // heads-up needs no "to each of 1 others"
+    expect(snake.settlement.lines[0]!.label).toBe('A pays $5')
     expect(snake.holeSummary(9)).toEqual([
       'A is left holding the snake',
       '↳ pays $5 to each of 1 other player — $5',

@@ -62,7 +62,9 @@ describe('ctp — golden fixtures (hand-verified)', () => {
     })
     assertZeroSum(ctp.settlement)
     expect(ctp.settlement.lines).toHaveLength(1)
-    expect(ctp.settlement.lines[0]!.label).toBe('Hole 4 — B closest to the pin')
+    // the game's name is the panel heading directly above this line, so the
+    // line itself says only what the heading cannot
+    expect(ctp.settlement.lines[0]!.label).toBe('Hole 4 — B')
 
     expect(ctp.holeResults).toEqual([
       { hole: 4, kind: 'won', winnerId: 'p-b' },
