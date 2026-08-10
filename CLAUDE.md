@@ -234,6 +234,13 @@ change, use a 6-digit code (`{{ .Token }}` + `verifyOtp`) rather than a link.
   Collapsing happens only when it saves a row (`shouldGroupSideBets`): a lone
   side bet keeps its own row and its recap, and a round of only side bets shows
   them expanded.
+  **The sheet accounts, but it leads with what just happened** (MAI-84): each
+  game's block is recap → player cards → notes, because opening it to a column
+  of running money buries the hole you are standing on. Universal, since
+  `holeSummary` is a per-hole recap by contract for every game. It stays
+  `holeSummary(currentHole)` and NOT `latestHoleSummary` — walking back to 3
+  must recap 3; the latest DECIDED hole is the bar's job, and on the frontier
+  (where the sheet is almost always opened) they are the same hole.
 - **One default primary game, shared by every surface** (`src/lib/gameRoles.ts`).
   `primaryGame(round)` = first NET main game → first main game → `games[0]`;
   `strokeGame(round)` is that game only when it allocates strokes. Three
@@ -286,6 +293,28 @@ change, use a 6-digit code (`{{ .Token }}` + `verifyOtp`) rather than a link.
   action's own `recommendedReason`. `ScoringScreen` uses one game's words when
   exactly one game is offering and neutral wording otherwise. A game that offers
   actions and declares no copy is a `catalog.test.ts` failure, not a fallback.
+- **An answered pull STAYS ON SCREEN** (MAI-84). `InputRequest.answered` carries
+  the option in effect plus the `lines` the game states it with; the screen turns
+  the gold interrupt into a quiet card with an `Adjust` button that reopens the
+  same options, current answer engaged. Same doctrine as `GameEventOffer.taken`,
+  and it closes the hole that made Wolf's teams unreadable AND unfixable: they
+  vanished on the tap, and the header undo only ever reaches the log's tail, so
+  one score entry later a mistapped partner was permanent. Re-answering is one
+  more event — every input reducer is last-write-wins per hole — which is why
+  `answered` carries no `undoEventIds`, and why the screen must NOT emit when the
+  option already in effect is tapped (`emitOnce` releases its key once the event
+  lands, so that tap would append a real duplicate). Anything asking "is this
+  hole still blocked?" filters on `!answered`, as `openActions` does on `!taken`.
+- **A game that needs a PICTURE puts a token in the string, never a glyph**
+  (`:wolf-shades:`, `engine/core/glyphs.ts`) — engines are pure TS and can't emit
+  React. `GlyphText` swaps in 16×16 pixel art drawn in `public/icon.svg`'s idiom.
+  ONLY `holeSummary` and `requiredInputs` decode it: the bar renders `summary`/
+  `summaryParts` raw, and `settlement.lines`/`detailLines`/`notes` are painted
+  onto a CANVAS for the share card, where a token becomes literal `:wolf:` inside
+  a PNG people send each other. `glyphs.test.ts` walks every engine and fails on
+  a token anywhere else. **The word always ships with the picture** — a 16px
+  graphic can't teach what "blind" costs — which is also why the art is
+  `aria-hidden` (labelling it would say "Lone Wolf" twice in one button).
 - **Awards pull too — and they never expire.** `awards?(hole)`/`Award` is the
   THIRD channel (MAI-46), for "give THIS player THIS thing on THIS hole":
   closest to the pin, greenies, sandies, the snake. It renders as group rows ×

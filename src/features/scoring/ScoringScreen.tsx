@@ -23,6 +23,7 @@ import { AwardGrid } from './AwardGrid'
 import { Sheet } from '../../components/Sheet'
 import { GameSummary, SummaryParts, type SummaryPart } from '../../components/GameSummary'
 import { DetailLines } from '../../components/DetailLines'
+import { GlyphText } from '../../components/GlyphText'
 import { BigButton } from '../../components/BigButton'
 import { enqueuePushRound } from '../../remote/outbox'
 import { LOCAL_USER } from '../../db/ids'
@@ -52,6 +53,8 @@ export function ScoringScreen() {
   const [standingsOpen, setStandingsOpen] = useState(false)
   const [rulesFor, setRulesFor] = useState<string>()
   const [actionsOpen, setActionsOpen] = useState(false)
+  // which answered input has its picker open — `${gameId}:${input.id}`
+  const [adjustingId, setAdjustingId] = useState<string>()
   // event ids already sent for retraction — see `giveBack`
   const undoneRef = useRef<Set<string>>(new Set())
   // event key → the id it was written as, or undefined while still in flight.
@@ -113,11 +116,15 @@ export function ScoringScreen() {
     }
   }
 
-  const pendingInputs = useMemo(() => {
+  // Every hole decision the games are asking for OR have on record — an
+  // answered one stays in the list carrying `answered` (catalog.ts), so this is
+  // no longer "pending". Anything that wants only the blocking ones filters on
+  // `!answered`, the way `openActions` filters on `!taken` below.
+  const inputs = useMemo(() => {
     if (!view) return []
-    const inputs: InputRequest[] = []
-    for (const d of view.derivations.values()) inputs.push(...d.requiredInputs())
-    return inputs
+    const all: InputRequest[] = []
+    for (const d of view.derivations.values()) all.push(...d.requiredInputs())
+    return all
   }, [view])
 
   // Optional actions (Nassau presses). Surfaced only while the scorekeeper is
@@ -203,7 +210,7 @@ export function ScoringScreen() {
         sideGames.flatMap((g) => derivations.get(g.gameId) ?? []),
       )
     : []
-  const holeInputs = pendingInputs.filter((i) => i.hole === currentHole)
+  const holeInputs = inputs.filter((i) => i.hole === currentHole)
 
   // Deliberately NOT a useMemo: `currentHole` is derived below the early
   // returns, so keying a hook on it would mean moving one or the other. It is a
@@ -513,27 +520,84 @@ export function ScoringScreen() {
         />
       </section>
 
+      {/* The blocking channel, in both of its states (MAI-84). UNANSWERED is a
+          gold interrupt — the hole cannot settle without it. ANSWERED stays on
+          screen as a quiet statement of what it recorded, because a decision
+          that vanishes is one you can neither read back nor fix: Wolf's teams
+          were invisible the moment they were picked, and a mistapped partner
+          was only reachable while it was still the round's last event.
+
+          Gold is reserved for "act now" throughout the app, so the answered
+          panel is deliberately the neutral card treatment. */}
       {holeInputs.length > 0 && (
         <section className="mb-2 space-y-2.5">
-          {holeInputs.map((input) => (
-            <div key={input.id} className="pixel border-coin-500 bg-coin-500/10 p-3">
-              <p className="mb-2 text-lg text-coin-400">
-                <span className="animate-blink">▶ </span>
-                {input.prompt}
-              </p>
-              <div className="flex flex-wrap gap-2.5">
-                {input.options.map((o) => (
-                  <button
-                    key={o.value}
-                    onClick={() => answerInput(input, o)}
-                    className="pixel-press border-stone-600 bg-stone-800 px-4 py-2.5 text-lg"
-                  >
-                    {o.label}
-                  </button>
-                ))}
+          {holeInputs.map((input) => {
+            // Composed with gameId: an offer's id is unique only WITHIN a game
+            // (catalog.ts), and two Wolfs at different stakes both mint
+            // `wolf-pick-5` — one key would collapse them into one row and one
+            // expanded picker.
+            const key = `${input.gameId}:${input.id}`
+            const open = !input.answered || adjustingId === key
+            return (
+              <div
+                key={key}
+                className={`pixel p-3 ${
+                  input.answered
+                    ? 'border-stone-700 bg-stone-900/70'
+                    : 'border-coin-500 bg-coin-500/10'
+                }`}
+              >
+                {input.answered ? (
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      {input.answered.lines.map((line, i) => (
+                        <p key={i} className="text-lg leading-snug">
+                          <GlyphText text={line} />
+                        </p>
+                      ))}
+                    </div>
+                    <button
+                      onClick={() => setAdjustingId(open ? undefined : key)}
+                      className="pixel-press font-display shrink-0 border-stone-600 bg-stone-800 px-3 py-2 text-[10px] uppercase text-stone-300"
+                    >
+                      Adjust
+                    </button>
+                  </div>
+                ) : (
+                  <p className="mb-2 text-lg text-coin-400">
+                    <span className="animate-blink">▶ </span>
+                    <GlyphText text={input.prompt} />
+                  </p>
+                )}
+                {open && (
+                  <div className={`flex flex-wrap gap-2.5 ${input.answered ? 'mt-3' : ''}`}>
+                    {input.options.map((o) => (
+                      <button
+                        key={o.value}
+                        onClick={() => {
+                          setAdjustingId(undefined)
+                          // Re-picking what is ALREADY in effect must write
+                          // nothing. `emitOnce` releases its key once the event
+                          // lands, so this tap would otherwise append a second
+                          // identical wolf/pick — inert in replay (last write
+                          // wins) but permanent in an append-only log that
+                          // syncs and exports.
+                          if (o.value !== input.answered?.value) answerInput(input, o)
+                        }}
+                        className={`pixel-press px-4 py-2.5 text-lg ${
+                          o.value === input.answered?.value
+                            ? 'border-felt-500 bg-felt-900'
+                            : 'border-stone-600 bg-stone-800'
+                        }`}
+                      >
+                        <GlyphText text={o.label} />
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
-            </div>
-          ))}
+            )
+          })}
         </section>
       )}
 
@@ -671,6 +735,21 @@ export function ScoringScreen() {
                     <DetailLines lines={d.detailLines} />
                   </div>
                 )}
+                {/* WHAT JUST HAPPENED, THEN THE TOTALS (MAI-84). This used to
+                    sit under the player cards, so opening the sheet led with
+                    the running money and buried the hole you are standing on.
+                    Universal rather than Wolf-only: `holeSummary` is a per-hole
+                    recap by contract for every game.
+
+                    Still the hole ON SCREEN, not the latest DECIDED one — that
+                    is the pinned bar's job (`latestHoleSummary`). Walking back
+                    to 3 must recap 3. On the frontier, where the sheet is
+                    almost always opened, they are the same hole. */}
+                {d.holeSummary(currentHole).map((s) => (
+                  <p key={s} className="mb-2 text-lg text-stone-400">
+                    <GlyphText text={s} />
+                  </p>
+                ))}
                 {/* Name and money share the top line; the per-bet status gets
                     its own beneath. Squeezing all three into one row wrapped a
                     long name onto two lines and — worse — broke "-$5" between
@@ -706,11 +785,6 @@ export function ScoringScreen() {
                     </motion.li>
                   ))}
                 </ul>
-                {d.holeSummary(currentHole).map((s) => (
-                  <p key={s} className="mt-2 text-lg text-stone-400">
-                    {s}
-                  </p>
-                ))}
                 {/* A pot can die before anyone taps Finish — every hole scored
                     and the last one tied is enough (ctx.finalized). This is the
                     screen the group is looking at while deciding what's still

@@ -5,8 +5,9 @@ import type { GameScopedEvent } from '../../core/events'
 import { emptySettlement, type Settlement } from '../../core/money'
 import { sideStake } from '../../core/match'
 import { duplicateInstanceProblems } from '../../core/setup'
+import { glyph } from '../../core/glyphs'
 import { standingsFromSettlement } from '../../core/standings'
-import { latestHoleSummary, summaryString } from '../../core/summary'
+import { firstName, joinNames, latestHoleSummary, summaryString } from '../../core/summary'
 import { isPlayerPermutation } from '../../core/teams'
 import type { GameConfig, HandicapSettings, RoundPlayer, Uuid } from '../../core/types'
 
@@ -69,6 +70,14 @@ export interface WolfHoleResult {
   hole: number
   wolfId: Uuid
   pick: WolfPick | null
+  /**
+   * The sides the pick made, or null with no pick. Resolved BEFORE the hole is
+   * finalized, because the teams are what the group needs on screen while they
+   * are still playing the hole — not only once it settles.
+   */
+  sides: { wolf: Uuid[]; pack: Uuid[] } | null
+  /** each side's best net ball, once the hole is decided on posted scores */
+  best: { wolf: number; pack: number } | null
   /** the signed SWING this hole, by player — sums to zero (see HOLE_UNITS) */
   points: Map<Uuid, number> | null
   outcome: 'wolfWin' | 'packWin' | 'halved' | 'pending'
@@ -126,13 +135,21 @@ function derive(
         ? null
         : rawPick
 
+    // Sides resolve as soon as the pick does — the scoring screen states them
+    // above the score rows while the hole is still being played (MAI-84).
+    const wolfSide: Uuid[] = pick
+      ? pick.kind === 'partner'
+        ? [wolfId, pick.partnerId]
+        : [wolfId]
+      : []
+    const packSide = playerIds.filter((id) => !wolfSide.includes(id))
+    const sides = pick ? { wolf: wolfSide, pack: packSide } : null
+
     if (!pick || !ctx.finalized(hole)) {
-      holeResults.push({ hole, wolfId, pick, points: null, outcome: 'pending' })
+      holeResults.push({ hole, wolfId, pick, sides, best: null, points: null, outcome: 'pending' })
       return
     }
 
-    const wolfSide: Uuid[] = pick.kind === 'partner' ? [wolfId, pick.partnerId] : [wolfId]
-    const packSide = playerIds.filter((id) => !wolfSide.includes(id))
     // shared posted-only best ball: a side with no scores can't win
     const wolfBest = ctx.bestNetAmongPosted(game.gameId, wolfSide, hole) ?? Infinity
     const packBest = ctx.bestNetAmongPosted(game.gameId, packSide, hole) ?? Infinity
@@ -145,6 +162,8 @@ function derive(
         hole,
         wolfId,
         pick,
+        sides,
+        best: null,
         points: new Map(playerIds.map((id) => [id, 0])),
         outcome: 'halved',
       })
@@ -171,16 +190,24 @@ function derive(
       // 3/5-player variants would need this rule generalised first. That pairing
       // is load-bearing, so `wolf.test.ts` asserts the holes balance at every
       // player count `validateSetup` accepts — raise the cap and it fails.
-      const sides = { a: wolfSide, b: packSide }
+      const stakeSides = { a: wolfSide, b: packSide }
       const sign = wolfBest < packBest ? 1 : -1
-      const wolfShare = sideStake(units, sides, 'a')
-      const packShare = sideStake(units, sides, 'b')
+      const wolfShare = sideStake(units, stakeSides, 'a')
+      const packShare = sideStake(units, stakeSides, 'b')
       for (const id of wolfSide) points.set(id, sign * wolfShare)
       for (const id of packSide) points.set(id, -sign * packShare)
     }
 
     for (const [id, p] of points) totals.set(id, totals.get(id)! + p)
-    holeResults.push({ hole, wolfId, pick, points, outcome })
+    holeResults.push({
+      hole,
+      wolfId,
+      pick,
+      sides,
+      best: { wolf: wolfBest, pack: packBest },
+      points,
+      outcome,
+    })
   })
 
   // A point IS a stake here, so money is the swing at face value — no gap
@@ -243,70 +270,115 @@ function derive(
   )
   const summary = summaryString(summaryParts)
 
+  // THE WOLF SIDE, marked. `(W)` for an ordinary partnered hole; the pixel wolf
+  // for lone and the same wolf in shades for blind — each followed by the word,
+  // because a 16px picture cannot teach what "blind" costs (core/glyphs.ts).
+  const wolfSideLabel = (r: WolfHoleResult): string => {
+    const names = joinNames(r.sides!.wolf, nameOf)
+    const kind = r.pick!.kind
+    return kind === 'partner'
+      ? `(W) ${names}`
+      : `${kind === 'lone' ? glyph('wolf') : glyph('wolf-shades')} ${names} (${kind})`
+  }
+  const packLabel = (r: WolfHoleResult): string => joinNames(r.sides!.pack, nameOf)
+  /** The teams, as the scoring screen stacks them above the score rows. */
+  const teamLines = (r: WolfHoleResult): string[] => [wolfSideLabel(r), 'vs.', packLabel(r)]
+
   // The wolf must decide on any hole that's being scored (or is next up) and
   // has no pick yet — a blocking chip, since the hole can't compute without it.
+  //
+  // AND THE ANSWERED ONES STAY (MAI-84). The teams used to vanish the moment
+  // they were picked, leaving no way to see them and no way to fix a mistap.
+  // An answered request carries `answered`, which the screen renders as a quiet
+  // statement with an Adjust affordance rather than a gold interrupt.
+  const frontier = ctx.holesPlayed.find(
+    (h) => !playerIds.every((id) => ctx.gross.get(id)?.get(h) !== undefined),
+  )
   const requiredInputs = (): InputRequest[] => {
     const inputs: InputRequest[] = []
     for (const r of holeResults) {
-      if (r.pick) continue
-      const anyScore = playerIds.some((id) => ctx.gross.get(id)?.get(r.hole) !== undefined)
-      const frontier = ctx.holesPlayed.find(
-        (h) => !playerIds.every((id) => ctx.gross.get(id)?.get(h) !== undefined),
-      )
-      if (!anyScore && r.hole !== frontier) continue
+      if (!r.pick) {
+        const anyScore = playerIds.some((id) => ctx.gross.get(id)?.get(r.hole) !== undefined)
+        if (!anyScore && r.hole !== frontier) continue
+      }
       const wolfName = nameOf.get(r.wolfId)
       inputs.push({
         id: `wolf-pick-${r.hole}`,
         gameId: game.gameId,
         hole: r.hole,
-        prompt: `🐺 Hole ${r.hole}: ${wolfName} rides with…`,
+        prompt: `${glyph('wolf')} Hole ${r.hole}: ${wolfName} rides with…`,
         options: [
           ...playerIds
             .filter((id) => id !== r.wolfId)
             .map((id) => ({ value: id, label: nameOf.get(id)! })),
-          { value: 'lone', label: 'Lone Wolf 🐺' },
-          { value: 'blind', label: 'Blind Wolf 🙈' },
+          { value: 'lone', label: `${glyph('wolf')} Lone Wolf` },
+          { value: 'blind', label: `${glyph('wolf-shades')} Blind Wolf` },
         ],
         eventKind: 'wolf/pick',
+        ...(r.pick && {
+          answered: {
+            value: r.pick.kind === 'partner' ? r.pick.partnerId : r.pick.kind,
+            lines: teamLines(r),
+          },
+        }),
       })
     }
     return inputs
   }
 
+  const isNet = game.handicap?.mode === 'net'
+  const scoreTag = (n: number) => (isNet ? `net ${n}` : `${n}`)
+  /**
+   * "Benjamin's net 4" — the possessive drops in the two cases where it says
+   * nothing. Two partners both round in 4 and naming either is a half-truth;
+   * and a lone wolf is the only player on their side, so "B wins with B's 3"
+   * just says B twice.
+   */
+  const madeIt = (side: readonly Uuid[], best: number, hole: number): string => {
+    if (side.length < 2) return ''
+    const at = side.filter((id) => ctx.netFor(game.gameId, id, hole) === best)
+    return at.length === 1 ? `${firstName(nameOf.get(at[0]!))}'s ` : ''
+  }
+
+  /**
+   * ONE SENTENCE, then the cause. It used to enumerate every player's swing —
+   * which the money ledger prints again as cash directly underneath, and the
+   * standings sheet prints again as points above, so each name appeared three
+   * times on one card (MAI-84). The ledger's own delta row is the movement; the
+   * narration's job is to say who won the hole and with what.
+   */
   const holeSummary = (hole: number): string[] => {
     const r = holeResults.find((h) => h.hole === hole)
     if (!r) return []
-    const wolfName = nameOf.get(r.wolfId)
-    if (r.outcome === 'pending') return [`Wolf: ${wolfName}`]
-    const pickLabel =
-      r.pick!.kind === 'partner'
-        ? `with ${nameOf.get(r.pick!.partnerId)}`
-        : r.pick!.kind === 'lone'
-          ? 'lone'
-          : 'blind'
-    if (r.outcome === 'halved') return [`Wolf ${wolfName} (${pickLabel}) — halved`]
-    // BOTH sides. Under the old score table a losing wolf simply scored 0, so
-    // listing gains alone lost nothing; now they pay the hole's whole swing —
-    // a blind loss is nine stakes — and a ledger that shows "A +3, B +3, C +3"
-    // without D's −9 is exactly the "reader has to ask why" this convention
-    // exists to prevent.
-    const swing = (p: number) => `${p > 0 ? '+' : ''}${p}`
-    const movement = [...r.points!.entries()]
-      .filter(([, p]) => p !== 0)
-      .sort((x, y) => y[1] - x[1])
-      .map(([id, p]) => `${nameOf.get(id)} ${swing(p)}`)
-      .join(', ')
-    const lines = [`Wolf ${wolfName} (${pickLabel}) — ${movement}`]
-    // explain the elevated points behind a solo pick
-    // say what the multiplier DID — the swing is double or triple a partnered
-    // hole, and that is the whole reason these numbers look different
-    if (r.pick!.kind === 'lone') {
-      lines.push('↳ lone wolf — the hole doubles, and he plays it against all three')
+    // A HOLE NOBODY PLAYED HAS NO RESULT. `ctx.finalized` goes true for every
+    // hole the moment the round completes, so without this guard a round
+    // finished on the 12th would report 13–18 as halved — the MAI-38 rule that
+    // a claim about a hole no one played is a claim about golf that never
+    // happened.
+    if (r.outcome === 'pending' || !ctx.anyScored(hole)) {
+      return r.sides ? [`${wolfSideLabel(r)} vs ${packLabel(r)}`] : [`Wolf: ${nameOf.get(r.wolfId)}`]
     }
-    if (r.pick!.kind === 'blind') {
-      lines.push('↳ blind wolf — called before any tee shot, so the hole triples')
+    const kind = r.pick!.kind
+    // The multiplier is why these numbers look unlike a partnered hole's, and
+    // on a hole the wolf LOST it is the only thing left naming them.
+    const cause =
+      kind === 'lone'
+        ? [`↳ ${nameOf.get(r.wolfId)} went lone — the hole doubles`]
+        : kind === 'blind'
+          ? [`↳ ${nameOf.get(r.wolfId)} went blind — the hole triples`]
+          : []
+    // No cause line: nothing moved, so the multiplier did nothing to explain —
+    // and the label already carries the word "(lone)" / "(blind)".
+    if (r.outcome === 'halved') {
+      const at = r.best ? ` at ${scoreTag(r.best.wolf)}` : ''
+      return [`${wolfSideLabel(r)} — halved${at}`]
     }
-    return lines
+    const wolfWon = r.outcome === 'wolfWin'
+    const side = wolfWon ? r.sides!.wolf : r.sides!.pack
+    const best = wolfWon ? r.best!.wolf : r.best!.pack
+    const who = wolfWon ? wolfSideLabel(r) : packLabel(r)
+    const verb = side.length === 1 ? 'wins' : 'win'
+    return [`${who} ${verb} with ${madeIt(side, best, hole)}${scoreTag(best)}`, ...cause]
   }
 
   return { standings, summary, summaryParts, holeSummary, requiredInputs, settlement }

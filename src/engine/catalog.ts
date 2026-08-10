@@ -81,6 +81,27 @@ export interface InputRequest {
   options: { value: string; label: string; data?: Record<string, unknown> }[]
   /** the game event kind to append with data { ...option.data, hole, choice } */
   eventKind: string
+  /**
+   * ALREADY ANSWERED. The request STAYS IN THE LIST rather than vanishing, so
+   * the decision it recorded is visible and changeable instead of silently
+   * final — Wolf's teams used to disappear the instant they were picked, and a
+   * mistapped partner was then only reachable while it was still the round's
+   * last event.
+   *
+   * Same doctrine as `GameEventOffer.taken`, and the same shape of consumer:
+   * anything asking "is this hole still blocked?" filters on `!answered`,
+   * exactly as `ScoringScreen` counts what is left to take with
+   * `actions.filter((a) => !a.taken)`.
+   *
+   * `value` is the option in effect, so the picker can mark it engaged.
+   * `lines` is how the GAME states the resolved position — stacked verbatim,
+   * with the screen owning none of the vocabulary.
+   *
+   * NO `undoEventIds`: an answer is REPLACED, not retracted. Every input
+   * reducer is last-write-wins per hole, so re-answering is one more event of
+   * the same kind and the newest one counts.
+   */
+  answered?: { value: string; lines: string[] }
 }
 
 /**
@@ -125,7 +146,10 @@ export interface GameAction extends GameEventOffer {
  * the snake. The third input channel, and it exists because neither of the
  * other two fits (MAI-46):
  *
- * - `requiredInputs` BLOCKS scoring. Nobody is stuck waiting on a greenie.
+ * - `requiredInputs` INTERRUPTS scoring: its hole cannot settle until someone
+ *   answers, so it renders as a gold chip above the score rows. Nobody is stuck
+ *   waiting on a greenie. (It has never DISABLED score entry — the screen has
+ *   no such gate — so don't write code that assumes one.)
  * - `availableActions` is a flat list behind a button, and it is frontier-gated
  *   (`ScoringScreen`): correct for a press, which must be declared on the tee
  *   you are standing on, and wrong for an award in exactly the cases awards

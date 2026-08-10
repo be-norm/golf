@@ -71,11 +71,35 @@ describe('wolf — golden fixture (hand-verified)', () => {
     })
     // every hole's swing nets out, so the round does too
     expect(Object.values(d.settlement.perPlayerCents).reduce((a, b) => a + b, 0)).toBe(0)
+    // NARRATION IS ONE SENTENCE: who won the hole, and with what. The per-player
+    // swing used to be enumerated here, which the ledger prints again as cash
+    // directly underneath and the standings sheet again as points (MAI-84).
+    // Gross round, so the scores are bare numbers rather than "net 4".
+    //
+    // Hand-derived from the card above, one per outcome shape:
+    expect(d.holeSummary(1)).toEqual(['(W) A & B win with A\'s 4']) // wolf side, partnered
+    expect(d.holeSummary(3)).toEqual(['A & B win with A\'s 4']) // pack, partnered
+    expect(d.holeSummary(7)).toEqual(['(W) C & A win with C\'s 3'])
+    // both partners posted the winning 4, so naming either would be a half-truth
+    expect(d.holeSummary(8)).toEqual(['(W) D & A win with 4'])
+    // lone win: one player on the side, so no possessive — "B wins with B's 3"
+    // would just say B twice. The cause line names the wolf and the multiplier.
+    expect(d.holeSummary(2)).toEqual([
+      ':wolf: B (lone) wins with 3',
+      '↳ B went lone — the hole doubles',
+    ])
+    // blind LOSS — the wolf is not in the headline, so the cause line is what
+    // names them; all three of A, B, C posted the 4, so no possessive
+    expect(d.holeSummary(4)).toEqual([
+      'A & B & C win with 4',
+      '↳ D went blind — the hole triples',
+    ])
+    // halved: still names the wolf's side (a bare "Halved" would be a
+    // regression), and no cause line — nothing moved for the multiplier to
+    // explain, and "(lone)" is already in the label
+    expect(d.holeSummary(5)).toEqual([':wolf: A (lone) — halved at 4'])
     // the trailing player takes the last wolf — D, not C, under these totals
-    expect(d.holeSummary(9)[0]).toContain('Wolf D')
-    expect(d.holeSummary(2)[0]).toContain('B +6')
-    // blind loss: the other three collect three stakes each
-    expect(d.holeSummary(4)[0]).toContain('+3')
+    expect(d.holeSummary(9)).toEqual(['(W) D & B — halved at 4'])
     // bar recaps the latest decided hole (h9: D rides with B, 4 v 4 → halved)
     expect(d.summaryParts![0]!.label).toBe('H9')
   })
@@ -98,17 +122,107 @@ describe('wolf — golden fixture (hand-verified)', () => {
     expect(inputs.map((i) => i.hole)).toEqual([1, 2])
     expect(inputs[0]).toMatchObject({ hole: 1, eventKind: 'wolf/pick' })
     expect(inputs[0]!.prompt).toContain('A')
+    // nothing is answered yet, so both are the blocking kind
+    expect(inputs.every((i) => i.answered === undefined)).toBe(true)
     // no points until the pick lands
     expect(Object.values(d.settlement.perPlayerCents).every((c) => c === 0)).toBe(true)
 
     pick(log, 1, 'lone')
     const after = deriveRound(round, log.events).derivations.get('game-1')!
-    expect(after.requiredInputs().map((i) => i.hole)).toEqual([2])
+    // THE ANSWERED REQUEST STAYS (MAI-84). Hole 1 no longer blocks, but it
+    // remains in the list carrying the teams it recorded, so the screen can
+    // state them and offer to change them. Hole 2 is still blocking.
+    const then = after.requiredInputs()
+    expect(then.map((i) => i.hole)).toEqual([1, 2])
+    expect(then[1]!.answered).toBeUndefined()
+    expect(then[0]!.answered).toEqual({
+      value: 'lone',
+      // the word rides with the picture: a 16px glyph can't teach "lone"
+      lines: [':wolf: A (lone)', 'vs.', 'B & C & D'],
+    })
     // lone win: the wolf plays the doubled hole against each of three → 6 stakes
     expect(after.settlement.perPlayerCents['p-a']).toBe(600)
     expect(after.settlement.perPlayerCents['p-b']).toBe(-200)
-    // bar recaps the solo win with its mode tag
+    // bar recaps the solo win with its mode tag — and stays token-free, since
+    // the pinned bar renders `summaryParts` raw
     expect(after.summaryParts).toEqual([{ label: 'H1', value: 'A lone +6' }])
+  })
+
+  /**
+   * A PARTNERED pick states both sides plainly — `(W)` marks the wolf, and
+   * there is no glyph because there is no mode to explain.
+   */
+  it('states the teams for a partnered pick, and re-picking replaces them', () => {
+    const players = makePlayers([{ name: 'A' }, { name: 'B' }, { name: 'C' }, { name: 'D' }])
+    const round = makeRound({
+      players,
+      holes: 'front9',
+      games: [
+        { type: 'wolf', config: { pointCents: 100, rotation: ['p-a', 'p-b', 'p-c', 'p-d'] } },
+      ],
+    })
+    const log = new EventLog()
+    log.scoreByHole(round, { A: [4], B: [5], C: [5], D: [5] }, [1])
+    pick(log, 1, 'p-b')
+
+    const d = deriveRound(round, log.events).derivations.get('game-1')!
+    expect(d.requiredInputs()[0]!.answered).toEqual({
+      value: 'p-b',
+      lines: ['(W) A & B', 'vs.', 'C & D'],
+    })
+
+    // Changing the pick is one more event of the same kind — no retraction,
+    // which is why `answered` carries no `undoEventIds`. Last write wins.
+    pick(log, 1, 'p-c')
+    const after = deriveRound(round, log.events).derivations.get('game-1')!
+    expect(after.requiredInputs()[0]!.answered).toEqual({
+      value: 'p-c',
+      lines: ['(W) A & C', 'vs.', 'B & D'],
+    })
+    // and the money follows the correction: A+C (4) beat B,D (5)
+    expect(after.settlement.perPlayerCents).toEqual({
+      'p-a': 100,
+      'p-c': 100,
+      'p-b': -100,
+      'p-d': -100,
+    })
+  })
+
+  /**
+   * MAI-38, applied to Wolf. `ctx.finalized` goes true for EVERY hole the
+   * moment the round completes, so a group that finishes on the 2nd would have
+   * had holes 3–9 reported as halved — a result for holes nobody played.
+   */
+  it('never reports a result for a hole nobody played', () => {
+    const players = makePlayers([{ name: 'A' }, { name: 'B' }, { name: 'C' }, { name: 'D' }])
+    const round = makeRound({
+      players,
+      holes: 'front9',
+      games: [
+        { type: 'wolf', config: { pointCents: 100, rotation: ['p-a', 'p-b', 'p-c', 'p-d'] } },
+      ],
+    })
+    const log = new EventLog()
+    log.scoreByHole(round, { A: [4], B: [5], C: [5], D: [5] }, [1])
+    pick(log, 1, 'p-b')
+    // a pick can exist on a hole that never gets played — the wolf is prompted
+    // off the tee, and then the group walks in
+    pick(log, 2, 'lone')
+    log.append({ type: 'round/completed' })
+
+    const d = deriveRound(round, log.events).derivations.get('game-1')!
+    expect(d.holeSummary(1)).toEqual(['(W) A & B win with A\'s 4'])
+    // the teams, not a verdict
+    expect(d.holeSummary(2)).toEqual([':wolf: B (lone) vs A & C & D'])
+    // no pick either: just whose tee it is
+    expect(d.holeSummary(3)).toEqual(['Wolf: C'])
+    // and no money moved on the holes nobody played
+    expect(d.settlement.perPlayerCents).toEqual({
+      'p-a': 100,
+      'p-b': 100,
+      'p-c': -100,
+      'p-d': -100,
+    })
   })
 
   /**

@@ -1000,8 +1000,9 @@ describe('ScoringScreen — input chips', () => {
     await waitFor(async () => {
       expect(await eventStore.list(round.id)).toHaveLength(1)
     })
-    // settle: a second identical pick would land here if the guard were absent
-    await screen.findByText(/Ann/)
+    // settle: a second identical pick would land here if the guard were absent.
+    // The teams block appearing is what says the answer landed.
+    await screen.findByText('vs.')
     expect(await eventStore.list(round.id)).toHaveLength(1)
   })
 
@@ -1035,10 +1036,113 @@ describe('ScoringScreen — input chips', () => {
       'p-bob',
       'lone',
     ])
-    // and the prompt is gone, so the hole computed on the corrected pick
+    // the picker collapses, so the hole computed on the corrected pick — and
+    // what replaces it states the teams that correction produced
     await waitFor(() => {
       expect(screen.queryByRole('button', { name: /Lone Wolf/ })).not.toBeInTheDocument()
     })
+    expect(screen.getByText(/Ann \(lone\)/)).toBeInTheDocument()
+  })
+
+  /**
+   * MAI-84. The teams used to vanish the instant they were picked: nothing on
+   * the scoring screen said who was partnered with whom, and a mistapped
+   * partner was only reachable while it was still the round's LAST event (the
+   * header undo retracts the tail of the log, whatever it is).
+   */
+  it('states the teams after the pick, with the picker collapsed', async () => {
+    await wolfRound('round-input-teams')
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Bob' }))
+
+    // Ann is the wolf on hole 1 and rides with Bob
+    await screen.findByText('(W) Ann & Bob')
+    expect(screen.getByText('vs.')).toBeInTheDocument()
+    expect(screen.getByText('Cal & Dee')).toBeInTheDocument()
+    // no glyph on a partnered pick — there is no mode to explain
+    expect(document.querySelector('[data-glyph]')).toBeNull()
+    // and the options are put away until asked for
+    expect(screen.queryByRole('button', { name: /Lone Wolf/ })).not.toBeInTheDocument()
+  })
+
+  it('reopens the picker on Adjust, with the current answer engaged', async () => {
+    const round = await wolfRound('round-input-adjust')
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Bob' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Adjust' }))
+
+    const bob = screen.getByRole('button', { name: 'Bob' })
+    expect(bob.className).toContain('border-felt-500')
+    expect(screen.getByRole('button', { name: 'Cal' }).className).not.toContain('border-felt-500')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cal' }))
+
+    await screen.findByText('(W) Ann & Cal')
+    const events = await eventStore.list(round.id)
+    expect(events.map((e) => (e as { data: { choice: string } }).data.choice)).toEqual([
+      'p-bob',
+      'p-cal',
+    ])
+    // the picker closes again behind the corrected teams
+    expect(screen.queryByRole('button', { name: 'Adjust' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Cal' })).not.toBeInTheDocument()
+  })
+
+  /**
+   * `emitOnce` releases its key once the event lands, so a tap on the answer
+   * ALREADY in effect would otherwise append a second identical wolf/pick —
+   * inert in replay (last write wins) but permanent in an append-only log that
+   * syncs and exports.
+   */
+  it('writes nothing when the answer in effect is tapped again', async () => {
+    const round = await wolfRound('round-input-same')
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Bob' }))
+    await screen.findByText('(W) Ann & Bob')
+    fireEvent.click(screen.getByRole('button', { name: 'Adjust' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Bob' }))
+
+    await screen.findByText('(W) Ann & Bob')
+    expect(await eventStore.list(round.id)).toHaveLength(1)
+  })
+
+  /** The picture never carries the meaning alone (engine/core/glyphs.ts). */
+  it('draws the wolf in shades for a blind pick, beside the word', async () => {
+    await wolfRound('round-input-blind')
+
+    fireEvent.click(await screen.findByRole('button', { name: /Blind Wolf/ }))
+
+    await screen.findByText(/Ann \(blind\)/)
+    expect(document.querySelector('[data-glyph="wolf-shades"]')).not.toBeNull()
+  })
+
+  /**
+   * MAI-84. Opening the sheet used to lead with the running money and bury
+   * what had just happened underneath it. Universal rather than Wolf-only:
+   * `holeSummary` is a per-hole recap by contract for every game.
+   *
+   * Still the hole ON SCREEN, not the latest DECIDED one — recapping the hole
+   * you walked back to is the sheet's job; the latest decided hole is the
+   * pinned bar's.
+   */
+  it('leads the standings sheet with the hole recap, then the player cards', async () => {
+    const round = await wolfRound('round-sheet-order')
+    fireEvent.click(await screen.findByRole('button', { name: 'Bob' }))
+    await eventStore.append(round.id, [
+      { type: 'score/set', playerId: 'p-ann', hole: 1, gross: 4 },
+      { type: 'score/set', playerId: 'p-bob', hole: 1, gross: 5 },
+      { type: 'score/set', playerId: 'p-cal', hole: 1, gross: 5 },
+      { type: 'score/set', playerId: 'p-dee', hole: 1, gross: 5 },
+    ])
+
+    await userEvent.click(await screen.findByText(/Ann & Bob \+1/))
+
+    const recap = await screen.findByText(/win with Ann's/)
+    const firstCard = screen.getAllByText('+$1')[0]!
+    // the recap precedes the first player card in document order
+    expect(
+      recap.compareDocumentPosition(firstCard) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
   })
 })
 
