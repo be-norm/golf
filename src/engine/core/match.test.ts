@@ -9,6 +9,7 @@ import {
   scoreMatchHole,
   segmentSpans,
   sideStake,
+  spanFrom,
   stretchLabel,
   toPlayAfterIn,
   type MatchHoleResult,
@@ -81,38 +82,101 @@ describe('segmentSpans', () => {
     expect(spans.back).toEqual([])
     expect(spans.overall).toHaveLength(9)
   })
+
+  /**
+   * The halves are the nines WALKED, not the nines printed on the card. A group
+   * teeing off on 10 plays its front bet over 10–18 and its back bet over 1–9 —
+   * splitting by hole number would settle their first bet with the last nine
+   * holes they play, which is the carry-across-the-turn failure MAI-41 is for.
+   */
+  it('splits a wrapped 18 by the order the holes were played', () => {
+    const wrapped = [...Array.from({ length: 9 }, (_, i) => i + 10), ...Array.from({ length: 9 }, (_, i) => i + 1)]
+    const spans = segmentSpans(wrapped)
+    expect(spans.front).toEqual([10, 11, 12, 13, 14, 15, 16, 17, 18])
+    expect(spans.back).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9])
+    expect(spans.overall).toEqual(wrapped)
+  })
+})
+
+describe('a match over a wrapped round', () => {
+  const wrapped = [...Array.from({ length: 9 }, (_, i) => i + 10), ...Array.from({ length: 9 }, (_, i) => i + 1)]
+
+  /**
+   * THE bug this kit had before MAI-41, and the reason `spanFrom` exists.
+   *
+   * `filter(h => h >= startHole)` over `[10…18, 1…9]` starting at 10 counts
+   * NINE holes, not eighteen — so a side going 5 up through the first nine
+   * would be "5 up with 4 to play", i.e. closed out 5&4, while the group is
+   * standing on the first tee with half their match still ahead of them. Money
+   * moves on a close (MAI-38), so this paid out a bet that was still live.
+   */
+  it('seeds all eighteen holes as remaining, not the nine above the start hole', () => {
+    expect(newMatch(wrapped, 10).holesRemaining).toBe(18)
+  })
+
+  it('counts the undecided holes of a wrapped span, wherever the bet opened', () => {
+    // decided: the first five walked (10–14). A bet opened on the first tee has
+    // 13 left; one opened on hole 1 — the TENTH hole walked — has all 9 of its.
+    const results = new Map<number, MatchHoleResult>(
+      wrapped.map((h) => [h, [10, 11, 12, 13, 14].includes(h) ? 1 : null]),
+    )
+    expect(holesRemainingIn(wrapped, 10, results)).toBe(13)
+    expect(holesRemainingIn(wrapped, 1, results)).toBe(9)
+  })
+
+  it('takes the tail of a span in play order, and the whole span for a hole not in it', () => {
+    expect(spanFrom(wrapped, 17)).toEqual([17, 18, 1, 2, 3, 4, 5, 6, 7, 8, 9])
+    expect(spanFrom(wrapped, 99)).toEqual(wrapped)
+  })
 })
 
 describe('stretchLabel', () => {
   it('names the whole card 18, and a nine by which nine it was', () => {
-    expect(stretchLabel(Array.from({ length: 18 }, (_, i) => i + 1), 'full18')).toBe('18')
-    expect(stretchLabel([1, 2, 3, 4, 5, 6, 7, 8, 9], 'front9')).toBe('F9')
-    expect(stretchLabel([10, 11, 12, 13, 14, 15, 16, 17, 18], 'back9')).toBe('B9')
+    expect(stretchLabel(Array.from({ length: 18 }, (_, i) => i + 1))).toBe('18')
+    expect(stretchLabel([1, 2, 3, 4, 5, 6, 7, 8, 9])).toBe('F9')
+    expect(stretchLabel([10, 11, 12, 13, 14, 15, 16, 17, 18])).toBe('B9')
   })
 
   /**
-   * The holes played win over the round's declared range. A round set to
-   * `full18` on a 9-hole course plays nine (context.ts filters `holesPlayed`
-   * against the snapshot), and calling that "18" would be a bet named after
-   * holes that do not exist.
+   * The holes played are the WHOLE input now — the round's declared range used
+   * to come in beside them, and stopped being able to answer the question it
+   * was asked. `back9` said "starts on 10" only while a round had to; once one
+   * can tee off anywhere and wrap (MAI-41), the hole list is the only thing
+   * that knows which nine this is. A round set to `full18` on a 9-hole course
+   * still plays nine, and calling that "18" would name holes that don't exist.
    */
-  it('reads the holes actually played, not the range the round declared', () => {
-    expect(stretchLabel([1, 2, 3, 4, 5, 6, 7, 8, 9], 'full18')).toBe('F9')
+  it('reads the holes actually played', () => {
+    expect(stretchLabel([1, 2, 3, 4, 5, 6, 7, 8, 9])).toBe('F9')
+    expect(stretchLabel(Array.from({ length: 18 }, (_, i) => ((i + 9) % 18) + 1))).toBe('18')
+  })
+
+  /**
+   * A nine that is neither of the card's own nines gets the bare count.
+   *
+   * Unreachable from setup — the start-hole picker is offered on 18-hole rounds
+   * only (`holesForRound`) — so this exists for a loosely-validated import, and
+   * it is the honest answer: holes 15–5 are not the front nine and not the back
+   * nine, and naming them either would be a claim about the card that is false.
+   * DON'T "fix" this into F9 by reading `holesPlayed[0] <= 9`.
+   */
+  it('names a nine that is neither of the card nines as just a nine', () => {
+    expect(stretchLabel([15, 16, 17, 18, 1, 2, 3, 4, 5])).toBe('9')
   })
 
   /**
    * A round with no playable holes at all is reachable — a back-nine round
    * whose course snapshot has nine holes leaves `holesPlayed` empty
-   * (context.ts), and `importRound` validates games loosely enough to restore
-   * one. An empty span falls into the `<= 9` branch, so it is named as a NINE
-   * either way: B9 when the round said back nine, F9 otherwise — including for
-   * `full18`, where that is the swallowed empty case rather than a reading of
-   * the range. Such a round moves no money, so nothing rides on the label;
-   * pinning it keeps the next reader from "restoring" a rule this never had.
+   * (`holesForRound`), and `importRound` validates loosely enough to restore
+   * one. It is still named as a NINE rather than an 18.
+   *
+   * It used to answer B9/F9 off the declared range. It now answers '9',
+   * deliberately: a round with no holes has no nine to point at, and the label
+   * that named one was reading a field that no longer decides where a round
+   * starts. Such a round moves no money, so nothing rides on the string —
+   * pinning it keeps the next reader from restoring a rule this never had.
    */
-  it('names an unplayable round as a nine, whatever range it declared', () => {
-    expect(stretchLabel([], 'back9')).toBe('B9')
-    expect(stretchLabel([], 'full18')).toBe('F9')
+  it('names an unplayable round as a nine, naming no particular nine', () => {
+    expect(stretchLabel([])).toBe('9')
   })
 })
 

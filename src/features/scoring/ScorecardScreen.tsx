@@ -121,8 +121,13 @@ export function ScorecardScreen() {
     )
   }
 
-  const front = ctx.holesPlayed.filter((h) => h <= 9)
-  const back = ctx.holesPlayed.filter((h) => h > 9)
+  // The two nines as WALKED, not as numbered. A round teeing off on 10 gets
+  // 10–18 on top, which is the order the money ledger below already reads in
+  // and the order the front/back bets settled in — a card whose first table is
+  // the nine you finished on would disagree with both. Identical for a round
+  // starting on 1, and a nine still renders as a single table.
+  const front = ctx.holesPlayed.slice(0, 9)
+  const back = ctx.holesPlayed.slice(9)
   const activeLedger = activeGame ? (ledger?.get(activeGame.gameId) ?? []) : []
   const activeDerivation = activeGame ? derivations.get(activeGame.gameId) : undefined
 

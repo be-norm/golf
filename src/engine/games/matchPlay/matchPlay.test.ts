@@ -352,4 +352,54 @@ describe('match play — golden fixtures (hand-verified)', () => {
     // even though nothing about h7 itself is decided yet
     expect(d.holeSummary(7)).toEqual(['Match closes — A wins 5&3'])
   })
+
+  /**
+   * MP12: a match over a round that teed off on 10 has EIGHTEEN holes left in
+   * it, not nine — the bug MAI-41 had to fix before a start hole could ship.
+   *
+   * The span is [10…18, 1…9] and the match opens on its first hole, 10. The old
+   * `filter(h => h >= startHole)` counted the nine holes NUMBERED 10 and up, so
+   * `holesRemaining` was 9 from the outset and 6 after three holes.
+   *
+   * What that number drives is what makes it serious. `betValue` quotes it to
+   * the group ("6 to play" on the tee of a match with fifteen left), calls the
+   * match DORMIE the moment a lead equals it — A goes 3 up here, and 3 would
+   * have read as dormie against a remaining count of 3 — and `matchClosed`
+   * treats 0 as decided, which is what makes a bet stop being pressable and its
+   * money settle. Every one of those is a lie told nine holes early, and all of
+   * them stay perfectly zero-sum, which is why the fuzz never caught it.
+   */
+  it('MP12: an eighteen teed off on 10 counts eighteen holes, not nine', () => {
+    const players = makePlayers([{ name: 'A' }, { name: 'B' }])
+    const round = makeRound({ players, startHole: 10, games: [game()] })
+    const log = new EventLog()
+    // three holes WALKED — 10, 11, 12 — all to A. Fifteen still to play.
+    log.scoreByHole(round, { A: [4, 4, 4], B: [5, 5, 5] }, [10, 11, 12])
+    const d = deriveRound(round, log.events).derivations.get('game-1')!
+
+    expect(d.detailLines![0]!.value).toBe('A ↑3 · 15 to play')
+    // three up with fifteen left decides nothing, so nothing has been paid
+    expect(d.settlement.perPlayerCents).toEqual({ 'p-a': 0, 'p-b': 0 })
+  })
+
+  /**
+   * MP13: a wrapped round closes on the hole WALKED, however it is numbered.
+   *
+   * A wins every hole. Through the ninth walked (hole 18) A is 9 up with 9 to
+   * play — still live, since 9 is not MORE than 9. The tenth walked is hole 1,
+   * where A goes 10 up with 8 to play: decided, 10&8, on the lowest-numbered
+   * hole on the card. The margin and the money both belong there, and the note
+   * has to sit on that row rather than on the numerically-later hole 18.
+   */
+  it('MP13: closes on hole 1, the tenth hole walked', () => {
+    const players = makePlayers([{ name: 'A' }, { name: 'B' }])
+    const round = makeRound({ players, startHole: 10, games: [game()] })
+    const log = new EventLog()
+    log.scoreByHole(round, { A: flat(18, 4), B: flat(18, 5) })
+    const d = deriveRound(round, log.events).derivations.get('game-1')!
+
+    expect(d.detailLines![0]!.value).toBe('A wins 10&8')
+    expect(d.settlement.perPlayerCents).toEqual({ 'p-a': 500, 'p-b': -500 })
+    expect(d.holeSummary(1)).toContain('Match closes — A wins 10&8')
+  })
 })

@@ -52,7 +52,13 @@ export function applyTee(course: Course, tee: TeeSet | undefined): Course {
  * Used at tee-off only, to build `Round.courseSnapshot`: the library course stays
  * the 9-hole record it is, while the round scores as a normal 18 (so the full
  * handicap index applies via `courseHandicapForTee`, and every game engine —
- * Nassau's front/back, Wolf's rotation — works unchanged).
+ * Nassau's two nines, Wolf's rotation — works unchanged; both read positions in
+ * `ctx.holesPlayed`, and a doubled nine is walked 1–18 like any other card).
+ *
+ * A doubled nine is the one 18 that CANNOT take a start hole (MAI-41): the loop
+ * stamps below say which time round each number is, and an offset would leave
+ * the closing holes labelled "1st time round" when they were the second. Setup
+ * offers the picker on 18-hole CARDS only, which excludes this by construction.
  */
 export function doubleNine(course: Course): Course {
   if (course.holeCount !== 9 || course.holes.length !== 9) return course

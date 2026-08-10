@@ -1,11 +1,22 @@
 import type { RoundEvent } from './events'
 import { deriveGross } from './replay'
 import { allocateStrokes, applyAllowance } from './handicap'
-import type { Round, RoundHoles, Uuid } from './types'
+import { holesForRound } from './holes'
+import type { Round, Uuid } from './types'
 
 export interface RoundContext {
   round: Round
-  /** absolute hole numbers being played, in order */
+  /**
+   * Absolute hole numbers being played, IN PLAY ORDER — and the order carries
+   * the meaning, not the numbers. A round can tee off on any hole and wrap
+   * (MAI-41), so `[10…18, 1…9]` is an ordinary 18: hole 1 comes ninth from
+   * last, and `3 < 12` says nothing about which was played first.
+   *
+   * Every question of sequence — is this hole later? how many are left? which
+   * nine is this? — is answered by POSITION in this list. Anything comparing
+   * hole numbers to answer one of those is wrong on a wrapped round, and the
+   * property fuzz (`test/arbitraries.ts`) deals them.
+   */
   holesPlayed: readonly number[]
   /** playerId → (hole → gross); missing key = no score yet */
   gross: ReadonlyMap<Uuid, ReadonlyMap<number, number>>
@@ -84,18 +95,13 @@ export interface RoundContext {
   finalizedAt(hole: number): number | undefined
 }
 
-export function holesForRange(range: RoundHoles): number[] {
-  const start = range === 'back9' ? 10 : 1
-  const count = range === 'full18' ? 18 : 9
-  return Array.from({ length: count }, (_, i) => start + i)
-}
-
 /** Build the shared read-model every engine derives from. Events must already be effective. */
 export function buildRoundContext(round: Round, effective: readonly RoundEvent[]): RoundContext {
   const course = round.courseSnapshot
-  const holesPlayed = holesForRange(round.holes).filter((h) =>
-    course.holes.some((hole) => hole.number === h),
-  )
+  // The one read of `round.holes`/`round.startHole` in the whole engine. From
+  // here on the hole set IS this list, and its ORDER is the only thing that says
+  // which hole comes first (core/holes.ts).
+  const holesPlayed = holesForRound(round)
   const gross = deriveGross(effective)
 
   // Last write wins per (player, hole), the same rule `deriveGross` applies to

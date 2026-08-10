@@ -5,6 +5,7 @@ import '../../engine/games'
 import { getEngine, type GameEngine } from '../../engine/catalog'
 import { gameLabel } from '../../engine/label'
 import { courseHandicapForTee } from '../../engine/core/handicap'
+import { holeRangeLabel, holesForRound } from '../../engine/core/holes'
 import { applyTee, doubleNine } from '../../engine/core/tees'
 import type { Course, GameConfig, RoundHoles, TeeSet } from '../../engine/core/types'
 import { courseRepo, ownsCourse, playerRepo, roundRepo } from '../../db/repos'
@@ -79,6 +80,7 @@ export function SetupScreen() {
   const [picked, setPicked] = useState<Course>()
   const [teeSetId, setTeeSetId] = useState<string>()
   const [holes, setHoles] = useState<RoundHoles>('full18')
+  const [startHole, setStartHole] = useState(1)
   const [players, setPlayers] = useState<PlayerDraft[]>([])
   const [nameInput, setNameInput] = useState('')
   const [showGhin, setShowGhin] = useState(false)
@@ -129,6 +131,9 @@ export function SetupScreen() {
     setPicked(c)
     setTeeSetId(c.teeSets[0]?.id)
     setHoles(c.holeCount === 9 ? 'front9' : 'full18')
+    // a start hole belongs to the card it was picked on — hole 14 means nothing
+    // on a nine, and `playedStart` would only silently correct it
+    setStartHole(1)
     // …and move on. Tees and holes belong to the course you just chose, so
     // asking for them beneath a list of every OTHER course invited the reader
     // to think the list was still the question.
@@ -150,6 +155,28 @@ export function SetupScreen() {
   // stale selection (a 'back9' left over from an 18-hole record would tee off
   // with ZERO playable holes). Always play a range this course actually offers.
   const playedHoles = holeOptions.some(([v]) => v === holes) ? holes : holeOptions[0]![0]
+
+  /**
+   * Choosing a starting hole is offered on 18-hole rounds of an 18-hole card,
+   * and only there (MAI-41).
+   *
+   * Front 9 / Back 9 LOCK it — a nine already says where it starts, and letting
+   * the two disagree would put "Back 9" on a round beginning at hole 4. That
+   * lock is also what keeps the feature revertible: because `startHole` is
+   * stored only when it differs from the default, it can then only ever land on
+   * a `full18`, whose holes survive a revert as the same eighteen in a
+   * different order. See `holesForRound`.
+   *
+   * A nine played twice around is excluded for a different reason: `doubleNine`
+   * renumbers the card 1–18 and stamps which loop each number is, so an offset
+   * on top would label the closing holes "1st time round" when they were the
+   * second.
+   */
+  const canPickStart = course?.holeCount === 18 && playedHoles === 'full18'
+  // Self-correcting, like `playedHoles` above: a 14 picked under "18 holes"
+  // must not survive a tap on Back 9, and this is the value everything
+  // downstream reads — the preview line, teeOff, and the grid's own selection.
+  const playedStart = canPickStart ? startHole : playedHoles === 'back9' ? 10 : 1
 
   // A nine played twice around scores as an 18-hole course. `played` is the
   // course as it will actually be played — the handicap chips and the frozen
@@ -175,6 +202,18 @@ export function SetupScreen() {
       : playedHoles === 'full18'
         ? undefined
         : 'Nine of eighteen — everyone plays off half their course handicap.'
+
+  // The holes this round will actually walk, derived by the SAME function the
+  // engine will use at tee-off, off `played` (the doubled card where that
+  // applies) rather than `course` — so the sentence on this screen and the
+  // round that gets written cannot say different things.
+  const willPlay = played
+    ? holesForRound({ holes: playedHoles, startHole: playedStart, courseSnapshot: played })
+    : []
+  const startNote =
+    playedStart === (playedHoles === 'back9' ? 10 : 1) && playedStart === willPlay[0]
+      ? undefined
+      : `You'll play ${holeRangeLabel(willPlay)}.`
 
   const addPlayer = (name: string) => {
     const trimmed = name.trim()
@@ -338,6 +377,11 @@ export function SetupScreen() {
       courseSnapshot: applyTee(played, playedTee),
       teeSetId: playedTee.id,
       holes: playedHoles,
+      // Only when it differs from what the range already says, the `trackPutts`
+      // rule below — a round teeing off where its range starts stays byte-for-
+      // byte the shape every round had before MAI-41, and that is also what
+      // keeps `startHole` off any nine (see `holesForRound` on revert safety).
+      ...(playedStart !== (playedHoles === 'back9' ? 10 : 1) ? { startHole: playedStart } : {}),
       players: roundPlayers,
       games: gameConfigs,
       // Stored only when something needs it, so a round that isn't counting
@@ -474,6 +518,37 @@ export function SetupScreen() {
                 </div>
                 {holesNote && <p className="mt-2 text-xs text-stone-500">{holesNote}</p>}
               </div>
+              {course.holeCount === 18 && (
+                <div>
+                  <h2 className="font-display mb-2 text-[10px] uppercase text-stone-400">
+                    Start on hole
+                  </h2>
+                  {canPickStart ? (
+                    <div className="grid grid-cols-6 gap-1.5">
+                      {course.holes.map((h) => (
+                        <button
+                          key={h.number}
+                          onClick={() => setStartHole(h.number)}
+                          aria-pressed={playedStart === h.number}
+                          className={`py-2.5 text-lg ${
+                            playedStart === h.number
+                              ? 'pixel border-felt-300 bg-felt-700'
+                              : 'pixel border-stone-700 bg-stone-900/70'
+                          }`}
+                        >
+                          {h.number}
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    // A nine already says where it starts. Stating it beats 18
+                    // greyed buttons that can't be pressed — same information,
+                    // nothing to tab through.
+                    <p className="text-lg text-stone-300">Hole {playedStart}</p>
+                  )}
+                  {startNote && <p className="mt-2 text-xs text-stone-500">{startNote}</p>}
+                </div>
+              )}
             </>
           )}
         </section>

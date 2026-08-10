@@ -401,14 +401,20 @@ export function buildSummaryCard(
     }
   }
 
-  const cards = [
-    half(ctx.holesPlayed.filter((h) => h <= 9)),
-    half(ctx.holesPlayed.filter((h) => h > 9)),
-  ].filter((c): c is ScorecardHalf => c !== null)
+  // Split by play order, the same rule ScorecardScreen uses — the halves are
+  // the nines that were walked, so the top table is the nine the front bet was
+  // settled over however the card numbers them.
+  const cards = [half(ctx.holesPlayed.slice(0, 9)), half(ctx.holesPlayed.slice(9))].filter(
+    (c): c is ScorecardHalf => c !== null,
+  )
+
+  // Say where it teed off when that isn't where the range says. Without it the
+  // image shows an 18 whose first column is hole 10 and offers no reason why.
+  const from = round.startHole === undefined ? '' : ` from ${ctx.holesPlayed[0]}`
 
   return {
     course: round.courseSnapshot.name,
-    subtitle: `${ctx.holesPlayed.length} holes · ${formatDate(round.startedAt)}`,
+    subtitle: `${ctx.holesPlayed.length} holes${from} · ${formatDate(round.startedAt)}`,
     standings,
     settle,
     games,

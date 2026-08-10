@@ -97,6 +97,20 @@ way it was.
    Exception: courses imported from OpenGolfAPI keep the provider's UUID as their id —
    deliberate, so the same course dedupes across devices and the shared library
    (provenance lives in `source`/`source_id`). Tee-set ids are course-scoped slugs.
+9. **`ctx.holesPlayed` is the hole set, and its ORDER is the only thing that sequences it.**
+   A round can tee off on any hole and WRAP (`Round.startHole`, MAI-41): 18 from 10 plays
+   `[10…18, 1…9]` and finishes on 9. `holesForRound` (`core/holes.ts`) is the one producer,
+   the only reader of `round.holes`/`round.startHole`, and the one place a start hole the card
+   lacks falls back — imports validate neither field. **Everything downstream compares
+   POSITION in that list, never hole number.** `3 < 12` says nothing about which was played
+   first, so "is this hole later", "how many are left", "which nine is this" and "what is in
+   this prefix" are all index questions: `spanFrom`, `segmentSpans`' slice halves, Nassau's
+   `Bet.startIdx`, the ledger's `positionOf`. Getting one wrong is INVISIBLE TO ZERO-SUM —
+   Match Play counted nine holes remaining on a wrapped 18 and closed out early while still
+   balancing to the cent — so the enforcement is the property fuzz, which deals a random
+   `startHole` to every registered engine (`test/arbitraries.ts`). Setup offers the picker on
+   18-hole rounds only, and `startHole` is stored only when it differs from the range default;
+   those two together are what keep the change revertible (see `holesForRound`).
 
 ## Layout
 

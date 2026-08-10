@@ -68,21 +68,31 @@ export function buildHoleLedger(
   // close is explained and another deciding whether that row survives.
   const hasScore = (hole: number) => ctx.anyScored(hole)
 
+  // "EARLIER" IS A POSITION, NOT A LOWER NUMBER. A round can tee off on any
+  // hole and wrap (MAI-41), so on an 18 from 10 the prefix "as of hole 12" must
+  // exclude holes 1–9 — which are played LAST — and include 13–18, which are
+  // played before it. Comparing hole numbers put every delta on the wrong row.
+  const positionOf = new Map(holesPlayed.map((h, i) => [h, i]))
+
   // Round completion finalizes everything at once — attribute the money it
   // locks to the last hole anyone actually played (an early-finished round
   // must not show money moving on an unplayed hole 18).
-  const scoredHoles = events
-    .filter((e): e is Extract<RoundEvent, { type: 'score/set' }> => e.type === 'score/set')
-    .map((e) => e.hole)
-    .filter((h) => holesPlayed.includes(h))
-  const completionHole = scoredHoles.length
-    ? Math.max(...scoredHoles)
-    : holesPlayed[holesPlayed.length - 1]
-  for (const hole of holesPlayed) {
+  const scored = new Set(
+    events
+      .filter((e): e is Extract<RoundEvent, { type: 'score/set' }> => e.type === 'score/set')
+      .map((e) => e.hole),
+  )
+  const completionHole =
+    [...holesPlayed].reverse().find((h) => scored.has(h)) ?? holesPlayed[holesPlayed.length - 1]
+  const completionIdx = completionHole === undefined ? -1 : positionOf.get(completionHole)!
+  holesPlayed.forEach((hole, idx) => {
     const prefix = events.filter((e) => {
-      if (e.type === 'round/completed' || e.type === 'round/reopened') return hole >= completionHole!
+      if (e.type === 'round/completed' || e.type === 'round/reopened') return idx >= completionIdx
       const eh = eventHole(e)
-      return eh === null || eh <= hole
+      // An event naming a hole this round doesn't play stays in EVERY prefix
+      // (`?? -1`), because that is what the FULL derivation does — it filters
+      // nothing — and the last ledger row has to agree with the settle screen.
+      return eh === null || (positionOf.get(eh) ?? -1) <= idx
     })
     const { derivations } = deriveRound(round, prefix)
     const next = new Map<Uuid, Record<Uuid, number>>()
@@ -102,6 +112,6 @@ export function buildHoleLedger(
       next.set(game.gameId, cents)
     }
     prev = next
-  }
+  })
   return ledger
 }

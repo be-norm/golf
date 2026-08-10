@@ -156,6 +156,9 @@ export function RoundStartScreen() {
         <p className="mt-1 text-sm text-stone-400">
           {tee ? `${tee.name} ${tee.rating}/${tee.slope} · ` : ''}
           {HOLES_LABEL[round.holes] ?? round.holes}
+          {/* only when it isn't where the range already starts, so a Back 9
+              isn't redundantly told it begins on 10 */}
+          {round.startHole !== undefined && ` from ${round.startHole}`}
           {/* a nine played twice around — say so before anyone wonders what
               "hole 14" means on a 9-hole course */}
           {round.courseSnapshot.holes.some((h) => h.loop && h.loop.nth > 1) &&

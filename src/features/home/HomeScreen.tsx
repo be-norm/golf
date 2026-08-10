@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Link } from 'react-router'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { roundRepo } from '../../db/repos'
-import { holesForRange } from '../../engine/core/context'
+import { holesForRound } from '../../engine/core/holes'
 import { InstallHint } from '../../pwa/InstallHint'
 import { useAuth } from '../../auth/AuthProvider'
 import { AuthSheet } from '../auth/AuthSheet'
@@ -41,7 +41,7 @@ export function HomeScreen() {
             {liveRound.players.map((p) => p.name).join(' · ')}
           </p>
           <p className="mt-2 text-lg text-felt-200">
-            {holesForRange(liveRound.holes).length} holes ·{' '}
+            {holesForRound(liveRound).length} holes ·{' '}
             {liveRound.games.length} game{liveRound.games.length === 1 ? '' : 's'}
           </p>
         </Link>

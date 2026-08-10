@@ -875,4 +875,69 @@ describe('nassau — golden fixtures (hand-verified)', () => {
     // kind of line that gets an app argued with on the 5th tee.
     expect(d.holeSummary(5)).toContain('F9 press @5 starts (Ann 2 down on Press @3 → auto-press)')
   })
+
+  /**
+   * N14: a Nassau over a round that teed off on 10 — the ticket's whole point.
+   *
+   * Play order is [10…18, 1…9]. The three bets are the two nines WALKED plus
+   * the eighteen: the first bet covers 10–18, the second covers 1–9. Splitting
+   * by hole number instead would settle the group's opening bet with the last
+   * nine holes they play, which is exactly the "bets don't carry past the turn"
+   * complaint MAI-41 exists to fix.
+   *
+   * The nines are named ordinally here, not F9/B9. Holes 10–18 are not this
+   * round's front nine in any sense the group would recognise, and calling
+   * 1–9 "B9" while they walk it last would be a plain lie.
+   *
+   * Card: A wins the first three walked (10, 11, 12) → 1st9 +3. B wins the
+   * first two of the second nine (1, 2) → 2nd9 −2. Everything else halves.
+   *   1st9:  A +3 over nine holes. After hole 14 — the fifth walked — A is 3 up
+   *          with 4 left; decided when 3 > to-play, i.e. after hole 15 (3 left)
+   *          no, after 16 (2 left) yes → 3&2 on hole 16. A +$5.
+   *   2nd9:  B +2, decided on hole 7 (the sixteenth walked) with 2 left → 2&2?
+   *          B is 2 up after hole 2 with 7 left, so it runs on and closes when
+   *          2 > to-play → after hole 7, 2 left → no; after hole 8, 1 left → 2&1.
+   *          B +$5.
+   *   18:    A +3 −2 = +1 over eighteen → A wins 1 up at the end. A +$5.
+   * Net: A +$5, B −$5.
+   */
+  it('N14: an eighteen from the 10th tee bets the two nines it walked', () => {
+    const players = makePlayers([{ name: 'A' }, { name: 'B' }])
+    const round = makeRound({ players, startHole: 10, games: [game({})] })
+    const log = new EventLog()
+    // scored in PLAY order — scoreByHole reads the round's own hole list
+    log.scoreByHole(round, {
+      A: [4, 4, 4, 4, 4, 4, 4, 4, 4, 5, 5, 4, 4, 4, 4, 4, 4, 4],
+      B: [5, 5, 5, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4],
+    })
+    const d = deriveRound(round, log.events).derivations.get('game-1')!
+
+    expect(d.settlement.perPlayerCents).toEqual({ 'p-a': 500, 'p-b': -500 })
+    expect(d.summary).toBe(`1st9: A wins 3&2 · 2nd9: B wins 2&1 · 18: A wins ${up(1)}`)
+    // the first bet was decided on hole 16 — a hole in the opening nine walked
+    expect(d.holeSummary(16)).toContain('1st9 closes — A wins 3&2')
+  })
+
+  /**
+   * N15: a press offer on a wrapped round quotes holes that actually exist.
+   *
+   * Standing on hole 12 of a round that teed off on 10, the overall bet still
+   * has holes 12–18 and then 1–9 in front of it. The old phrasing took the
+   * first and last of the span and rendered "holes 12–9" — a range that reads
+   * backwards and names nothing. It is now the two runs it really is.
+   *
+   * The nine's own offer is unaffected: 12–18 is still one plain run.
+   */
+  it('N15: names a wrapped stretch as the runs it is, not "holes 12–9"', () => {
+    const players = makePlayers([{ name: 'A' }, { name: 'B' }])
+    const round = makeRound({ players, startHole: 10, games: [game({})] })
+    const log = new EventLog()
+    // B goes 2 down over the first two walked, so a press is on offer at 12
+    log.scoreByHole(round, { A: [4, 4], B: [5, 5] }, [10, 11])
+    const offers = deriveRound(round, log.events).derivations.get('game-1')!.availableActions!()
+
+    expect(offers.map((o) => o.label)).toEqual(['Press 1st9', 'Press 18'])
+    expect(offers[0]!.effect).toBe('New $5 bet · holes 12–18')
+    expect(offers[1]!.effect).toBe('New $5 bet · holes 12–18, 1–9')
+  })
 })

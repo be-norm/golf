@@ -1,5 +1,6 @@
 import fc from 'fast-check'
 import { EventLog, makePlayers, makeRound } from './harness'
+import { holesForRound } from '../core/holes'
 import type { HandicapSettings, Uuid } from '../core/types'
 
 /**
@@ -227,6 +228,20 @@ export function arbitraryRoundAndEvents(extra: readonly GameFuzz[] = []) {
       playerCount: fc.integer({ min: 2, max: 4 }),
       handicaps: fc.array(fc.integer({ min: -3, max: 24 }), { minLength: 4, maxLength: 4 }),
       net: fc.boolean(),
+      /**
+       * Where the round tees off, wrapping from there (MAI-41).
+       *
+       * THE enforcement of "compare position in `ctx.holesPlayed`, never hole
+       * number". Every engine's zero-sum, replay determinism and retraction
+       * equivalence now have to hold over a round where hole 3 is played
+       * fifteenth — and one drawn field covers all of them at once, which is
+       * why it belongs here rather than as a per-game golden.
+       *
+       * In the flat record with everything else, so fast-check shrinks it
+       * jointly and a real failure reports the SIMPLEST start hole that shows
+       * it — 1 wherever the rotation isn't the cause.
+       */
+      startHole: fc.integer({ min: 1, max: 18 }),
       // per hole per player: gross score or null (unscored)
       scores: fc.array(
         fc.array(fc.option(fc.integer({ min: 1, max: 12 }), { nil: null }), {
@@ -237,7 +252,7 @@ export function arbitraryRoundAndEvents(extra: readonly GameFuzz[] = []) {
       ),
       games: fc.tuple(...registry.map((g) => g.arbitrary())),
     })
-    .map(({ playerCount, handicaps, net, scores, games }) => {
+    .map(({ playerCount, handicaps, net, startHole, scores, games }) => {
       const players = makePlayers(
         PLAYER_NAMES.slice(0, playerCount).map((name, i) => ({ name, ch: handicaps[i]! })),
       )
@@ -265,12 +280,18 @@ export function arbitraryRoundAndEvents(extra: readonly GameFuzz[] = []) {
       const round = makeRound({
         players,
         holes: 'full18',
+        startHole,
         games: entries.map((e) => ({ type: e.type, config: e.game.config, handicap })),
       })
 
       const log = new EventLog()
+      // Score the holes IN PLAY ORDER, which on a wrapped round is not 1,2,3…
+      // `holeIdx` stays the position in the walk, so each game's per-hole seeds
+      // (Wolf's rotation, CTP's awards) line up with the hole the engine will
+      // put them on — the same index the engine rotates by.
+      const holesPlayed = holesForRound(round)
       scores.forEach((byPlayer, holeIdx) => {
-        const hole = holeIdx + 1
+        const hole = holesPlayed[holeIdx]!
         players.forEach((p, pi) => {
           const gross = byPlayer[pi]
           if (gross !== null && gross !== undefined) {
