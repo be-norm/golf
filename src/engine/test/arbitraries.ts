@@ -1,5 +1,5 @@
 import fc from 'fast-check'
-import { EventLog, makePlayers, makeRound } from './harness'
+import { EventLog, makeCourse, makePlayers, makeRound } from './harness'
 import { holesForRound } from '../core/holes'
 import type { HandicapSettings, Uuid } from '../core/types'
 
@@ -231,11 +231,14 @@ export function arbitraryRoundAndEvents(extra: readonly GameFuzz[] = []) {
       /**
        * Where the round tees off, wrapping from there (MAI-41).
        *
-       * THE enforcement of "compare position in `ctx.holesPlayed`, never hole
-       * number". Every engine's zero-sum, replay determinism and retraction
-       * equivalence now have to hold over a round where hole 3 is played
-       * fifteenth — and one drawn field covers all of them at once, which is
-       * why it belongs here rather than as a per-game golden.
+       * This carries the ORDER-BLIND properties — zero-sum, replay
+       * determinism, retraction equivalence — onto rounds where hole 3 is
+       * played fifteenth. Worth having, but be clear about what it cannot see:
+       * every one of those properties holds just as well when an engine
+       * confuses hole number with position. Match Play settled nine holes
+       * early and balanced to the cent (`matchPlay.test.ts` MP12).
+       *
+       * The property that CAN see it is `arbitraryRotationPair` below.
        *
        * In the flat record with everything else, so fast-check shrinks it
        * jointly and a real failure reports the SIMPLEST start hole that shows
@@ -308,5 +311,126 @@ export function arbitraryRoundAndEvents(extra: readonly GameFuzz[] = []) {
         })
       })
       return { round, log }
+    })
+}
+
+/** The default harness card, spelled out so a rotation can be built from it. */
+const PARS = [4, 4, 5, 3, 4, 4, 3, 5, 4, 4, 5, 3, 4, 4, 5, 3, 4, 4]
+const SIS = [5, 13, 1, 9, 17, 3, 11, 7, 15, 6, 2, 16, 10, 4, 8, 18, 12, 14]
+
+/**
+ * THE ENFORCEMENT of "compare position in `ctx.holesPlayed`, never hole number"
+ * (CLAUDE.md invariant 9) — the one property that can actually fail on it.
+ *
+ * Every other property in `replay.test.ts` is order-BLIND: zero-sum, replay
+ * determinism, retraction equivalence and "every line moves money" would all
+ * pass over engines that had confused a hole's number with its place in the
+ * round. Dealing a random `startHole` to them proves engines don't crash or
+ * unbalance on a wrapped round. It cannot prove they compute the right thing.
+ *
+ * So deal the SAME GOLF twice:
+ *
+ *   WRAPPED  — the ordinary card, teeing off on hole S, walking [S…18, 1…S-1].
+ *   STRAIGHT — a card RENUMBERED so that walking it 1…18 presents the very same
+ *              sequence of pars and stroke indexes, teeing off on 1.
+ *
+ * Position for position these are the same round of golf: the same player wins
+ * the same nth hole against the same par off the same stroke index. Only the
+ * NUMBERS painted on the tee markers differ. So every engine must settle them
+ * identically, and land each payment on the same hole of the walk.
+ *
+ * WHAT IT CATCHES, verified by reintroducing each bug and watching it fail:
+ * splitting nassau's nines by card number (`filter(h <= 9)`) — caught, the
+ * money comes apart; and the ledger's numeric prefix (`eventHole(e) <= hole`)
+ * — caught, the money lands on the wrong rows while the total stays right.
+ *
+ * WHAT IT DOES NOT CATCH, equally verified: the match kit's old
+ * `filter(h >= startHole)`. That one is real and user-facing but costs no
+ * money — `holesRemaining` reaches only the to-play count, the dormie test and
+ * the close NOTE, while every settlement is gated on `closedAt`, which comes
+ * from the always-positional `toPlayAfterIn`. Goldens hold that line
+ * (`matchPlay.test.ts` MP12), and a property comparing money never will.
+ *
+ * Money and its placement, deliberately — not prose. Hole numbers legitimately
+ * appear in narration (`Press @12`, "hole 7 halved"), so asserting on strings
+ * would fail for a perfectly correct engine.
+ */
+export function arbitraryRotationPair(extra: readonly GameFuzz[] = []) {
+  const registry = [...GAME_FUZZ, ...extra]
+  return fc
+    .record({
+      playerCount: fc.integer({ min: 2, max: 4 }),
+      handicaps: fc.array(fc.integer({ min: -3, max: 24 }), { minLength: 4, maxLength: 4 }),
+      net: fc.boolean(),
+      // 1 is included and is where fast-check shrinks to: at startHole 1 the
+      // two rounds are literally identical, so a counterexample that survives
+      // shrinking to 1 is a bug in something other than rotation.
+      startHole: fc.integer({ min: 1, max: 18 }),
+      scores: fc.array(
+        fc.array(fc.option(fc.integer({ min: 1, max: 12 }), { nil: null }), {
+          minLength: 4,
+          maxLength: 4,
+        }),
+        { minLength: 1, maxLength: 18 },
+      ),
+      games: fc.tuple(...registry.map((g) => g.arbitrary())),
+    })
+    .map(({ playerCount, handicaps, net, startHole, scores, games }) => {
+      const players = makePlayers(
+        PLAYER_NAMES.slice(0, playerCount).map((name, i) => ({ name, ch: handicaps[i]! })),
+      )
+      const ids = players.map((p) => p.playerId)
+      const handicap: HandicapSettings = net
+        ? { mode: 'net', allowancePct: 100, reference: 'offLow' }
+        : { mode: 'gross', allowancePct: 100, reference: 'absolute' }
+      const entries = registry
+        .map((g, i) => ({ g, build: games[i]! }))
+        .filter(({ g }) => g.eligible(playerCount))
+        .map(({ g, build }) => ({ type: g.type, game: build(ids) }))
+      const gameDefs = entries.map((e) => ({ type: e.type, config: e.game.config, handicap }))
+
+      const wrapped = makeRound({ players, holes: 'full18', startHole, games: gameDefs })
+      const walk = holesForRound(wrapped)
+      // The renumbered card: its hole i+1 IS the (i+1)th hole of the wrapped
+      // walk, carrying that hole's par and stroke index so handicap allocation
+      // and every par-sensitive game (CTP's par 3s) see the same round.
+      const straight = makeRound({
+        players,
+        holes: 'full18',
+        course: makeCourse(
+          walk.map((h) => PARS[h - 1]!),
+          walk.map((h) => SIS[h - 1]!),
+        ),
+        games: gameDefs,
+      })
+
+      const logFor = (holeAt: (idx: number) => number) => {
+        const log = new EventLog()
+        scores.forEach((byPlayer, holeIdx) => {
+          const hole = holeAt(holeIdx)
+          players.forEach((p, pi) => {
+            const gross = byPlayer[pi]
+            if (gross !== null && gross !== undefined) {
+              log.append({ type: 'score/set', playerId: p.playerId, hole, gross })
+            }
+          })
+          entries.forEach((e, gi) => {
+            if (!e.game.events) return
+            const gameId = wrapped.games[gi]!.gameId
+            // the SAME seed at the same position, addressed to whichever hole
+            // number that position carries on this card
+            for (const ev of e.game.events(hole, holeIdx)) {
+              log.append({ type: 'game/event', gameId, kind: ev.kind, data: ev.data })
+            }
+          })
+        })
+        return log
+      }
+
+      return {
+        startHole,
+        wrapped: { round: wrapped, log: logFor((i) => walk[i]!) },
+        straight: { round: straight, log: logFor((i) => i + 1) },
+      }
     })
 }

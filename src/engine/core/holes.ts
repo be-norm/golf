@@ -24,17 +24,25 @@ type HoleRange = Pick<Round, 'holes' | 'startHole' | 'courseSnapshot'>
  * without validating either field, so an archive can carry anything, and a
  * round the user can still open must not white-screen over it.
  *
- * Preserved from before start holes existed: a range naming holes this card
- * doesn't have returns EMPTY (a back nine on a 9-hole card). Match Play
- * documents and depends on that reading — an empty span is a match with no
- * holes, which settles nothing, rather than a crash.
+ * A range whose FIRST hole the card hasn't got returns EMPTY (a back nine on a
+ * 9-hole card), preserved from before start holes existed — Match Play
+ * documents and depends on that reading: an empty span is a match with no
+ * holes, which settles nothing, rather than a crash. A card that holds the
+ * start but runs out before the count does now WRAPS where the old snapshot
+ * filter truncated (a 'back9' on a hypothetical 14-hole card was 5 holes and is
+ * now 9). Only reachable through a hand-edited export — every course-building
+ * path mints 9 or 18 — but it is a change, not a preservation.
  *
  * REVERT SAFETY, and why setup only offers a start hole on an 18-hole round:
  * `startHole` is stored only when it differs from the default, so it can only
  * ever sit on a 'full18'. Revert MAI-41 and such a round re-derives as 1–18 —
- * the same eighteen holes in a different order. A nine could not survive that:
- * 'front9' + startHole 10 would re-derive as holes 1–9 against scores posted on
- * 10–18, i.e. an empty card in a synced archive.
+ * the same eighteen holes, in a different order, AND FOR DIFFERENT MONEY: Wolf
+ * assigns by position so every hole gets a new wolf (and the recorded picks
+ * then read as stale, sending settled holes back to pending), nassau's front
+ * bet moves to holes 1–9, and match close-outs land elsewhere. Recoverable,
+ * because every score is still in the log against a hole the round plays.
+ * A NINE would not be: 'front9' + startHole 10 re-derives as holes 1–9 against
+ * scores posted on 10–18, i.e. an empty card in a synced archive.
  */
 export function holesForRound(round: HoleRange): number[] {
   const card = round.courseSnapshot.holes.map((h) => h.number).sort((a, b) => a - b)

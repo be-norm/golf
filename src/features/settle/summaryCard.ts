@@ -410,7 +410,11 @@ export function buildSummaryCard(
 
   // Say where it teed off when that isn't where the range says. Without it the
   // image shows an 18 whose first column is hole 10 and offers no reason why.
-  const from = round.startHole === undefined ? '' : ` from ${ctx.holesPlayed[0]}`
+  // The DERIVED first hole, never the stored one — `holesForRound` falls back
+  // for a start hole the card hasn't got.
+  const teedOff = ctx.holesPlayed[0]
+  const from =
+    round.startHole !== undefined && teedOff !== undefined && teedOff !== 1 ? ` from ${teedOff}` : ''
 
   return {
     course: round.courseSnapshot.name,

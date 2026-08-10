@@ -361,13 +361,18 @@ describe('match play — golden fixtures (hand-verified)', () => {
    * `filter(h => h >= startHole)` counted the nine holes NUMBERED 10 and up, so
    * `holesRemaining` was 9 from the outset and 6 after three holes.
    *
-   * What that number drives is what makes it serious. `betValue` quotes it to
-   * the group ("6 to play" on the tee of a match with fifteen left), calls the
-   * match DORMIE the moment a lead equals it — A goes 3 up here, and 3 would
-   * have read as dormie against a remaining count of 3 — and `matchClosed`
-   * treats 0 as decided, which is what makes a bet stop being pressable and its
-   * money settle. Every one of those is a lie told nine holes early, and all of
-   * them stay perfectly zero-sum, which is why the fuzz never caught it.
+   * What that number drives is narration, and NO MONEY — worth being exact
+   * about, because it is why only a golden can hold this line. `betValue`
+   * quotes it to the group ("6 to play" on the tee of a match with fifteen
+   * left) and calls the match DORMIE the moment a lead equals it; `matchClosed`
+   * treats 0 as decided and so fires the "Match closes" note. Settlement never
+   * reads it — that is gated on `closedAt`, which comes from `toPlayAfterIn`
+   * and has always been positional.
+   *
+   * So the round settles correctly while telling the group something false
+   * about their own match, which every money-comparing property is blind to,
+   * including `arbitraryRotationPair`. Checked by reintroducing the bug: the
+   * whole property suite passes and this test is what fails.
    */
   it('MP12: an eighteen teed off on 10 counts eighteen holes, not nine', () => {
     const players = makePlayers([{ name: 'A' }, { name: 'B' }])

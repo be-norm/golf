@@ -105,12 +105,19 @@ way it was.
    POSITION in that list, never hole number.** `3 < 12` says nothing about which was played
    first, so "is this hole later", "how many are left", "which nine is this" and "what is in
    this prefix" are all index questions: `spanFrom`, `segmentSpans`' slice halves, Nassau's
-   `Bet.startIdx`, the ledger's `positionOf`. Getting one wrong is INVISIBLE TO ZERO-SUM —
-   Match Play counted nine holes remaining on a wrapped 18 and closed out early while still
-   balancing to the cent — so the enforcement is the property fuzz, which deals a random
-   `startHole` to every registered engine (`test/arbitraries.ts`). Setup offers the picker on
-   18-hole rounds only, and `startHole` is stored only when it differs from the range default;
-   those two together are what keep the change revertible (see `holesForRound`).
+   `Bet.startIdx`, the ledger's `positionOf`. **Getting one wrong is invisible to every
+   order-blind property** — zero-sum, determinism and retraction equivalence all hold while
+   nassau settles its front bet with the last nine holes walked. So the enforcement is
+   `arbitraryRotationPair` (`test/arbitraries.ts`): the same golf dealt twice, once wrapped
+   and once on a card renumbered so the identical walk reads 1–18, asserting every engine
+   settles both the same AND lands each payment on the same hole of the walk. It is checked
+   by reintroducing the bugs — it catches the nassau-halves and ledger-prefix ones. It does
+   NOT catch the match kit's old `filter(h >= startHole)`, because that costs no money:
+   `holesRemaining` drives the to-play count, the dormie test and the close note, while
+   settlement is gated on `closedAt` off the always-positional `toPlayAfterIn`. Narration
+   bugs of that shape need goldens (`matchPlay.test.ts` MP12), not properties. Setup offers
+   the picker on 18-hole rounds only, and `startHole` is stored only when it differs from the
+   range default; those two together are what keep the change revertible (`holesForRound`).
 
 ## Layout
 

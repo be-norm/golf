@@ -164,8 +164,9 @@ export function SetupScreen() {
    * the two disagree would put "Back 9" on a round beginning at hole 4. That
    * lock is also what keeps the feature revertible: because `startHole` is
    * stored only when it differs from the default, it can then only ever land on
-   * a `full18`, whose holes survive a revert as the same eighteen in a
-   * different order. See `holesForRound`.
+   * a `full18`, which a revert re-derives as the same eighteen holes (for
+   * different money, but recoverably) where a nine would derive holes nobody
+   * played. See `holesForRound`.
    *
    * A nine played twice around is excluded for a different reason: `doubleNine`
    * renumbers the card 1–18 and stamps which loop each number is, so an offset
@@ -211,7 +212,10 @@ export function SetupScreen() {
     ? holesForRound({ holes: playedHoles, startHole: playedStart, courseSnapshot: played })
     : []
   const startNote =
-    playedStart === (playedHoles === 'back9' ? 10 : 1) && playedStart === willPlay[0]
+    // nothing to promise when the range derives no holes at all — a card whose
+    // numbering can't seat the start tees off empty, and "You'll play ." is a
+    // broken sentence about it
+    willPlay.length === 0 || (playedStart === willPlay[0] && willPlay[0] === (playedHoles === 'back9' ? 10 : 1))
       ? undefined
       : `You'll play ${holeRangeLabel(willPlay)}.`
 

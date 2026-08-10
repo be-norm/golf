@@ -143,6 +143,15 @@ export function ScorecardScreen() {
 
       {front.length > 0 && half(front)}
       {back.length > 0 && half(back)}
+      {/* The tables are in WALK order, so on a round that teed off elsewhere the
+          top one starts at hole 10 and the second at hole 1. Say why: `loopOf`
+          only titles a doubled nine, which would otherwise leave this the one
+          surface that reorders silently — the share card states it too. */}
+      {ctx.holesPlayed[0] !== undefined && ctx.holesPlayed[0] !== 1 && back.length > 0 && (
+        <p className="text-center text-sm text-felt-300">
+          Teed off on {ctx.holesPlayed[0]} — top nine first
+        </p>
+      )}
       <p className="text-center text-sm text-stone-500">
         Tap a cell to correct that hole
         {activeGame?.handicap?.mode === 'net'
