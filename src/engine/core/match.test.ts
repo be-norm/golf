@@ -101,13 +101,16 @@ describe('stretchLabel', () => {
   })
 
   /**
-   * No holes at all falls back to the range, because it is the only thing left
-   * to answer from. A round can genuinely reach this — a back-nine round whose
-   * course snapshot has nine holes leaves `holesPlayed` empty (context.ts), and
-   * `importRound` validates games loosely enough to restore one. It moves no
-   * money either way; this pins the label rather than leaving it to chance.
+   * A round with no playable holes at all is reachable — a back-nine round
+   * whose course snapshot has nine holes leaves `holesPlayed` empty
+   * (context.ts), and `importRound` validates games loosely enough to restore
+   * one. An empty span falls into the `<= 9` branch, so it is named as a NINE
+   * either way: B9 when the round said back nine, F9 otherwise — including for
+   * `full18`, where that is the swallowed empty case rather than a reading of
+   * the range. Such a round moves no money, so nothing rides on the label;
+   * pinning it keeps the next reader from "restoring" a rule this never had.
    */
-  it('answers from the declared range when no holes are playable', () => {
+  it('names an unplayable round as a nine, whatever range it declared', () => {
     expect(stretchLabel([], 'back9')).toBe('B9')
     expect(stretchLabel([], 'full18')).toBe('F9')
   })

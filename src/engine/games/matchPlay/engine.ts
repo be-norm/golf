@@ -20,7 +20,7 @@ import { addLine, emptySettlement, type Settlement } from '../../core/money'
 import { duplicateInstanceProblems } from '../../core/setup'
 import { standingsFromSettlement } from '../../core/standings'
 import { firstName, joinNames, summaryString } from '../../core/summary'
-import { teamsSchema, nonEmptyPartitionProblems } from '../../core/teams'
+import { teamsSchema, nonEmptyPartitionProblems, rawTeams } from '../../core/teams'
 import type { GameConfig, HandicapSettings, Uuid } from '../../core/types'
 
 export const matchPlayConfigSchema = z.object({
@@ -196,11 +196,15 @@ function derive(
   }
 
   const holeSummary = (hole: number): string[] => {
-    const r = holeResult.get(hole)
-    if (r === null || r === undefined) return []
     const notes = holeNotes.get(hole) ?? []
-    // an unplayed hole finalized by round completion carries only its notes
-    if (!ctx.anyScored(hole)) return notes
+    const r = holeResult.get(hole)
+    // Notes first, and NOT gated on the hole being decided. `finalizedAt` can
+    // land the close note on the live frontier — h6 finalizes because somebody
+    // teed off on h7, so the money appears on h7's ledger row while h7 itself
+    // is still half-scored and undecided. Returning [] there is the exact
+    // failure the close note exists to prevent: a delta with no sentence.
+    // An unplayed hole finalized by round completion carries only its notes too.
+    if (r === null || r === undefined || !ctx.anyScored(hole)) return notes
     const side = r === 1 ? sideA : r === -1 ? sideB : null
     const winnerLine = side
       ? `${joinNames(side, nameOf)} ${side.length > 1 ? 'win' : 'wins'} the hole`
@@ -309,7 +313,16 @@ export const matchPlayEngine: GameEngine<MatchPlayConfig> = {
   validateSetup: (config, players, siblings) => {
     const dupes = duplicateInstanceProblems(config, siblings, MATCH_PLAY_NAME)
     const parsed = matchPlayConfigSchema.safeParse(config.config)
-    if (!parsed.success) return [...dupes, 'Invalid match play configuration']
+    if (!parsed.success) {
+      // An empty or double-booked side is now a SCHEMA failure (core/teams.ts),
+      // and setup reaches the empty one by accident — so say which side needs a
+      // player rather than falling through to the generic sentence.
+      const raw = rawTeams(config.config)
+      const problems = raw ? nonEmptyPartitionProblems(raw, players, MATCH_PLAY_NAME) : []
+      return problems.length > 0
+        ? [...dupes, ...problems]
+        : [...dupes, 'Invalid match play configuration']
+    }
     const teams = parsed.data.teams
     if (teams === null) {
       return players.length === 2

@@ -324,4 +324,32 @@ describe('match play — golden fixtures (hand-verified)', () => {
     expect(d.standings.find((s) => s.id === 'p-a')!.detail).toBe('↑2')
     expect(d.standings.find((s) => s.id === 'p-b')!.detail).toBe('↓2')
   })
+
+  /**
+   * MP11: the close note survives landing on the LIVE frontier.
+   *
+   * A takes h1–h4, h5 halves, then A alone posts h6 and A alone posts h7. h6
+   * finalizes because play moved on — B posted nothing, so A takes it and goes
+   * 5 up with three left: closed 5&3. But `finalizedAt(6)` is 7, because h7 is
+   * where a prefix replay first sees h6 as final, so that is the ledger row the
+   * ±$5 appears on. h7 is the half-scored frontier and therefore undecided, and
+   * a `holeSummary` that returned [] for an undecided hole would drop the one
+   * sentence explaining that money. Transient — it heals when B posts h7 — but
+   * the hole it opens is precisely the one `ctx.finalizedAt` exists to close.
+   */
+  it('MP11: a close landing on the live frontier still explains its money', () => {
+    const players = makePlayers([{ name: 'A' }, { name: 'B' }])
+    const round = makeRound({ players, holes: 'front9', games: [game()] })
+    const log = new EventLog()
+    log.scoreByHole(round, { A: flat(5, 4), B: [5, 5, 5, 5, 4] }, [1, 2, 3, 4, 5])
+    log.scoreByHole(round, { A: [4] }, [6])
+    log.scoreByHole(round, { A: [4] }, [7])
+    const d = deriveRound(round, log.events).derivations.get('game-1')!
+
+    expect(d.detailLines![0]!.value).toBe('A wins 5&3')
+    expect(d.settlement.perPlayerCents).toEqual({ 'p-a': 500, 'p-b': -500 })
+    // h7 is where the money lands, so h7 is where the sentence has to be —
+    // even though nothing about h7 itself is decided yet
+    expect(d.holeSummary(7)).toEqual(['Match closes — A wins 5&3'])
+  })
 })

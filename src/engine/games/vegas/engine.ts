@@ -6,7 +6,7 @@ import { addLine, emptySettlement, type Settlement } from '../../core/money'
 import { duplicateInstanceProblems } from '../../core/setup'
 import { standingsFromSettlement } from '../../core/standings'
 import { firstName, joinNames, latestHoleSummary, summaryString } from '../../core/summary'
-import { teamsSchema, teamPartitionProblems } from '../../core/teams'
+import { teamsSchema, teamPartitionProblems, rawTeams } from '../../core/teams'
 import type { GameConfig, HandicapSettings, RoundPlayer, Uuid } from '../../core/types'
 
 export const vegasConfigSchema = z.object({
@@ -296,7 +296,14 @@ export const vegasEngine: GameEngine<VegasConfig> = {
     const dupes = duplicateInstanceProblems(config, siblings, VEGAS_NAME)
     if (players.length !== 4) return [...dupes, `${VEGAS_NAME} needs exactly 4 players`]
     const parsed = vegasConfigSchema.safeParse(config.config)
-    if (!parsed.success) return [...dupes, 'Invalid vegas configuration']
+    if (!parsed.success) {
+      // An empty or double-booked side is now a SCHEMA failure (core/teams.ts),
+      // and setup reaches the empty one by accident — so keep vegas's own
+      // "2 players per side" rather than falling through to the generic line.
+      const raw = rawTeams(config.config)
+      const problems = raw ? teamPartitionProblems(raw, players, VEGAS_NAME) : []
+      return problems.length > 0 ? [...dupes, ...problems] : [...dupes, 'Invalid vegas configuration']
+    }
     return [...teamPartitionProblems(parsed.data.teams, players, VEGAS_NAME), ...dupes]
   },
   eventKinds: {},
