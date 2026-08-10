@@ -150,10 +150,20 @@ export interface GameDerivation {
   awards?(hole: number): Award[]
   settlement: Settlement
   /**
-   * Things the game has to SAY on the settle surface that are not money
-   * movements — "3 skins died unwon", say. Rendered as annotation, below the
-   * money and visibly apart from it.
+   * Things the game has to SAY that are not money movements — "3 skins died
+   * unwon", say. Rendered as annotation, below the money and visibly apart
+   * from it.
    *
+   * THREE SURFACES, and not all of them are the end of the round: the settle
+   * screen, the standings sheet mid-round, and the first-tee screen
+   * (`RoundStartScreen`). Most notes gate themselves on `ctx.completed`,
+   * because dead money is only dead once it can no longer be won — but that is
+   * each game's judgement, not this channel's rule. A note that is STRUCTURAL
+   * (Long Drive on a card with no par 5 can never pay anything) is true from
+   * the first tee and must not wait for the settle screen to be read out,
+   * which is the one moment the group can no longer act on it.
+   *
+
    * This channel exists so narration never has to be smuggled into
    * `settlement.lines`. That field is the record of money that MOVED; a
    * zero-cent row in it makes `lines.length === 0` — the model's "No money

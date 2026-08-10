@@ -241,6 +241,18 @@ export function RoundStartScreen() {
                 <p className="mt-1 text-sm text-stone-300">{chips.join(' · ')}</p>
               )}
 
+              {/* What the game has to say about THIS round before anyone tees
+                  off — today that is only a structurally inert bet ("no par 5s
+                  in the holes you are playing"), because every other note gates
+                  itself on `ctx.completed`. Generic on purpose: the screen
+                  learns no golf, it just prints whichever game had something to
+                  say (invariant #7). */}
+              {view.derivations.get(game.gameId)?.notes?.map((note) => (
+                <p key={note} className="mt-1.5 text-sm text-coin-400">
+                  {note}
+                </p>
+              ))}
+
               {/* teams / rotation, by name */}
               {engine.configFields.map((f) => {
                 if (f.kind === 'teams') {

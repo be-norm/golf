@@ -163,16 +163,18 @@ export function ConfigField({
             </button>
           </div>
           {custom && (
-            <div
-              role="group"
-              aria-label={gameName ? `${field.label} — ${gameName}` : field.label}
-              className="mt-2.5 flex flex-wrap gap-1.5"
-            >
+            // Deliberately NOT a `role="group"` wrapper, which is what a11y
+            // would otherwise want here: setup's chosen-game CARDS are the
+            // screen's groups, and the tests reach one game's controls by
+            // walking them positionally (`gameCards`). A nested group would
+            // silently shift that walk. So the disambiguation rides each button
+            // instead, exactly as the money stepper's label does.
+            <div className="mt-2.5 flex flex-wrap gap-1.5">
               {offered.map((hole) => (
                 <button
                   key={hole}
                   aria-pressed={picked.includes(hole)}
-                  aria-label={`hole ${hole}`}
+                  aria-label={gameName ? `hole ${hole} — ${gameName}` : `hole ${hole}`}
                   onClick={() => toggle(hole)}
                   className={`pixel-press size-11 text-lg ${
                     picked.includes(hole)

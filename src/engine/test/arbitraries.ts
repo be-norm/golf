@@ -192,6 +192,45 @@ const ctpFuzz: GameFuzz = {
 }
 
 /**
+ * The award channel's second game — and the first config in the catalog that
+ * names HOLE NUMBERS.
+ *
+ * WHICH IS WHY IT DRAWS ONLY `par5s` AND `all`, NEVER A NOMINATED LIST. Do not
+ * "complete" this by adding one: `arbitraryRotationPair` builds its straight
+ * card by RENUMBERING the wrapped one and hands the SAME config to both. Every
+ * other config in the catalog survives that — teams and rotations name players,
+ * CTP's eligibility is read off par, and the renumbered card carries the same
+ * pars in the same order. A list of hole numbers does not: at `startHole: 5`,
+ * `holes: [3, 8]` sits at walk positions 16 and 3 on one card and 2 and 7 on
+ * the other, while awards are seeded by POSITION — so the two settle
+ * differently and the property fails on a perfectly correct engine.
+ *
+ * The nominated list is covered by goldens instead (`longDrive.test.ts` L7/L8),
+ * which is where it belongs: nothing about it is order-blind.
+ */
+const longDriveFuzz: GameFuzz = {
+  type: 'longDrive',
+  eligible: (n) => n >= 2,
+  arbitrary: () =>
+    fc
+      .tuple(fc.boolean(), fc.array(fc.integer({ min: 0, max: 5 }), { minLength: 18, maxLength: 18 }))
+      .map(([everyHole, seeds]) => (ids: readonly Uuid[]) => ({
+        config: { stakeCents: 200, holes: everyHole ? 'all' : 'par5s' },
+        // one seed per hole: 0–3 award it to that player, 4 leave it
+        // unawarded, 5 award it to somebody who ISN'T in the round — which
+        // must move no money rather than pay a ghost. Not filtered to
+        // designated holes: an award on an ineligible one is inert, and the
+        // fuzz should keep proving it.
+        events: (hole: number, idx: number) => {
+          const seed = seeds[idx]!
+          if (seed === 4) return []
+          const playerId = seed === 5 ? 'p-nobody' : (ids[seed % ids.length] ?? ids[0]!)
+          return [{ kind: 'longDrive/award', data: { hole, playerId } }]
+        },
+      })),
+}
+
+/**
  * Order matters: it decides the order games sit in `round.games`, and so which
  * `gameId` each one gets. Keep new entries appended.
  */
@@ -203,6 +242,7 @@ export const GAME_FUZZ: readonly GameFuzz[] = [
   wolfFuzz,
   ctpFuzz,
   matchPlayFuzz,
+  longDriveFuzz,
 ]
 
 const PLAYER_NAMES = ['A', 'B', 'C', 'D'] as const
