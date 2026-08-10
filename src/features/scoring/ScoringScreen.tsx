@@ -225,6 +225,13 @@ export function ScoringScreen() {
         sideGames.flatMap((g) => derivations.get(g.gameId) ?? []),
       )
     : []
+  // Side bets whose position is live but not yet money — see `openBet`. Only
+  // ever rendered while the bar is collapsing side bets into a money aggregate
+  // that cannot hold them.
+  const openBets = sideGames.flatMap((game) => {
+    const openBet = derivations.get(game.gameId)?.openBet
+    return openBet ? [{ game, openBet }] : []
+  })
   const holeInputs = inputs.filter((i) => i.hole === currentHole)
 
   // Deliberately NOT a useMemo: `currentHole` is derived below the early
@@ -813,6 +820,25 @@ export function ScoringScreen() {
                   </span>
                 </div>
               )}
+              {/* A live bet the aggregate above CANNOT represent, because that
+                  row is money and this one is not money yet — the snake is
+                  worth $4 to somebody and settles at the end. Without it a
+                  collapsed round reads "no money yet" and says nothing about
+                  who is carrying it, which is the one thing the group wants off
+                  the bar. Only while collapsed: an uncollapsed game already has
+                  its own row. */}
+              {collapseSide &&
+                openBets.map(({ game, openBet }) => (
+                  <div
+                    key={game.gameId}
+                    className="flex items-baseline justify-between gap-3 py-0.5"
+                  >
+                    <span className="font-display text-[10px] uppercase text-felt-300">
+                      {gameLabel(game, round.games)}
+                    </span>
+                    <SummaryParts parts={[{ label: '', value: openBet }]} />
+                  </div>
+                ))}
             </button>
           )}
         </div>

@@ -257,6 +257,11 @@ function derive(
     summary: summaryString(summaryParts),
     summaryParts,
     detailLines,
+    // What the pinned bar's money aggregate cannot say: the snake is worth
+    // something to somebody right now, and settles nothing until the round
+    // ends. Dropped once it IS money — the aggregate reports that itself, and
+    // two rows saying it would just disagree about the phrasing.
+    ...(held && !owes && { openBet: `${nameOf.get(held.holderId)} · ${formatCents(held.potCents)}` }),
     holeSummary,
     requiredInputs: () => [],
     awards,
