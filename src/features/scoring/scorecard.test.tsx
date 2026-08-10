@@ -85,3 +85,57 @@ describe('ScorecardScreen — where the money moved', () => {
     expect(within(card).getByText('Bob -$2')).toBeInTheDocument()
   })
 })
+
+/**
+ * The grids, for a round that teed off somewhere other than the first tee
+ * (MAI-41). The tables run in WALK order, which is the order the ledger below
+ * them already reads in and the order the front/back bets settled in.
+ */
+describe('ScorecardScreen — a round that teed off elsewhere', () => {
+  async function renderCard(id: string, startHole?: number) {
+    const round = makeRound({
+      players: makePlayers([{ name: 'Ann' }, { name: 'Bob' }]),
+      ...(startHole !== undefined && { startHole }),
+      games: [{ type: 'skins', config: { stakeCents: 100, carryover: false } }],
+    })
+    round.id = id
+    await db.rounds.put(round)
+    await eventStore.append(round.id, [
+      { type: 'score/set', playerId: 'p-ann', hole: startHole ?? 1, gross: 4 },
+      { type: 'score/set', playerId: 'p-bob', hole: startHole ?? 1, gross: 5 },
+    ])
+    render(
+      <RouterProvider
+        router={createMemoryRouter(routes, { initialEntries: [`/round/${id}/card`] })}
+      />,
+    )
+    return round
+  }
+
+  /** the hole-number header cells of the nth table, in render order */
+  const holeRow = (n: number) =>
+    within(screen.getAllByRole('table')[n]!)
+      .getAllByRole('columnheader')
+      .map((th) => th.textContent)
+
+  it('puts the nine it walked first on top, and says so', async () => {
+    await renderCard('card-from-10', 10)
+    expect(await screen.findByText('Teed off on 10 — top nine first')).toBeInTheDocument()
+    expect(holeRow(0)).toEqual(['Hole', '10', '11', '12', '13', '14', '15', '16', '17', '18', '—'])
+    expect(holeRow(1)).toEqual(['Hole', '1', '2', '3', '4', '5', '6', '7', '8', '9', '—'])
+  })
+
+  /**
+   * An ordinary round is untouched — no note, and the card in the order every
+   * golfer reads one. This is the regression half: the split changed from a
+   * hole-number filter to a positional slice, and for every round played
+   * before MAI-41 the two are the same thing.
+   */
+  it('leaves an ordinary round exactly as it was', async () => {
+    await renderCard('card-from-1')
+    expect(await screen.findByText(/Tap a cell/)).toBeInTheDocument()
+    expect(screen.queryByText(/Teed off on/)).not.toBeInTheDocument()
+    expect(holeRow(0)).toEqual(['Hole', '1', '2', '3', '4', '5', '6', '7', '8', '9', '—'])
+    expect(holeRow(1)).toEqual(['Hole', '10', '11', '12', '13', '14', '15', '16', '17', '18', '—'])
+  })
+})

@@ -232,4 +232,55 @@ describe('RoundStartScreen', () => {
     expect(screen.queryByText(/CH \d+ ·/)).not.toBeInTheDocument()
     expect(screen.getByText('Ann · Bo')).toBeInTheDocument()
   })
+
+  /**
+   * Where the round teed off, when that isn't where its range already says
+   * (MAI-41). The first tee is the last screen before anyone hits a ball, so
+   * it is where a group would catch a mistapped start hole.
+   */
+  describe('the hole range line', () => {
+    const seed = async (
+      id: string,
+      opts: { holes?: 'front9' | 'back9' | 'full18'; startHole?: number },
+    ) => {
+      const round = makeRound({
+        players: makePlayers([{ name: 'Ann' }, { name: 'Bo' }]),
+        ...(opts.holes && { holes: opts.holes }),
+        ...(opts.startHole !== undefined && { startHole: opts.startHole }),
+        games: [{ type: 'skins', config: { stakeCents: 100, carryover: false } }],
+      })
+      round.id = id
+      await db.rounds.put(round)
+      renderStart(round.id)
+    }
+
+    it('names the hole an eighteen teed off on', async () => {
+      await seed('start-from-10', { startHole: 10 })
+      expect(await screen.findByText(/18 holes from 10/)).toBeInTheDocument()
+    })
+
+    it('says nothing extra when the round starts where its range says', async () => {
+      await seed('start-plain', {})
+      expect(await screen.findByText(/18 holes/)).toBeInTheDocument()
+      expect(screen.queryByText(/from/)).not.toBeInTheDocument()
+    })
+
+    /** a Back 9 already says it begins on 10 — announcing it again is noise */
+    it('does not tell a Back 9 that it begins on 10', async () => {
+      await seed('start-back9', { holes: 'back9', startHole: 10 })
+      expect(await screen.findByText(/Back 9/)).toBeInTheDocument()
+      expect(screen.queryByText(/from 10/)).not.toBeInTheDocument()
+    })
+
+    /**
+     * The DERIVED hole, never the stored one. `holesForRound` falls back for a
+     * start hole the card hasn't got, so a round imported with hole 40 plays
+     * 1–18 — and must not claim to have started on a hole nobody walked.
+     */
+    it('says nothing for a start hole the card has not got', async () => {
+      await seed('start-bogus', { startHole: 40 })
+      expect(await screen.findByText(/18 holes/)).toBeInTheDocument()
+      expect(screen.queryByText(/from 40/)).not.toBeInTheDocument()
+    })
+  })
 })
