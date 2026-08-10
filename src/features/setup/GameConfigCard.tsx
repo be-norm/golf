@@ -104,25 +104,39 @@ export function GameConfigCard({
    * must be on exactly one Nassau side" points at a Team A/B toggle the reader
    * cannot see and has no reason to look for.
    *
-   * THE ENGINE'S OWN WORDS WHENEVER IT HAS ANY, and `meta` only when it is
-   * silent. Two rules were tried and both were wrong in a way the other one
-   * fixes: showing only the roster note hid a duplicate-settings problem behind
-   * a missing player, which is independent of the roster and is exactly the
-   * "solve one problem to discover the next" wolf's `validateSetup` warns
-   * about; showing the note AND the problems said the same fact twice in two
-   * sentences, because five of seven engines lead with the player count in
-   * better words than `playerCountNote` can ("Wolf needs exactly 4 players").
+   * EVERYTHING, AND THE ROSTER LAST. Three rules were tried; the other two each
+   * omitted something, and omission is the only failure that matters here:
    *
-   * The fallback is not dead code. `isPlayable` reads `meta.minPlayers/
-   * maxPlayers` while Skins and CTP declare 2–8 and validate only the lower
-   * bound, so a ninth player leaves the engine with nothing to say about a
-   * game its own catalogue entry calls unplayable. That gap belongs to the
-   * engines; until it closes, the card is the only thing that mentions it —
+   * - Roster note INSTEAD of the problems hid a duplicate-settings complaint
+   *   behind a missing player. A duplicate is independent of the roster, so
+   *   that is the "solve one problem to discover the next" wolf's
+   *   `validateSetup` warns about, in prose, four lines above the bug.
+   * - Problems, with the note only when they are SILENT, hid the roster behind
+   *   any complaint that doesn't name it. Nassau at five players reports one
+   *   unassigned player and nothing else — so the card sent the reader to
+   *   assign them, the message cleared, and "Needs 2–4 players" appeared only
+   *   then. Worse than redundant: no assignment makes a five-player Nassau
+   *   playable, so the intermediate instruction was false.
+   *
+   * What that costs is a restatement whenever an engine names the count in its
+   * own words (`wolf`, `vegas`, `sixPoint` always; `nassau` and `matchPlay` on
+   * their teams-less path; `skins` and `ctp` below their minimum): "Wolf needs
+   * exactly 4 players" with "Needs 4 players" beneath it. Cheap, and the note
+   * goes LAST so the two land together and read as one fact rather than two
+   * complaints. Removing it properly needs `validateSetup` to return something
+   * a caller can TELL APART — a tagged problem rather than a bare string — and
+   * that is an engine-contract change, not a card's decision.
+   *
+   * The note is not decoration in the silent case either: `isPlayable` reads
+   * `meta.minPlayers/maxPlayers` while Skins and CTP declare 2–8 and validate
+   * only the lower bound, so a ninth player leaves the engine with nothing to
+   * say about a game its own catalogue entry calls unplayable. That gap is the
+   * engines'; until it closes the card is the only thing that mentions it,
    * which is why this says what is WRONG here rather than what is blocking
    * tee-off. The list beside the button speaks for the button.
    */
   const stranded = !isPlayable(engine, players.length)
-  const wrong = problems.length > 0 ? problems : stranded ? [playerCountNote(engine)] : []
+  const wrong = stranded ? [...problems, playerCountNote(engine)] : problems
   const stake = stakeSummary(engine, config)
   // scoped per instance: the screen renders several of these, and two panels
   // sharing an id would point every aria-controls at the same element

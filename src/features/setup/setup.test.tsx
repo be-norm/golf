@@ -533,15 +533,15 @@ describe('SetupScreen — choosing games', () => {
   })
 
   /**
-   * The card speaks in the ENGINE's words whenever the engine has any. Two
-   * rules were tried on the way here and each is the other's counter-example:
-   * showing only the card's own roster note hid a duplicate-settings problem
-   * behind a missing player — independent of the roster, and exactly the "solve
-   * one problem to discover the next" wolf's `validateSetup` warns about — and
-   * showing both said the same fact twice, because Wolf's own sentence already
-   * names the count. Two Wolfs at three players is where both went wrong.
+   * A card states EVERYTHING wrong with its game. Two narrower rules were tried
+   * and each omitted something the other kept, which is why both of these
+   * assertions live in one test: showing only the roster note hid the
+   * duplicate — independent of the roster, and exactly the "solve one problem
+   * to discover the next" wolf's `validateSetup` warns about — while showing
+   * the problems and falling back to the note only in SILENCE hid the roster
+   * behind any complaint that doesn't name it (see the Nassau test below).
    */
-  it('says everything wrong with a game, and says the roster once', async () => {
+  it('states a duplicate and a bad roster on the same card', async () => {
     await pickPenmar()
     await cont() // → players
     for (const name of ['Ann', 'Ben', 'Cal', 'Dee']) await addPlayer(name, 10)
@@ -560,17 +560,40 @@ describe('SetupScreen — choosing games', () => {
       expect(within(card).getByText(/Wolf needs exactly 4 players/)).toBeInTheDocument()
       // the duplicate too, which no number of players fixes
       expect(within(card).getByText(/identical settings/)).toBeInTheDocument()
-      // and NOT the card's own paraphrase of the count beside the engine's
-      expect(within(card).queryByText('Needs 4 players')).toBeNull()
     }
   })
 
   /**
-   * …and `meta` when the engine is silent, which is not dead code: `isPlayable`
-   * reads `meta.minPlayers/maxPlayers`, and Skins declares 2–8 while validating
-   * only the lower bound. A ninth player leaves the engine with nothing to say
-   * about a game its own catalogue entry calls unplayable, so the card is the
-   * only thing that mentions it.
+   * The roster line is stated even when the engine is complaining about
+   * something else, and this is the case that forced it: Nassau at five players
+   * reports one unassigned player and nothing more. Told only that, the reader
+   * assigns them, the message clears, and "Needs 2–4 players" turns up only
+   * then — an instruction that was false when it was given, because no team
+   * assignment makes a five-player Nassau playable.
+   */
+  it('states the roster on a card whose engine is complaining about something else', async () => {
+    await pickPenmar()
+    await cont() // → players
+    for (const name of ['Ann', 'Ben', 'Cal', 'Dee']) await addPlayer(name, 10)
+    await cont() // → games
+    await pickGame('Nassau') // seeds a 2v2, so nothing is wrong yet
+
+    const card = () => within(gameCards()[0]!)
+    expect(card().queryByText(/Needs 2–4 players/)).toBeNull()
+
+    await userEvent.click(screen.getByText('← Back'))
+    await addPlayer('Eve', 10)
+    await cont()
+
+    expect(card().getByText(/exactly one nassau side/)).toBeInTheDocument()
+    expect(card().getByText(/Needs 2–4 players/)).toBeInTheDocument()
+  })
+
+  /**
+   * The roster line is also all there is when the engine says nothing:
+   * `isPlayable` reads `meta.minPlayers/maxPlayers`, and Skins declares 2–8
+   * while validating only the lower bound. A ninth player leaves the engine
+   * with nothing to say about a game its own catalogue entry calls unplayable.
    */
   it('falls back to the catalogue when the engine has nothing to say', async () => {
     await pickPenmar()
