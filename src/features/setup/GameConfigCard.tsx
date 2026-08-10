@@ -98,23 +98,31 @@ export function GameConfigCard({
   const config = (draft.config ?? {}) as Record<string, unknown>
   const setConfigValue = (key: string, value: unknown) =>
     onChange({ ...draft, config: { ...config, [key]: value } })
-  // A game can be stranded after the fact — chosen with four players, then a
-  // player dropped on the way back through step 1. The card should say so on
-  // its own rather than leaving the reason somewhere else on the screen.
-  //
-  // It LEADS the engine's own complaints, because it is usually their cause:
-  // Nassau with five players reports an unassigned player, which is true and
-  // fixable only by dropping one. It never REPLACES them — a duplicate-settings
-  // problem is independent of the roster, and hiding it until the roster is
-  // fixed makes the user solve one problem to discover the next (the rule
-  // wolf's `validateSetup` states in prose, and this used to break).
-  //
-  // Not all of these block tee-off, so this says what is WRONG with the game
-  // rather than what is stopping you: `meta.minPlayers/maxPlayers` is the
-  // card's own reading, and Skins declares 2–8 while validating only the lower
-  // bound. The list beside the Tee off button is the one that speaks for it.
+  /**
+   * What is wrong with this game, said on the card — because the fix is a
+   * control INSIDE it, and told only at the foot of the screen, "every player
+   * must be on exactly one Nassau side" points at a Team A/B toggle the reader
+   * cannot see and has no reason to look for.
+   *
+   * THE ENGINE'S OWN WORDS WHENEVER IT HAS ANY, and `meta` only when it is
+   * silent. Two rules were tried and both were wrong in a way the other one
+   * fixes: showing only the roster note hid a duplicate-settings problem behind
+   * a missing player, which is independent of the roster and is exactly the
+   * "solve one problem to discover the next" wolf's `validateSetup` warns
+   * about; showing the note AND the problems said the same fact twice in two
+   * sentences, because five of seven engines lead with the player count in
+   * better words than `playerCountNote` can ("Wolf needs exactly 4 players").
+   *
+   * The fallback is not dead code. `isPlayable` reads `meta.minPlayers/
+   * maxPlayers` while Skins and CTP declare 2–8 and validate only the lower
+   * bound, so a ninth player leaves the engine with nothing to say about a
+   * game its own catalogue entry calls unplayable. That gap belongs to the
+   * engines; until it closes, the card is the only thing that mentions it —
+   * which is why this says what is WRONG here rather than what is blocking
+   * tee-off. The list beside the button speaks for the button.
+   */
   const stranded = !isPlayable(engine, players.length)
-  const wrong = stranded ? [playerCountNote(engine), ...problems] : problems
+  const wrong = problems.length > 0 ? problems : stranded ? [playerCountNote(engine)] : []
   const stake = stakeSummary(engine, config)
   // scoped per instance: the screen renders several of these, and two panels
   // sharing an id would point every aria-controls at the same element

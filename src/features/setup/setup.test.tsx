@@ -533,14 +533,15 @@ describe('SetupScreen — choosing games', () => {
   })
 
   /**
-   * The roster note LEADS the engine's own problems and does not replace them.
-   * It replaced them at first, which quietly reintroduced the thing wolf's
-   * `validateSetup` states in prose: a duplicate is independent of the roster,
-   * so hiding it until the roster is fixed makes you solve one problem to
-   * discover the next. Two Wolfs at three players is that case exactly — the
-   * summary listed the duplicate while neither card would admit to it.
+   * The card speaks in the ENGINE's words whenever the engine has any. Two
+   * rules were tried on the way here and each is the other's counter-example:
+   * showing only the card's own roster note hid a duplicate-settings problem
+   * behind a missing player — independent of the roster, and exactly the "solve
+   * one problem to discover the next" wolf's `validateSetup` warns about — and
+   * showing both said the same fact twice, because Wolf's own sentence already
+   * names the count. Two Wolfs at three players is where both went wrong.
    */
-  it('states a duplicate on the card even while the roster is wrong', async () => {
+  it('says everything wrong with a game, and says the roster once', async () => {
     await pickPenmar()
     await cont() // → players
     for (const name of ['Ann', 'Ben', 'Cal', 'Dee']) await addPlayer(name, 10)
@@ -556,11 +557,35 @@ describe('SetupScreen — choosing games', () => {
 
     expect(gameCards()).toHaveLength(2)
     for (const card of gameCards()) {
-      // the roster first, because it is why the rest of the card is unusable
-      expect(within(card).getByText(/Needs 4 players/)).toBeInTheDocument()
-      // …and the duplicate too, which no number of players fixes
+      expect(within(card).getByText(/Wolf needs exactly 4 players/)).toBeInTheDocument()
+      // the duplicate too, which no number of players fixes
       expect(within(card).getByText(/identical settings/)).toBeInTheDocument()
+      // and NOT the card's own paraphrase of the count beside the engine's
+      expect(within(card).queryByText('Needs 4 players')).toBeNull()
     }
+  })
+
+  /**
+   * …and `meta` when the engine is silent, which is not dead code: `isPlayable`
+   * reads `meta.minPlayers/maxPlayers`, and Skins declares 2–8 while validating
+   * only the lower bound. A ninth player leaves the engine with nothing to say
+   * about a game its own catalogue entry calls unplayable, so the card is the
+   * only thing that mentions it.
+   */
+  it('falls back to the catalogue when the engine has nothing to say', async () => {
+    await pickPenmar()
+    await cont() // → players
+    for (let i = 0; i < 8; i++) await addPlayer(`P${i}`, 10)
+    await cont() // → games
+    await pickGame('Skins')
+
+    expect(within(gameCards()[0]!).queryByText(/Needs 2–8 players/)).toBeNull()
+
+    await userEvent.click(screen.getByText('← Back'))
+    await addPlayer('P8', 10)
+    await cont()
+
+    expect(within(gameCards()[0]!).getByText(/Needs 2–8 players/)).toBeInTheDocument()
   })
 
   /**

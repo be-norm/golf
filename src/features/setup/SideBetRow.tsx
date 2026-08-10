@@ -63,8 +63,9 @@ export function SideBetRow({
     onChange({ ...draft, config: { ...config, [key]: value } })
   const stake = stakeSummary(engine, config)
   const stranded = !isPlayable(engine, players.length)
-  // roster first, then the engine's own — never instead of them, see the main card
-  const wrong = stranded ? [playerCountNote(engine), ...problems] : problems
+  // the engine's own words when it has any, `meta` when it is silent — see the
+  // main card, where the two rules this replaced are written out
+  const wrong = problems.length > 0 ? problems : stranded ? [playerCountNote(engine)] : []
   // scoped per instance — see GameConfigCard's `panelId`
   const panelId = useId()
 
