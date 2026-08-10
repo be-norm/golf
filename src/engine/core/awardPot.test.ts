@@ -159,8 +159,6 @@ describe('deriveAwardPot — the money', () => {
     expect(pot.holeResults[0]).toEqual({ hole: 2, kind: 'won', winnerId: 'p-d' })
   })
 
-  /** An award naming somebody outside the round can only come from a corrupt or
-   *  hand-edited log. It must move no money rather than pay a ghost. */
   /**
    * A ONE-PLAYER ROUND, which every `validateSetup` refuses and `importRound`
    * accepts (`.min(1)` on the roster). The winner collects from nobody, so the
@@ -183,6 +181,8 @@ describe('deriveAwardPot — the money', () => {
     expect(pot.settlement.perPlayerCents).toEqual({ 'p-a': 0 })
   })
 
+  /** An award naming somebody outside the round can only come from a corrupt or
+   *  hand-edited log. It must move no money rather than pay a ghost. */
   it('an award naming a non-player is inert', () => {
     const round = potRound()
     const log = new EventLog()
