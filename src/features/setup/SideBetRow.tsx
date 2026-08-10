@@ -1,12 +1,14 @@
-import { useState } from 'react'
+import { useId } from 'react'
 import type { GameEngine } from '../../engine/catalog'
 import {
   ConfigField,
   isPlayable,
   playerCountNote,
   stakeSummary,
+  statesPlayerCount,
   type FieldPlayer,
 } from './ConfigField'
+import { DisclosureArrow } from './DisclosureArrow'
 import { HandicapControls } from './HandicapControls'
 import type { GameDraft } from './GameConfigCard'
 
@@ -16,34 +18,65 @@ interface Props {
   label: string
   players: FieldPlayer[]
   draft: GameDraft
+  /** This game's own `validateSetup` problems — see GameConfigCard's `problems`. */
+  problems: string[]
+  /** Whether the settings are showing. Owned by SetupScreen — see `collapsed`. */
+  open: boolean
+  onToggle: () => void
   onChange: (draft: GameDraft) => void
   onRemove: () => void
   onRules: () => void
 }
 
 /**
- * A chosen SIDE BET: one line — name, stake, disclosure — that expands in place
- * into the same fields a main game gets.
+ * A chosen SIDE BET: name, stake and settings, foldable to a single line.
  *
- * Side bets are numerous by nature (the catalogue has ~20 of them queued), and
- * a full config card each would make a round with four of them a scrolling
- * screen before a ball is struck. The stake is shown because it is what people
- * actually name the bet by; everything else is one tap away.
+ * It used to arrive FOLDED, on a density argument — side bets are numerous by
+ * nature (~20 in the catalogue) and four full cards is a scrolling screen
+ * before a ball is struck. That was the wrong trade (MAI-89): a row whose
+ * settings are behind a tap reads as a row with no settings, so groups teed off
+ * on a default stake they never knew was theirs to change. Discoverability
+ * wins; the fold is still here, for once you are done with the bet.
+ *
+ * This is not the scoring bar's rule inverted. That bar folds N side bets into
+ * one line only when folding SAVES a row (CLAUDE.md, `shouldGroupSideBets`) —
+ * it is a readout, and its job is to compress. This is an editor, and its job
+ * is to show you what you can change.
  *
  * The expanded body renders `ConfigField` and `HandicapControls` — the same
  * components the main card uses, not compact variants of them. A side bet is an
  * ordinary peer game (invariant #7), so its editor cannot be a lesser one.
  */
-export function SideBetRow({ engine, label, players, draft, onChange, onRemove, onRules }: Props) {
-  const [open, setOpen] = useState(false)
+export function SideBetRow({
+  engine,
+  label,
+  players,
+  draft,
+  problems,
+  open,
+  onToggle,
+  onChange,
+  onRemove,
+  onRules,
+}: Props) {
   const config = (draft.config ?? {}) as Record<string, unknown>
   const setConfigValue = (key: string, value: unknown) =>
     onChange({ ...draft, config: { ...config, [key]: value } })
   const stake = stakeSummary(engine, config)
   const stranded = !isPlayable(engine, players.length)
+  // every problem, plus the roster unless one of them already states it — see
+  // the main card, where the rules this replaced are written out with what
+  // each of them omitted
+  const wrong =
+    stranded && !statesPlayerCount(engine, problems)
+      ? [...problems, playerCountNote(engine)]
+      : problems
+  // scoped per instance — see GameConfigCard's `panelId`
+  const panelId = useId()
 
   return (
-    <div className="pixel border-felt-700 bg-felt-900/40">
+    // a named group, for the same reason the main card is one
+    <div role="group" aria-label={label} className="pixel border-felt-700 bg-felt-900/40">
       <div className="flex items-center gap-2 px-3 py-2.5">
         <button
           aria-label={`remove ${label}`}
@@ -55,31 +88,26 @@ export function SideBetRow({ engine, label, players, draft, onChange, onRemove, 
         <button
           className="flex min-w-0 flex-1 items-center justify-between gap-3 text-left"
           aria-expanded={open}
-          onClick={() => setOpen((v) => !v)}
+          aria-controls={open ? panelId : undefined}
+          onClick={onToggle}
         >
           <span className="min-w-0 truncate font-medium">{label}</span>
           <span className="flex shrink-0 items-center gap-2">
-            {stake && <span className="tabular-nums text-stone-300">{stake}</span>}
-            {/* ▶ rotated, rather than a second glyph: the pixel display font
-                has no ▾/▸ and paints them as invisible specks, while ▶ is
-                already proven here (HoleArrow, "Rules ▶"). */}
-            <span
-              className={`font-display inline-block text-[10px] text-felt-400 transition-transform ${
-                open ? 'rotate-90' : ''
-              }`}
-            >
-              ▶
-            </span>
+            {!open && stake && <span className="tabular-nums text-stone-300">{stake}</span>}
+            <DisclosureArrow open={open} />
           </span>
         </button>
       </div>
 
-      {stranded && (
-        <p className="px-3 pb-2 text-xs text-flag-500">{playerCountNote(engine)}</p>
-      )}
+      {/* outside the fold — see the main card */}
+      {wrong.map((problem) => (
+        <p key={problem} className="px-3 pb-2 text-xs text-flag-500">
+          {problem}
+        </p>
+      ))}
 
       {open && (
-        <div className="space-y-4 border-t border-felt-800/60 px-3 py-3">
+        <div id={panelId} className="space-y-4 border-t border-felt-800/60 px-3 py-3">
           {engine.configFields.map((field) => (
             <ConfigField
               key={field.key}

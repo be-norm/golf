@@ -99,6 +99,18 @@ async function pickGame(name: string, section: 'main' | 'side' = 'main') {
   await userEvent.click(await within(await picker()).findByText(name))
 }
 
+/**
+ * The chosen-game cards, in screen order: main games first, then side bets.
+ *
+ * Every card is a named group (MAI-89) and nothing else on the screen is one,
+ * so this is the way to reach one game's controls now that they are all mounted
+ * at once. Deliberately positional rather than `{ name: 'Skins (#1)' }`: that
+ * "#1" is `gameLabel`'s LAST-RESORT discriminator, reached only because two
+ * default Skins match on every earlier axis, and naming it here would couple
+ * this file to a ladder that has nothing to do with setup.
+ */
+const gameCards = () => screen.getAllByRole('group')
+
 /** The picker sheet's content region. */
 const picker = () => screen.findByRole('region', { name: 'Game picker' })
 const pickerClosed = () =>
@@ -357,9 +369,11 @@ describe('SetupScreen — choosing games', () => {
     await pickGame('Skins')
     await pickGame('Skins', 'side')
 
-    // make them differ, or they are a duplicate and tee-off is blocked. Only
-    // the main card's stake is mounted — the side row is collapsed.
-    await userEvent.click(screen.getByRole('button', { name: /^increase Skin value/ }))
+    // make them differ, or they are a duplicate and tee-off is blocked. BOTH
+    // stakes are mounted now (MAI-89), so raise the main game's specifically.
+    await userEvent.click(
+      within(gameCards()[0]!).getByRole('button', { name: /^increase Skin value/ }),
+    )
 
     await teeOff()
     await waitFor(async () => expect(await roundFor('penmar')).toBeDefined())
@@ -386,10 +400,11 @@ describe('SetupScreen — choosing games', () => {
     await toStepTwo()
     await pickGame('Skins', 'side')
     await pickGame('Skins', 'side')
-    // a side-bet row is collapsed until tapped, so open one to reach its stake
+    // both side bets arrive open, so raise the first one's stake straight away
     // and make the two differ (identical settings block tee-off)
-    await userEvent.click(screen.getAllByRole('button', { expanded: false })[0]!)
-    await userEvent.click(screen.getByRole('button', { name: /^increase Skin value/ }))
+    await userEvent.click(
+      within(gameCards()[0]!).getByRole('button', { name: /^increase Skin value/ }),
+    )
 
     await teeOff()
     await waitFor(async () => expect(await roundFor('penmar')).toBeDefined())
@@ -406,10 +421,15 @@ describe('SetupScreen — choosing games', () => {
     await pickGame('Skins')
     await pickGame('Skins', 'side')
 
-    const problem = await screen.findByText(/identical settings/)
-    expect(problem).toBeInTheDocument()
-    // ONE message, not one per instance — both report it and the caller dedupes
-    expect(screen.getAllByText(/identical settings/)).toHaveLength(1)
+    // ONE message in the summary, not one per instance — both drafts report it
+    // and the caller dedupes. The CARDS each say it too, which is the point of
+    // saying it there: with two identical Skins, both of them are the offender.
+    const summary = within(await screen.findByRole('list', { name: 'Blocking tee off' }))
+    expect(summary.getAllByText(/identical settings/)).toHaveLength(1)
+    expect(gameCards()).toHaveLength(2)
+    for (const card of gameCards()) {
+      expect(within(card).getByText(/identical settings/)).toBeInTheDocument()
+    }
     expect(screen.getByRole('button', { name: /Tee off/ })).toBeDisabled()
   })
 
@@ -423,9 +443,194 @@ describe('SetupScreen — choosing games', () => {
     await pickGame('Skins', 'side')
 
     expect(screen.getByText('Nothing picked yet')).toBeInTheDocument()
-    // it sits under SIDE BETS, as a compact row rather than a full card
+    // it sits under SIDE BETS, and the MAIN section is the one still empty
     expect(screen.getByRole('button', { name: 'remove Skins' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /More side bets/ })).toBeInTheDocument()
+  })
+
+  /**
+   * MAI-89. A side bet used to arrive FOLDED, so its stake, its handicap policy
+   * and even its rules link were behind an unlabelled ▶ that nothing invited
+   * you to press — groups teed off on a default dollar they never knew was
+   * theirs to change. The fold stays; the default flips.
+   */
+  it('opens a side bet on the settings the moment it is added', async () => {
+    await toStepTwo()
+    await pickGame('Skins', 'side')
+
+    const card = within(gameCards()[0]!)
+    expect(card.getByRole('button', { name: /^increase Skin value/ })).toBeInTheDocument()
+    expect(card.getByText('Handicaps')).toBeInTheDocument()
+    expect(card.getByRole('button', { name: 'Skins rules' })).toBeInTheDocument()
+    expect(card.getByRole('button', { name: /^Skins/, expanded: true })).toBeInTheDocument()
+  })
+
+  /** The main card gains the affordance it never had: it can be put away too. */
+  it('folds one card away without touching its neighbour', async () => {
+    await toStepTwo()
+    await pickGame('Skins')
+    await pickGame('Closest to the Pin', 'side')
+
+    const [skins, ctp] = gameCards()
+    await userEvent.click(within(skins!).getByRole('button', { name: /^Skins/, expanded: true }))
+
+    // folded: the fields are gone, the stake it is known by is not
+    expect(within(skins!).queryByRole('button', { name: /^increase Skin value/ })).toBeNull()
+    expect(
+      within(skins!).getByRole('button', { name: /^Skins/, expanded: false }),
+    ).toBeInTheDocument()
+    expect(within(skins!).getByText('$1')).toBeInTheDocument()
+    // and the one beside it is untouched
+    expect(within(ctp!).getByText('Handicaps')).toBeInTheDocument()
+  })
+
+  /**
+   * "…and stays that way unless I collapse it", in both directions: the game
+   * you added arrives open, and the one you folded stays folded.
+   */
+  it('leaves the cards already on screen alone when another game is added', async () => {
+    await toStepTwo()
+    await pickGame('Skins')
+    await userEvent.click(screen.getByRole('button', { name: /^Skins/, expanded: true }))
+    await pickGame('Closest to the Pin', 'side')
+
+    const [skins, ctp] = gameCards()
+    expect(
+      within(skins!).getByRole('button', { name: /^Skins/, expanded: false }),
+    ).toBeInTheDocument()
+    expect(
+      within(ctp!).getByRole('button', { name: /Closest to the Pin/, expanded: true }),
+    ).toBeInTheDocument()
+  })
+
+  /**
+   * A folded card still has to own up. Every `validateSetup` problem is a
+   * reason Tee off is disabled whose fix lives INSIDE the card, so told only at
+   * the foot of the screen, "every player must be on exactly one Nassau side"
+   * points at a Team A/B control the reader cannot see and has no reason to
+   * look for. Before the fold reached the main card this was self-fixing.
+   */
+  it('says on the card itself that a folded game is the one blocking tee-off', async () => {
+    await pickPenmar()
+    await cont() // → players
+    for (const name of ['Ann', 'Ben', 'Cal']) await addPlayer(name, 10)
+    await cont() // → games
+    await pickGame('Nassau') // 2v1 across three players: legal
+
+    const card = () => within(gameCards()[0]!)
+    await userEvent.click(card().getByRole('button', { name: /^Nassau/, expanded: true }))
+    expect(card().queryByText(/exactly one nassau side/)).toBeNull()
+
+    // a fourth player lands on neither side, and the teams control that would
+    // fix it is folded away
+    await userEvent.click(screen.getByText('← Back'))
+    await addPlayer('Dee', 10)
+    await cont()
+
+    expect(screen.getByRole('button', { name: /Tee off/ })).toBeDisabled()
+    expect(card().getByRole('button', { name: /^Nassau/, expanded: false })).toBeInTheDocument()
+    expect(card().getByText(/exactly one nassau side/)).toBeInTheDocument()
+  })
+
+  /**
+   * A card states EVERYTHING wrong with its game. Two narrower rules were tried
+   * and each omitted something the other kept, which is why both of these
+   * assertions live in one test: showing only the roster note hid the
+   * duplicate — independent of the roster, and exactly the "solve one problem
+   * to discover the next" wolf's `validateSetup` warns about — while showing
+   * the problems and falling back to the note only in SILENCE hid the roster
+   * behind any complaint that doesn't name it (see the Nassau test below).
+   */
+  it('states a duplicate and a bad roster on the same card', async () => {
+    await pickPenmar()
+    await cont() // → players
+    for (const name of ['Ann', 'Ben', 'Cal', 'Dee']) await addPlayer(name, 10)
+    await cont() // → games
+    await pickGame('Wolf')
+    await pickGame('Wolf')
+
+    // stranded after the fact — the picker won't offer a game the roster can't
+    // play, so this is the only way into that state
+    await userEvent.click(screen.getByText('← Back'))
+    await userEvent.click(await screen.findByRole('button', { name: 'remove Dee' }))
+    await cont()
+
+    expect(gameCards()).toHaveLength(2)
+    for (const card of gameCards()) {
+      expect(within(card).getByText(/Wolf needs exactly 4 players/)).toBeInTheDocument()
+      // the duplicate too, which no number of players fixes
+      expect(within(card).getByText(/identical settings/)).toBeInTheDocument()
+
+      // …but the roster is stated ONCE. Wolf's own sentence already prints the
+      // 4, and it is the better of the two because it names the game, so the
+      // catalogue note stands down rather than saying it again underneath.
+      expect(within(card).queryByText('Needs 4 players')).toBeNull()
+    }
+  })
+
+  /**
+   * …but it stands down only against a problem that PRINTS THE COUNT. Nassau at
+   * five players reports one unassigned player and nothing more — a complaint
+   * about the teams, with no number in it. Suppressed behind that, the reader
+   * assigns the fifth player, the message clears, and "Needs 2–4 players" turns
+   * up only then: an instruction that was false when it was given, because no
+   * team assignment makes a five-player Nassau playable.
+   */
+  it('states the roster on a card whose engine is complaining about something else', async () => {
+    await pickPenmar()
+    await cont() // → players
+    for (const name of ['Ann', 'Ben', 'Cal', 'Dee']) await addPlayer(name, 10)
+    await cont() // → games
+    await pickGame('Nassau') // seeds a 2v2, so nothing is wrong yet
+
+    const card = () => within(gameCards()[0]!)
+    expect(card().queryByText(/Needs 2–4 players/)).toBeNull()
+
+    await userEvent.click(screen.getByText('← Back'))
+    await addPlayer('Eve', 10)
+    await cont()
+
+    expect(card().getByText(/exactly one nassau side/)).toBeInTheDocument()
+    expect(card().getByText(/Needs 2–4 players/)).toBeInTheDocument()
+  })
+
+  /**
+   * The roster line is also all there is when the engine says nothing:
+   * `isPlayable` reads `meta.minPlayers/maxPlayers`, and Skins declares 2–8
+   * while validating only the lower bound. A ninth player leaves the engine
+   * with nothing to say about a game its own catalogue entry calls unplayable.
+   */
+  it('falls back to the catalogue when the engine has nothing to say', async () => {
+    await pickPenmar()
+    await cont() // → players
+    for (let i = 0; i < 8; i++) await addPlayer(`P${i}`, 10)
+    await cont() // → games
+    await pickGame('Skins')
+
+    expect(within(gameCards()[0]!).queryByText(/Needs 2–8 players/)).toBeNull()
+
+    await userEvent.click(screen.getByText('← Back'))
+    await addPlayer('P8', 10)
+    await cont()
+
+    expect(within(gameCards()[0]!).getByText(/Needs 2–8 players/)).toBeInTheDocument()
+  })
+
+  /**
+   * Why the fold is state on SetupScreen and not inside the cards: this step is
+   * a conditional branch of one component, so `← Back` unmounts every card on
+   * it. Held locally, a screen the user had just tidied would silently spring
+   * back open on the way forward.
+   */
+  it('remembers a folded card across a trip back through the steps', async () => {
+    await toStepTwo()
+    await pickGame('Skins')
+    await userEvent.click(screen.getByRole('button', { name: /^Skins/, expanded: true }))
+
+    await userEvent.click(screen.getByText('← Back'))
+    await userEvent.click(screen.getByRole('button', { name: 'Continue' }))
+
+    expect(await screen.findByRole('button', { name: /^Skins/, expanded: false })).toBeInTheDocument()
   })
 
   it('tees off a side-bets-only round, storing no role for it', async () => {
@@ -521,6 +726,37 @@ describe('SetupScreen — choosing games', () => {
     expect([...teams.a, ...teams.b]).toHaveLength(3)
     expect(teams.a.length).toBeGreaterThan(0)
     expect(teams.b.length).toBeGreaterThan(0)
+  })
+
+  /**
+   * The other half of `dropPlayer`, missing until MAI-89's smoke test walked
+   * into it. Removal had a generic answer and got one; addition never did, so
+   * nothing put a new player into a Wolf rotation.
+   *
+   * That one is a DEAD END rather than an annoyance: the rotation editor draws
+   * the config's own list, so a player absent from it has no row and no ↑/↓.
+   * The card read "Wolf order must include every player exactly once" over a
+   * list that didn't contain them, with Tee off disabled and nothing on the
+   * screen able to fix it — the only way out was deleting the game.
+   */
+  it('puts a player added later into a rotation that was already set', async () => {
+    await pickPenmar()
+    await cont() // → players
+    for (const name of ['Ann', 'Ben', 'Cal', 'Dee']) await addPlayer(name, 10)
+    await cont() // → games
+    await pickGame('Wolf')
+
+    await userEvent.click(screen.getByText('← Back'))
+    await userEvent.click(await screen.findByRole('button', { name: 'remove Dee' }))
+    await addPlayer('Eve', 10)
+    await cont()
+
+    const card = within(gameCards()[0]!)
+    expect(card.queryByText(/order must include every player/)).toBeNull()
+    // last off the tee: the order was set before she joined
+    expect(card.getByText('Eve')).toBeInTheDocument()
+    expect(card.getByRole('button', { name: 'move Eve down' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /Tee off/ })).toBeEnabled()
   })
 
   /**
