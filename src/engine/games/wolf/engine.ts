@@ -95,9 +95,11 @@ function derive(
   const n = playerIds.length
 
   const picks = new Map<number, WolfPick>()
+  /** who was the wolf when the pick was recorded, for picks that say (below) */
+  const declaredBy = new Map<number, Uuid>()
   for (const e of events) {
     if (e.kind !== 'wolf/pick') continue
-    const data = e.data as { hole: number; choice: string }
+    const data = e.data as { hole: number; choice: string; wolf?: string }
     picks.set(
       data.hole,
       data.choice === 'lone'
@@ -106,6 +108,11 @@ function derive(
           ? { kind: 'blind' }
           : { kind: 'partner', partnerId: data.choice },
     )
+    // Last write wins here too, and absence must CLEAR: a re-pick recorded by
+    // an older build carries no wolf, and inheriting the previous event's
+    // would attribute it to whoever the first pick named.
+    if (data.wolf === undefined) declaredBy.delete(data.hole)
+    else declaredBy.set(data.hole, data.wolf)
   }
 
   const totals = new Map<Uuid, number>(playerIds.map((id) => [id, 0]))
@@ -123,17 +130,27 @@ function derive(
       )[0]!
     }
 
-    // A partner pick must name a current player other than the hole's wolf.
-    // A pick can go stale legitimately: on trailing-player holes a score
-    // correction can reassign the wolf after the pick was recorded — treat
-    // the orphaned pick as pending so the prompt re-appears, rather than
-    // silently computing a degenerate [wolf, wolf] side.
+    // A PICK CAN GO STALE LEGITIMATELY. On trailing-player holes (17–18, or the
+    // 9th of a nine) the wolf is whoever has fewest points, so a score
+    // correction can reassign it after the pick was recorded. Treat an orphaned
+    // pick as pending so the prompt re-appears, rather than computing on it.
+    //
+    // TWO WAYS TO GO STALE, and the second one only became visible when the
+    // screen started STATING the pick (MAI-84). A partner pick shows itself: it
+    // names the wolf, or names nobody in the round. A lone or blind
+    // declaration doesn't — reassign the wolf and it silently becomes someone
+    // else's declaration, and the app then says "D went blind" about a call D
+    // never made. So the pick records who was the wolf when it was made
+    // (`options[].data`, which exists for exactly this), and a mismatch is
+    // stale. Picks written before this carry no `wolf` and are left alone:
+    // absence means we cannot know, not that it disagrees.
     const rawPick = picks.get(hole) ?? null
-    const pick =
-      rawPick?.kind === 'partner' &&
-      (rawPick.partnerId === wolfId || !playerIds.includes(rawPick.partnerId))
-        ? null
-        : rawPick
+    const declared = declaredBy.get(hole)
+    const stale =
+      (rawPick?.kind === 'partner' &&
+        (rawPick.partnerId === wolfId || !playerIds.includes(rawPick.partnerId))) ||
+      (declared !== undefined && declared !== wolfId)
+    const pick = stale ? null : rawPick
 
     // Sides resolve as soon as the pick does — the scoring screen states them
     // above the score rows while the hole is still being played (MAI-84).
@@ -153,20 +170,19 @@ function derive(
     // shared posted-only best ball: a side with no scores can't win
     const wolfBest = ctx.bestNetAmongPosted(game.gameId, wolfSide, hole) ?? Infinity
     const packBest = ctx.bestNetAmongPosted(game.gameId, packSide, hole) ?? Infinity
+    // NOBODY POSTED — which is the same statement as `!ctx.anyScored(hole)`,
+    // since the two sides between them are every player. This is NOT a halved
+    // hole, and calling it one was a claim about golf that never happened:
+    // `ctx.finalized` goes true for EVERY hole the moment the round completes,
+    // so a group finishing on the 12th had 13–18 reported as halved — in the
+    // ledger, in the standings sheet, and on the pinned bar (MAI-38).
+    //
+    // Pending is the one bucket that means "no result", so fixing it HERE fixes
+    // every consumer at once; guarding each narration channel separately is how
+    // the bar kept saying it after `holeSummary` was fixed. No money either way
+    // — this branch never touched `totals`.
     if (wolfBest === Infinity && packBest === Infinity) {
-      // zeros, not an empty map: `points` is documented as the swing BY PLAYER,
-      // and a halved hole where nobody posted is the same outcome as a halved
-      // hole where everybody tied. One of them answering `undefined` to
-      // `points.get(id)` is a trap for the first consumer to trust the doc.
-      holeResults.push({
-        hole,
-        wolfId,
-        pick,
-        sides,
-        best: null,
-        points: new Map(playerIds.map((id) => [id, 0])),
-        outcome: 'halved',
-      })
+      holeResults.push({ hole, wolfId, pick, sides, best: null, points: null, outcome: 'pending' })
       return
     }
 
@@ -307,12 +323,18 @@ function derive(
         gameId: game.gameId,
         hole: r.hole,
         prompt: `${glyph('wolf')} Hole ${r.hole}: ${wolfName} rides with…`,
+        // every option carries the wolf it was offered under, so a pick can be
+        // recognised as stale when a score correction reassigns the wolf
         options: [
           ...playerIds
             .filter((id) => id !== r.wolfId)
-            .map((id) => ({ value: id, label: nameOf.get(id)! })),
-          { value: 'lone', label: `${glyph('wolf')} Lone Wolf` },
-          { value: 'blind', label: `${glyph('wolf-shades')} Blind Wolf` },
+            .map((id) => ({ value: id, label: nameOf.get(id)!, data: { wolf: r.wolfId } })),
+          { value: 'lone', label: `${glyph('wolf')} Lone Wolf`, data: { wolf: r.wolfId } },
+          {
+            value: 'blind',
+            label: `${glyph('wolf-shades')} Blind Wolf`,
+            data: { wolf: r.wolfId },
+          },
         ],
         eventKind: 'wolf/pick',
         ...(r.pick && {
@@ -350,12 +372,9 @@ function derive(
   const holeSummary = (hole: number): string[] => {
     const r = holeResults.find((h) => h.hole === hole)
     if (!r) return []
-    // A HOLE NOBODY PLAYED HAS NO RESULT. `ctx.finalized` goes true for every
-    // hole the moment the round completes, so without this guard a round
-    // finished on the 12th would report 13–18 as halved — the MAI-38 rule that
-    // a claim about a hole no one played is a claim about golf that never
-    // happened.
-    if (r.outcome === 'pending' || !ctx.anyScored(hole)) {
+    // Pending covers a hole nobody played, because `derive` files it that way
+    // rather than as a halve — see the nobody-posted branch.
+    if (r.outcome === 'pending') {
       return r.sides ? [`${wolfSideLabel(r)} vs ${packLabel(r)}`] : [`Wolf: ${nameOf.get(r.wolfId)}`]
     }
     // No cause line: nothing moved, so the multiplier did nothing to explain —
@@ -459,6 +478,8 @@ export const wolfEngine: GameEngine<WolfConfig> = {
     'wolf/pick': z.object({
       hole: z.number().int().min(1).max(18),
       choice: z.string(),
+      /** who was the wolf when this was recorded — absent on pre-MAI-84 picks */
+      wolf: z.string().optional(),
     }),
   },
   derive,

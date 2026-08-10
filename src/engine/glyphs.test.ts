@@ -135,8 +135,17 @@ describe('glyph tokens stay in channels that decode them', () => {
         ...(d.detailLines ?? []).flatMap((l) => [l.label, l.value]),
         ...(d.notes ?? []),
         ...d.settlement.lines.map((l) => l.label),
-        ...(d.availableActions?.() ?? []).flatMap((a) => [a.label, a.detail, a.effect]),
+        ...(d.availableActions?.() ?? []).flatMap((a) => [
+          a.label,
+          a.detail,
+          a.effect,
+          // rendered raw beside the row, in a 9px column (ActionsSheet)
+          a.recommendedReason ?? '',
+        ]),
         ...HOLES.flatMap((h) => (d.awards?.(h) ?? []).flatMap((a) => [a.group, a.label])),
+        // the affordance's own vocabulary (MAI-47) — button, sheet header,
+        // explainer and empty state, none of which go through GlyphText
+        ...Object.values(engine.meta.actions ?? {}),
       ]
       for (const s of undecoded) expect(hasGlyphToken(s), s).toBe(false)
     })

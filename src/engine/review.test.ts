@@ -88,8 +88,11 @@ describe('code-review regressions', () => {
     log.scoreByHole(round, { A: [3], B: [5], C: [5], D: [5] }, [1])
     const d = deriveRound(round, log.events).derivations.get('game-1')!
     expect(Object.values(d.settlement.perPlayerCents).every((c) => c === 0)).toBe(true)
-    // the pick prompt re-appears so the group can re-declare
-    expect(d.requiredInputs().some((i) => i.hole === 1)).toBe(true)
+    // The pick prompt re-appears so the group can re-declare — and it must be
+    // the BLOCKING kind. An answered request now stays in the list too
+    // (MAI-84), so `some(i => i.hole === 1)` alone is true either way and would
+    // no longer prove the pick was rejected.
+    expect(d.requiredInputs().some((i) => i.hole === 1 && !i.answered)).toBe(true)
   })
 
   it('malformed game-event payloads are dropped, not blind-cast', () => {
@@ -103,8 +106,8 @@ describe('code-review regressions', () => {
     log.append({ type: 'game/event', gameId: 'game-1', kind: 'not-a-kind', data: { hole: 1 } })
     log.scoreByHole(round, { A: [4], B: [5], C: [5], D: [5] }, [1])
     const d = deriveRound(round, log.events).derivations.get('game-1')!
-    // both events inert: hole still pending on its pick
-    expect(d.requiredInputs().some((i) => i.hole === 1)).toBe(true)
+    // both events inert: hole still BLOCKING on its pick, not answered by one
+    expect(d.requiredInputs().some((i) => i.hole === 1 && !i.answered)).toBe(true)
   })
 
   it('a completed round STATUS does not leak completion into ledger prefixes', () => {

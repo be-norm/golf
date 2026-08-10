@@ -55,6 +55,13 @@ export function ScoringScreen() {
   const [actionsOpen, setActionsOpen] = useState(false)
   // which answered input has its picker open — `${gameId}:${input.id}`
   const [adjustingId, setAdjustingId] = useState<string>()
+  // What was last SENT per input, so "this answer is already in effect" steps
+  // from intent rather than from a derivation that lags the write — the same
+  // rule as `sentPutts`. Without it, answering, then reverting before the
+  // re-derive lands, compares against the OLD answer and silently drops the
+  // revert. Released when the derivation catches up, or at once if the append
+  // failed and nothing is coming to release it.
+  const sentAnswerRef = useRef<Map<string, string>>(new Map())
   // event ids already sent for retraction — see `giveBack`
   const undoneRef = useRef<Set<string>>(new Set())
   // event key → the id it was written as, or undefined while still in flight.
@@ -126,6 +133,20 @@ export function ScoringScreen() {
     for (const d of view.derivations.values()) all.push(...d.requiredInputs())
     return all
   }, [view])
+
+  // Ownership of a sent answer ends when the derivation actually shows it —
+  // after the commit is the honest moment, and a ref must not be touched during
+  // render. Matching on the VALUE is right here (unlike `sentPutts`, which owns
+  // by event identity because it STEPS from the count): an answer is not
+  // arithmetic, so an answer that agrees with the log is simply landed.
+  useEffect(() => {
+    for (const i of inputs) {
+      const key = `${i.gameId}:${i.id}`
+      if (i.answered && sentAnswerRef.current.get(key) === i.answered.value) {
+        sentAnswerRef.current.delete(key)
+      }
+    }
+  }, [inputs])
 
   // Optional actions (Nassau presses). Surfaced only while the scorekeeper is
   // ON the hole the action starts from — see `onFrontier` below.
@@ -240,6 +261,14 @@ export function ScoringScreen() {
   const anyScored = round.players.some((p) =>
     ctx.holesPlayed.some((h) => ctx.gross.get(p.playerId)?.get(h) !== undefined),
   )
+
+  // Walking to another tee puts the picker away. Its key is hole-scoped, so an
+  // Adjust left open on 5 would still be open on the way back to 5 — a stale
+  // expansion over teams the group settled two holes ago.
+  const goToHole = (hole: number) => {
+    setAdjustingId(undefined)
+    setHole(hole)
+  }
 
   const setScore = (playerId: string, gross: number) => {
     void eventStore.append(round.id, [{ type: 'score/set', playerId, hole: currentHole, gross }])
@@ -377,7 +406,7 @@ export function ScoringScreen() {
    * coming to do it.
    */
   type GameEventDraft = Extract<EventDraft, { type: 'game/event' }>
-  const emitOnce = (draft: GameEventDraft) => {
+  const emitOnce = (draft: GameEventDraft, onNothingWritten?: () => void) => {
     const key = `${draft.gameId}:${draft.kind}:${JSON.stringify(draft.data)}`
     if (takingRef.current.has(key)) return
     takingRef.current.set(key, undefined)
@@ -386,22 +415,42 @@ export function ScoringScreen() {
       .then(([event]) => {
         // nothing written means nothing to wait for
         if (event) takingRef.current.set(key, event.id)
-        else takingRef.current.delete(key)
+        else {
+          takingRef.current.delete(key)
+          onNothingWritten?.()
+        }
       })
-      .catch(() => takingRef.current.delete(key))
+      .catch(() => {
+        takingRef.current.delete(key)
+        onNothingWritten?.()
+      })
   }
 
   // An option's own `data` rides UNDER `{ hole, choice }`, never over it: those
   // two are the channel's contract, and an option disagreeing with the prompt
   // it was rendered beneath is a bug rather than a feature (MAI-46).
   const answerInput = (input: InputRequest, option: InputRequest['options'][number]) => {
-    emitOnce({
-      type: 'game/event',
-      gameId: input.gameId,
-      kind: input.eventKind,
-      data: { ...option.data, hole: input.hole, choice: option.value },
-    })
+    const key = `${input.gameId}:${input.id}`
+    sentAnswerRef.current.set(key, option.value)
+    emitOnce(
+      {
+        type: 'game/event',
+        gameId: input.gameId,
+        kind: input.eventKind,
+        data: { ...option.data, hole: input.hole, choice: option.value },
+      },
+      // Nothing landed, so no derivation is coming to release this — and
+      // leaving it would make the retry look like a no-op change. Only this
+      // entry: a later tap's intent must not be dropped by an earlier failure.
+      () => {
+        if (sentAnswerRef.current.get(key) === option.value) sentAnswerRef.current.delete(key)
+      },
+    )
   }
+
+  /** The answer in effect for this input — what was SENT, else what derived. */
+  const answerFor = (input: InputRequest): string | undefined =>
+    sentAnswerRef.current.get(`${input.gameId}:${input.id}`) ?? input.answered?.value
 
   // The write half both optional channels share (GameEventOffer): take it and
   // one game event lands; give it back and its events are retracted. An award
@@ -485,7 +534,7 @@ export function ScoringScreen() {
         <HoleArrow
           dir="prev"
           disabled={holeIdx <= 0}
-          onClick={() => setHole(ctx.holesPlayed[holeIdx - 1]!)}
+          onClick={() => goToHole(ctx.holesPlayed[holeIdx - 1]!)}
         />
         <AnimatePresence mode="popLayout" initial={false}>
           <motion.div
@@ -516,7 +565,7 @@ export function ScoringScreen() {
         <HoleArrow
           dir="next"
           disabled={holeIdx >= ctx.holesPlayed.length - 1}
-          onClick={() => setHole(ctx.holesPlayed[holeIdx + 1]!)}
+          onClick={() => goToHole(ctx.holesPlayed[holeIdx + 1]!)}
         />
       </section>
 
@@ -575,14 +624,17 @@ export function ScoringScreen() {
                       <button
                         key={o.value}
                         onClick={() => {
-                          setAdjustingId(undefined)
+                          // only THIS input's picker — a sibling game's open
+                          // one is not ours to close
+                          setAdjustingId((cur) => (cur === key ? undefined : cur))
                           // Re-picking what is ALREADY in effect must write
                           // nothing. `emitOnce` releases its key once the event
                           // lands, so this tap would otherwise append a second
                           // identical wolf/pick — inert in replay (last write
                           // wins) but permanent in an append-only log that
-                          // syncs and exports.
-                          if (o.value !== input.answered?.value) answerInput(input, o)
+                          // syncs and exports. Resolved in the handler, from
+                          // what was SENT: a ref must not be read during render.
+                          if (o.value !== answerFor(input)) answerInput(input, o)
                         }}
                         className={`pixel-press px-4 py-2.5 text-lg ${
                           o.value === input.answered?.value

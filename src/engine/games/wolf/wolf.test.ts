@@ -216,6 +216,11 @@ describe('wolf — golden fixture (hand-verified)', () => {
     expect(d.holeSummary(2)).toEqual([':wolf: B (lone) vs A & C & D'])
     // no pick either: just whose tee it is
     expect(d.holeSummary(3)).toEqual(['Wolf: C'])
+    // AND THE BAR, which is the half that was missed the first time round: the
+    // fix belongs in `derive` (an unplayed hole is pending, not halved), not in
+    // each narration channel, or the recap keeps saying it after the ledger
+    // stops. h2 is skipped and the bar falls back to the last hole played.
+    expect(d.summaryParts).toEqual([{ label: 'H1', value: 'A & B +1' }])
     // and no money moved on the holes nobody played
     expect(d.settlement.perPlayerCents).toEqual({
       'p-a': 100,
@@ -223,6 +228,74 @@ describe('wolf — golden fixture (hand-verified)', () => {
       'p-c': -100,
       'p-d': -100,
     })
+  })
+
+  /**
+   * A PICK BELONGS TO THE WOLF WHO MADE IT.
+   *
+   * On trailing-player holes the wolf is whoever has fewest points, so a score
+   * correction can hand the role to someone else after a pick was recorded. A
+   * partner pick shows its own staleness — it names the new wolf, or names
+   * nobody. A lone or blind declaration does not, and it silently becomes
+   * someone else's call: harmless while nothing showed it, and a lie the moment
+   * the screen started saying "D went blind" (MAI-84). So the pick records the
+   * wolf it was made under.
+   */
+  it('drops a solo declaration when the wolf it was made under has changed', () => {
+    const players = makePlayers([{ name: 'A' }, { name: 'B' }, { name: 'C' }, { name: 'D' }])
+    const round = makeRound({
+      players,
+      holes: 'front9',
+      games: [
+        { type: 'wolf', config: { pointCents: 100, rotation: ['p-a', 'p-b', 'p-c', 'p-d'] } },
+      ],
+    })
+    const log = new EventLog()
+    log.scoreByHole(round, { A: [3], B: [5], C: [5], D: [5] }, [1])
+    // A is the wolf on hole 1, but this says it was declared under B
+    log.append({
+      type: 'game/event',
+      gameId: 'game-1',
+      kind: 'wolf/pick',
+      data: { hole: 1, choice: 'lone', wolf: 'p-b' },
+    })
+
+    const d = deriveRound(round, log.events).derivations.get('game-1')!
+    // stale: nothing computed, and the prompt is back so the group can re-declare
+    expect(Object.values(d.settlement.perPlayerCents).every((c) => c === 0)).toBe(true)
+    expect(d.requiredInputs().some((i) => i.hole === 1 && !i.answered)).toBe(true)
+    expect(d.holeSummary(1)).toEqual(['Wolf: A'])
+  })
+
+  it('honours a pick recorded before the wolf was stamped on it', () => {
+    const players = makePlayers([{ name: 'A' }, { name: 'B' }, { name: 'C' }, { name: 'D' }])
+    const round = makeRound({
+      players,
+      holes: 'front9',
+      games: [
+        { type: 'wolf', config: { pointCents: 100, rotation: ['p-a', 'p-b', 'p-c', 'p-d'] } },
+      ],
+    })
+    const log = new EventLog()
+    log.scoreByHole(round, { A: [3], B: [5], C: [5], D: [5] }, [1])
+    // no `wolf` key — every pick in every round played before MAI-84. Absence
+    // means we cannot know, NOT that it disagrees.
+    pick(log, 1, 'lone')
+
+    const d = deriveRound(round, log.events).derivations.get('game-1')!
+    expect(d.settlement.perPlayerCents['p-a']).toBe(600)
+
+    // …and a re-pick from such a build CLEARS the stamp rather than inheriting
+    // the earlier event's, which would attribute the new call to the old wolf
+    log.append({
+      type: 'game/event',
+      gameId: 'game-1',
+      kind: 'wolf/pick',
+      data: { hole: 1, choice: 'blind', wolf: 'p-a' },
+    })
+    pick(log, 1, 'lone')
+    const after = deriveRound(round, log.events).derivations.get('game-1')!
+    expect(after.settlement.perPlayerCents['p-a']).toBe(600)
   })
 
   /**

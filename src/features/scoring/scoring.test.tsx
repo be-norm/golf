@@ -1106,6 +1106,39 @@ describe('ScoringScreen — input chips', () => {
     expect(await eventStore.list(round.id)).toHaveLength(1)
   })
 
+  /**
+   * …but the guard must step from what was SENT, not from the derivation,
+   * which lags the write by an append, a live query and a re-derive. Comparing
+   * against `input.answered` meant that answering and then reverting inside
+   * that window read the OLD answer as "already in effect" and silently
+   * dropped the revert — the same class of bug the putts stepper documents at
+   * length, and the reason this file guards on intent everywhere else.
+   */
+  it('lets a revert through while the previous answer is still in flight', async () => {
+    const round = await wolfRound('round-input-revert')
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Bob' }))
+    await screen.findByText('(W) Ann & Bob')
+    fireEvent.click(screen.getByRole('button', { name: 'Adjust' }))
+    // Cal, then straight back to Bob — no await between, so the panel still
+    // says Bob when the second tap lands
+    fireEvent.click(screen.getByRole('button', { name: 'Cal' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Adjust' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Bob' }))
+
+    await waitFor(async () => {
+      expect(await eventStore.list(round.id)).toHaveLength(3)
+    })
+    const events = await eventStore.list(round.id)
+    expect(events.map((e) => (e as { data: { choice: string } }).data.choice)).toEqual([
+      'p-bob',
+      'p-cal',
+      'p-bob',
+    ])
+    // and the teams the scorekeeper meant are the ones on screen
+    await screen.findByText('(W) Ann & Bob')
+  })
+
   /** The picture never carries the meaning alone (engine/core/glyphs.ts). */
   it('draws the wolf in shades for a blind pick, beside the word', async () => {
     await wolfRound('round-input-blind')
