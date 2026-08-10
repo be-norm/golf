@@ -197,6 +197,8 @@ export const longDriveEngine: GameEngine<LongDriveConfig> = {
     category: 'side',
     family: 'award',
     shapes: ['solo'],
+    // Handicaps have nothing to say here, so setup does not offer them.
+    grossOnly: true,
     rules: {
       tagline: 'One swing on the big holes, and the money follows it.',
       howToPlay: [

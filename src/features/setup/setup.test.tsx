@@ -466,6 +466,25 @@ describe('SetupScreen — choosing games', () => {
   })
 
   /** The main card gains the affordance it never had: it can be put away too. */
+  /**
+   * A game strokes cannot decide offers no handicap control at all — closest to
+   * the pin, long drive and the snake are contests of one shot, and a toggle
+   * that changes nothing is worse than no toggle. Hidden rather than disabled,
+   * with one line saying why so its absence does not read as a bug.
+   */
+  it('offers no handicap control to a game strokes cannot decide', async () => {
+    await toStepTwo()
+    await pickGame('Skins')
+    await pickGame('Closest to the Pin', 'side')
+
+    const [skins, ctp] = gameCards()
+    // Skins keeps its own — gross vs net Skins is the round the discriminator
+    // ladder exists for
+    expect(within(skins!).getByText('Handicaps')).toBeInTheDocument()
+    expect(within(ctp!).queryByText('Handicaps')).toBeNull()
+    expect(within(ctp!).getByText(/Handicaps don’t apply/)).toBeInTheDocument()
+  })
+
   it('folds one card away without touching its neighbour', async () => {
     await toStepTwo()
     await pickGame('Skins')
@@ -480,8 +499,12 @@ describe('SetupScreen — choosing games', () => {
       within(skins!).getByRole('button', { name: /^Skins/, expanded: false }),
     ).toBeInTheDocument()
     expect(within(skins!).getByText('$1')).toBeInTheDocument()
-    // and the one beside it is untouched
-    expect(within(ctp!).getByText('Handicaps')).toBeInTheDocument()
+    // and the one beside it is untouched — anchored on its OWN config field
+    // rather than on the handicap control, which a game strokes cannot decide
+    // no longer renders at all (`meta.grossOnly`)
+    expect(
+      within(ctp!).getByRole('button', { name: /^increase Per par 3/ }),
+    ).toBeInTheDocument()
   })
 
   /**

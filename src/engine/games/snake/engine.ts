@@ -282,6 +282,8 @@ export const snakeEngine: GameEngine<SnakeConfig> = {
     category: 'side',
     family: 'pot',
     shapes: ['solo'],
+    // Handicaps have nothing to say here, so setup does not offer them.
+    grossOnly: true,
     /**
      * NO `reads`. Snake was built on round-level putt counts first (MAI-54,
      * MAI-90) and moved to the award channel, because the two are not the same

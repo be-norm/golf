@@ -407,6 +407,26 @@ export interface GameEngine<C = unknown> {
     family: GameFamily
     /** every shape this game can be played in; see GameShape */
     shapes: readonly GameShape[]
+    /**
+     * STROKES DO NOT DECIDE THIS GAME, so a handicap policy is meaningless for
+     * it — closest to the pin, long drive, the snake. One shot or one putt is
+     * measured against the other players' shots, not against anybody's index.
+     *
+     * Setup hides the handicap control entirely rather than offering a choice
+     * that changes nothing, which is the visible half. The half that matters is
+     * `strokeGame` (`src/lib/gameRoles.ts`): a net game can capture the
+     * scorecard's stroke dots and the share card's "underline = handicap
+     * stroke: X" note, and in a round of nothing but side bets `primaryGame`
+     * falls through to `games[0]` — so a CTP flipped to net, or arriving net
+     * from an import, would label underlines it never earned.
+     *
+     * PRESENTATION, like the rest of `meta`: `deriveRound` never reads it, and
+     * these engines never ask `ctx` for a stroke either way. It says what is
+     * true, it does not enforce it — `catalog.test.ts` checks the engine's own
+     * `defaultHandicap` agrees, so the declaration cannot quietly contradict
+     * the game it describes.
+     */
+    grossOnly?: boolean
     rules: GameRules
     /**
      * Round-level facts this engine READS out of `RoundContext` — the ones a
