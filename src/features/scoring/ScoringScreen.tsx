@@ -360,35 +360,30 @@ export function ScoringScreen() {
 
   /**
    * ONE TAP, ONE EVENT — for every control that emits a game event and then
-   * SURVIVES ITS OWN TAP, which is all of them except the actions row (whose
-   * sheet closes underneath it). An award cell, an input chip: both stay
-   * mounted until a re-derive replaces them, so two taps inside one frame both
-   * fire against stale props and append the same event twice. Replay shrugs —
-   * every reducer here is last-write-wins — but the log is append-only and
-   * syncs, so the duplicate outlives the round in every export and archive, and
-   * the first game to COUNT its events rather than treat them as a set would
-   * double-pay on a fumbled tap.
+   * SURVIVES ITS OWN TAP — an award cell and a press row stay mounted until a
+   * re-derive replaces them, so two taps inside one frame both fire against
+   * stale props and append the same event twice. Replay shrugs — every reducer
+   * here is last-write-wins — but the log is append-only and syncs, so the
+   * duplicate outlives the round in every export and archive, and the first
+   * game to COUNT its events rather than treat them as a set would double-pay
+   * on a fumbled tap.
    *
-   * THE KEY IS THE EVENT — the whole payload, not the control that emitted it.
-   * Three review rounds narrowed it to that, each time by finding one more
-   * thing the identity had to include:
+   * THE CALLERS ARE `take` AND `takeAction` — the two `GameEventOffer` channels.
+   * The input channel used to come through here too and no longer does: an
+   * input has ONE answer at a time, so "is this answer already in effect?" is
+   * both the stronger guard and the one that has to be asked anyway, and
+   * `answerInput` owns that. (This guard also has a silent third no-write path
+   * — the early return below — with no rollback behind it, which is what
+   * stranded the intent map when the two were layered.)
    *
-   * - The GAME. `GameEventOffer.id` and `InputRequest.id` are unique only
-   *   WITHIN a game (an engine cannot see its siblings) and a round can hold
-   *   two instances of one game (MAI-44), so two CTPs both mint `ctp-4-p-ann`.
-   * - For an input, the ANSWER. One `InputRequest` renders a row of options and
-   *   they are alternatives, not repeats: a slip-tap on a Wolf partner followed
-   *   at once by the intended Lone Wolf must keep LONE. Deduping is for the
-   *   same answer twice; changing your mind gets through, and replay's
-   *   last-write-wins is what makes that correct.
-   * - And the option's own `data`, which is exactly what a future game will use
-   *   to tell two options apart (BBB's three points, a hammer's multiplier) —
-   *   two options sharing a `value` and differing only there are different
-   *   answers.
+   * THE KEY IS THE EVENT — the whole payload, not the control that emitted it,
+   * which makes two things true by construction rather than by remembered rule:
    *
-   * Keying on the payload makes all three true by construction rather than by
-   * three remembered rules, and there is nothing left for a fourth to miss:
-   * identical payload = the same event = a duplicate.
+   * - The GAME. `GameEventOffer.id` is unique only WITHIN a game (an engine
+   *   cannot see its siblings) and a round can hold two instances of one game
+   *   (MAI-44), so two CTPs both mint `ctp-4-p-ann`.
+   * - And the offer's own `data`, so two offers differing only there stay
+   *   distinct.
    *
    * RELEASED WHEN THE EVENT IS ACTUALLY VISIBLE IN A DERIVATION, which is what
    * the guard is about and is NOT the same as the append resolving. With two
@@ -613,6 +608,17 @@ export function ScoringScreen() {
             // expanded picker.
             const key = `${input.gameId}:${input.id}`
             const open = !input.answered || adjustingId === key
+            // Two Wolfs at different stakes put two of these on one hole, and
+            // "Ann rides with…" twice over says nothing about which. Named only
+            // then — a label over the single panel of a one-game round is noise.
+            // Same answer `AwardGrid` reached with its `gameName` prop.
+            const sibling = holeInputs.some((o) => o.gameId !== input.gameId)
+            const label = sibling
+              ? gameLabel(
+                  round.games.find((g) => g.gameId === input.gameId)!,
+                  round.games,
+                )
+              : ''
             return (
               <div
                 key={key}
@@ -622,6 +628,15 @@ export function ScoringScreen() {
                     : 'border-coin-500 bg-coin-500/10'
                 }`}
               >
+                {label && (
+                  <h3
+                    className={`font-display mb-1.5 text-[10px] uppercase ${
+                      input.answered ? 'text-stone-400' : 'text-coin-500'
+                    }`}
+                  >
+                    {label}
+                  </h3>
+                )}
                 {input.answered ? (
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
@@ -654,14 +669,19 @@ export function ScoringScreen() {
                           // one is not ours to close
                           setAdjustingId((cur) => (cur === key ? undefined : cur))
                           // Re-picking what is ALREADY in effect must write
-                          // nothing. `emitOnce` releases its key once the event
-                          // lands, so this tap would otherwise append a second
-                          // identical wolf/pick — inert in replay (last write
-                          // wins) but permanent in an append-only log that
-                          // syncs and exports. Resolved in the handler, from
-                          // what was SENT: a ref must not be read during render.
+                          // nothing — inert in replay (last write wins) but
+                          // permanent in an append-only log that syncs and
+                          // exports. Resolved in the HANDLER, from what was
+                          // SENT, because a ref must not be read during render.
                           if (o.value !== answerFor(input)) answerInput(input, o)
                         }}
+                        // The highlight reads the DERIVED answer, so it can lag
+                        // the guard above by one re-derive: reopen the picker
+                        // inside that window and the previous option is still
+                        // lit. Deliberate — the write is always right, the
+                        // wrong pixel corrects itself, and mirroring the intent
+                        // into state to fix it would put the answer in two
+                        // places, which is the drift this file keeps out.
                         className={`pixel-press px-4 py-2.5 text-lg ${
                           o.value === input.answered?.value
                             ? 'border-felt-500 bg-felt-900'

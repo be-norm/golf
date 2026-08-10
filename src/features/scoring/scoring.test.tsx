@@ -1173,6 +1173,43 @@ describe('ScoringScreen — input chips', () => {
     await screen.findByText('(W) Ann & Bob')
   })
 
+  /**
+   * Two Wolfs at different stakes is a supported round (MAI-44 —
+   * `duplicateInstanceProblems` blocks only IDENTICAL settings), and both mint
+   * `wolf-pick-1`. So the panels must be keyed on `${gameId}:${id}` (or React
+   * collapses them and one Adjust opens both) and they must SAY which stake
+   * they belong to, since "Ann rides with…" twice over names neither.
+   */
+  it('names the game when two of them ask on the same hole', async () => {
+    const round = makeRound({
+      players: makePlayers([{ name: 'Ann' }, { name: 'Bob' }, { name: 'Cal' }, { name: 'Dee' }]),
+      holes: 'front9',
+      games: [
+        { type: 'wolf', config: { pointCents: 100, rotation: ['p-ann', 'p-bob', 'p-cal', 'p-dee'] } },
+        { type: 'wolf', config: { pointCents: 500, rotation: ['p-ann', 'p-bob', 'p-cal', 'p-dee'] } },
+      ],
+    })
+    round.id = 'round-two-wolves'
+    await db.rounds.put(round)
+    render(
+      <RouterProvider
+        router={createMemoryRouter(routes, { initialEntries: [`/round/${round.id}`] })}
+      />,
+    )
+
+    // `gameLabel` earns a discriminator only for a repeated type (MAI-42)
+    expect(await screen.findAllByText('Wolf ($1)')).not.toHaveLength(0)
+    expect(screen.getAllByText('Wolf ($5)')).not.toHaveLength(0)
+    // two separate panels, each with its own options
+    expect(screen.getAllByRole('button', { name: /Lone Wolf/ })).toHaveLength(2)
+
+    // answering one leaves the other still asking
+    fireEvent.click(screen.getAllByRole('button', { name: 'Bob' })[0]!)
+    await screen.findByText('(W) Ann & Bob')
+    expect(screen.getAllByRole('button', { name: /Lone Wolf/ })).toHaveLength(1)
+    expect(screen.getAllByRole('button', { name: 'Adjust' })).toHaveLength(1)
+  })
+
   /** The picture never carries the meaning alone (engine/core/glyphs.ts). */
   it('draws the wolf in shades for a blind pick, beside the word', async () => {
     await wolfRound('round-input-blind')

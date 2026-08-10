@@ -78,21 +78,25 @@ describe('wolf — golden fixture (hand-verified)', () => {
     //
     // Hand-derived from the card above, one per outcome shape:
     expect(d.holeSummary(1)).toEqual(['(W) A & B win with A\'s 4']) // wolf side, partnered
-    expect(d.holeSummary(3)).toEqual(['A & B win with A\'s 4']) // pack, partnered
+    // PACK WIN: the wolf is still named. Winners lead, but a pack win has no
+    // wolf in it, so without the losing side here the two names in the money
+    // row (C -$1 · D -$1) can't say which of them called the hole.
+    expect(d.holeSummary(3)).toEqual(['A & B beat (W) C & D — A\'s 4'])
     expect(d.holeSummary(7)).toEqual(['(W) C & A win with C\'s 3'])
     // both partners posted the winning 4, so naming either would be a half-truth
     expect(d.holeSummary(8)).toEqual(['(W) D & A win with 4'])
     // lone win: one player on the side, so no possessive — "B wins with B's 3"
-    // would just say B twice. The cause line names the wolf and the multiplier.
+    // would just say B twice. The cause line carries only the multiplier, since
+    // the headline's label already says who and which mode.
     expect(d.holeSummary(2)).toEqual([
       ':wolf: B (lone) wins with 3',
-      '↳ B went lone — the hole doubles',
+      '↳ lone wolf — the hole doubles',
     ])
-    // blind LOSS — the wolf is not in the headline, so the cause line is what
-    // names them; all three of A, B, C posted the 4, so no possessive
+    // blind LOSS — the headline names the wolf on the losing side; all three of
+    // A, B and C posted the 4, so no possessive
     expect(d.holeSummary(4)).toEqual([
-      'A & B & C win with 4',
-      '↳ D went blind — the hole triples',
+      'A & B & C beat :wolf-shades: D (blind) — 4',
+      '↳ blind wolf — the hole triples',
     ])
     // halved: still names the wolf's side (a bare "Halved" would be a
     // regression), and no cause line — nothing moved for the multiplier to

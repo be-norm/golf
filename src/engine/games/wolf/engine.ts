@@ -7,7 +7,7 @@ import { sideStake } from '../../core/match'
 import { duplicateInstanceProblems } from '../../core/setup'
 import { glyph } from '../../core/glyphs'
 import { standingsFromSettlement } from '../../core/standings'
-import { firstName, joinNames, latestHoleSummary, summaryString } from '../../core/summary'
+import { joinNames, latestHoleSummary, summaryString } from '../../core/summary'
 import { isPlayerPermutation } from '../../core/teams'
 import type { GameConfig, HandicapSettings, RoundPlayer, Uuid } from '../../core/types'
 
@@ -359,7 +359,10 @@ function derive(
   const madeIt = (side: readonly Uuid[], best: number, hole: number): string => {
     if (side.length < 2) return ''
     const at = side.filter((id) => ctx.netFor(game.gameId, id, hole) === best)
-    return at.length === 1 ? `${firstName(nameOf.get(at[0]!))}'s ` : ''
+    // FULL name, like the rest of the sentence. `firstName` is for the bar's
+    // compact chips, and two Mikes in a foursome is an ordinary Saturday —
+    // "Mike Ross & Mike Doyle win with Mike's 4" names nobody.
+    return at.length === 1 ? `${nameOf.get(at[0]!)}'s ` : ''
   }
 
   /**
@@ -385,20 +388,27 @@ function derive(
       return [`${wolfSideLabel(r)} — halved${at}`]
     }
     const kind = r.pick!.kind
-    // The multiplier is why these numbers look unlike a partnered hole's, and
-    // on a hole the wolf LOST it is the only thing left naming them.
+    // The multiplier is why these numbers look unlike a partnered hole's. It no
+    // longer has to name the wolf — the headline always does now, with the mode
+    // in the label — so this says only the part the label can't.
     const cause =
       kind === 'lone'
-        ? [`↳ ${nameOf.get(r.wolfId)} went lone — the hole doubles`]
+        ? ['↳ lone wolf — the hole doubles']
         : kind === 'blind'
-          ? [`↳ ${nameOf.get(r.wolfId)} went blind — the hole triples`]
+          ? ['↳ blind wolf — the hole triples']
           : []
     const wolfWon = r.outcome === 'wolfWin'
     const side = wolfWon ? r.sides!.wolf : r.sides!.pack
     const best = wolfWon ? r.best!.wolf : r.best!.pack
-    const who = wolfWon ? wolfSideLabel(r) : packLabel(r)
-    const verb = side.length === 1 ? 'wins' : 'win'
-    return [`${who} ${verb} with ${madeIt(side, best, hole)}${scoreTag(best)}`, ...cause]
+    const won = `${madeIt(side, best, hole)}${scoreTag(best)}`
+    // THE WOLF IS NAMED ON EVERY DECIDED HOLE. Winners lead either way, but a
+    // pack win has no wolf in it, and dropping them there left roughly a
+    // quarter of holes unable to say whose hole it was — the two losing names
+    // are in the money row, with nothing marking which of them called it. The
+    // wolf-win and halved lines never had this problem; only this one did.
+    return wolfWon
+      ? [`${wolfSideLabel(r)} ${side.length === 1 ? 'wins' : 'win'} with ${won}`, ...cause]
+      : [`${packLabel(r)} beat ${wolfSideLabel(r)} — ${won}`, ...cause]
   }
 
   return { standings, summary, summaryParts, holeSummary, requiredInputs, settlement }

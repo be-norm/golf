@@ -75,7 +75,9 @@ describe('ScorecardScreen — where the money moved', () => {
 
     const card = (await screen.findByText(/wins with/)).closest('li')!
     expect(within(card).getByText('Ann (lone) wins with 4')).toBeInTheDocument()
-    expect(within(card).getByText('↳ Ann went lone — the hole doubles')).toBeInTheDocument()
+    // the cause line carries only the multiplier — the headline's label already
+    // says who went lone
+    expect(within(card).getByText('↳ lone wolf — the hole doubles')).toBeInTheDocument()
     expect(card.querySelector('[data-glyph="wolf"]')).not.toBeNull()
     expect(card.textContent).not.toContain(':wolf:')
     // a lone win is the doubled hole against each of three
