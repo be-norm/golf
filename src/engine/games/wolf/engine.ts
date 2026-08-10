@@ -150,6 +150,16 @@ function derive(
     // (`options[].data`, which exists for exactly this), and a mismatch is
     // stale. Picks written before this carry no `wolf` and are left alone:
     // absence means we cannot know, not that it disagrees.
+    //
+    // ON A TRAILING-PLAYER HOLE THE WOLF IS PROVISIONAL until every earlier
+    // hole has finalized, and the group can pick under a provisional one: leave
+    // the 8th unfinished, and the 9th tee's wolf is computed from holes 1–7. The
+    // first score entered on the 9th finalizes the 8th, the totals move, and the
+    // pick can go stale right there — the panel reverts to the prompt mid-hole
+    // and the group re-declares. That interruption is the correct answer (the
+    // wolf really did change, and the alternative is the silent
+    // mis-attribution this rule exists to stop) but it is a real behaviour, so
+    // it is pinned by a test rather than left to be discovered on a Saturday.
     const rawPick = picks.get(hole) ?? null
     const declared = declaredBy.get(hole)
     const stale =
@@ -390,7 +400,11 @@ function derive(
     // Pending covers a hole nobody played, because `derive` files it that way
     // rather than as a halve — see the nobody-posted branch.
     if (r.outcome === 'pending') {
-      return r.sides ? [`${wolfSideLabel(r)} vs ${packLabel(r)}`] : [`Wolf: ${nameOf.get(r.wolfId)}`]
+      // `vs.` with the stop, the same token `teamLines` stacks — the ledger and
+      // the scoring panel state the same two sides and must not word it twice.
+      return r.sides
+        ? [`${wolfSideLabel(r)} vs. ${packLabel(r)}`]
+        : [`Wolf: ${nameOf.get(r.wolfId)}`]
     }
     // No cause line: nothing moved, so the multiplier did nothing to explain —
     // and the label already carries the word "(lone)" / "(blind)". A halve is

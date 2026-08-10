@@ -153,6 +153,37 @@ describe('wolf — golden fixture (hand-verified)', () => {
   })
 
   /**
+   * THE CONTRACT OF THE CHANNEL, as a test rather than three paragraphs of
+   * prose. `requiredInputs()` keeps an answered request in the list, so its
+   * LENGTH is not a count of what is blocking and never becomes zero on a
+   * round that is fully declared. Anything asking "is this hole still stuck?"
+   * has to filter on `!answered` — the same shape as `openActions` filtering on
+   * `!taken`. A future gate that counts the list instead gets a round that can
+   * never look settled, and this is what fails when it tries.
+   */
+  it('answers with a list that is never empty, so its length is not a blocker count', () => {
+    const players = makePlayers([{ name: 'A' }, { name: 'B' }, { name: 'C' }, { name: 'D' }])
+    const round = makeRound({
+      players,
+      holes: 'front9',
+      games: [
+        { type: 'wolf', config: { pointCents: 100, rotation: ['p-a', 'p-b', 'p-c', 'p-d'] } },
+      ],
+    })
+    const log = new EventLog()
+    log.scoreByHole(round, { A: [4], B: [5], C: [5], D: [5] }, [1])
+    pick(log, 1, 'p-b')
+
+    const d = deriveRound(round, log.events).derivations.get('game-1')!
+    const inputs = d.requiredInputs()
+    // every hole the round has reached is represented…
+    expect(inputs.length).toBeGreaterThan(0)
+    // …but nothing is blocking: hole 1 is answered, hole 2 is the frontier
+    expect(inputs.filter((i) => !i.answered).map((i) => i.hole)).toEqual([2])
+    expect(inputs.find((i) => i.hole === 1)?.answered).toBeDefined()
+  })
+
+  /**
    * A PARTNERED pick states both sides plainly — `(W)` marks the wolf, and
    * there is no glyph because there is no mode to explain.
    */
@@ -217,7 +248,8 @@ describe('wolf — golden fixture (hand-verified)', () => {
     const d = deriveRound(round, log.events).derivations.get('game-1')!
     expect(d.holeSummary(1)).toEqual(['(W) A & B win with A\'s 4'])
     // the teams, not a verdict
-    expect(d.holeSummary(2)).toEqual([':wolf: B (lone) vs A & C & D'])
+    // `vs.` is the same token the scoring panel stacks — one wording for one fact
+    expect(d.holeSummary(2)).toEqual([':wolf: B (lone) vs. A & C & D'])
     // no pick either: just whose tee it is
     expect(d.holeSummary(3)).toEqual(['Wolf: C'])
     // AND THE BAR, which is the half that was missed the first time round: the
@@ -269,6 +301,55 @@ describe('wolf — golden fixture (hand-verified)', () => {
     expect(Object.values(d.settlement.perPlayerCents).every((c) => c === 0)).toBe(true)
     expect(d.requiredInputs().some((i) => i.hole === 1 && !i.answered)).toBe(true)
     expect(d.holeSummary(1)).toEqual(['Wolf: A'])
+  })
+
+  /**
+   * THE TRAILING-PLAYER WOLF IS PROVISIONAL while an earlier hole is
+   * unfinished, and picking under a provisional one is ordinary: the group is
+   * standing on the 9th tee with someone's 8th still unwritten. The first score
+   * on the 9th finalizes the 8th, the totals move, and the wolf can change
+   * underneath a pick already made.
+   *
+   * The re-prompt is the CORRECT answer — the declaration really does belong to
+   * a player who is no longer the wolf — but it interrupts the hole, so it is
+   * pinned here rather than discovered on a Saturday.
+   */
+  it('re-prompts when a finalizing earlier hole moves the trailing-player wolf', () => {
+    const players = makePlayers([{ name: 'A' }, { name: 'B' }, { name: 'C' }, { name: 'D' }])
+    const round = makeRound({
+      players,
+      holes: 'front9',
+      games: [
+        { type: 'wolf', config: { pointCents: 100, rotation: ['p-a', 'p-b', 'p-c', 'p-d'] } },
+      ],
+    })
+    const log = new EventLog()
+    // Hole 8 is D's tee. Three players post; D never does, so the hole is not
+    // finalized while the 9th has no scores.
+    log.append({ type: 'game/event', gameId: 'game-1', kind: 'wolf/pick', data: { hole: 8, choice: 'lone', wolf: 'p-d' } })
+    for (const id of ['p-a', 'p-b', 'p-c']) {
+      log.append({ type: 'score/set', playerId: id, hole: 8, gross: 4 })
+    }
+
+    // 9 holes / 4 players leaves hole 9 off the rotation, so its wolf is the
+    // trailing player — and every total is still 0, so it is A on the tie-break.
+    const onTheTee = deriveRound(round, log.events).derivations.get('game-1')!
+    expect(onTheTee.holeSummary(9)).toEqual(['Wolf: A'])
+
+    // the group declares under that wolf
+    log.append({ type: 'game/event', gameId: 'game-1', kind: 'wolf/pick', data: { hole: 9, choice: 'lone', wolf: 'p-a' } })
+    const declared = deriveRound(round, log.events).derivations.get('game-1')!
+    expect(declared.requiredInputs().find((i) => i.hole === 9)?.answered?.value).toBe('lone')
+
+    // …then the first score on 9 finalizes 8, D's lone loss puts them on −6,
+    // and the 9th's wolf becomes D
+    log.append({ type: 'score/set', playerId: 'p-a', hole: 9, gross: 4 })
+    const after = deriveRound(round, log.events).derivations.get('game-1')!
+    expect(after.settlement.perPlayerCents['p-d']).toBe(-600)
+    // A's declaration is not D's to inherit: the hole goes back to pending and
+    // the prompt returns so the group can re-declare
+    expect(after.holeSummary(9)).toEqual(['Wolf: D'])
+    expect(after.requiredInputs().some((i) => i.hole === 9 && !i.answered)).toBe(true)
   })
 
   it('honours a pick recorded before the wolf was stamped on it', () => {

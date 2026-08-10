@@ -91,7 +91,10 @@ export interface InputRequest {
    * Same doctrine as `GameEventOffer.taken`, and the same shape of consumer:
    * anything asking "is this hole still blocked?" filters on `!answered`,
    * exactly as `ScoringScreen` counts what is left to take with
-   * `actions.filter((a) => !a.taken)`.
+   * `actions.filter((a) => !a.taken)`. WHICH MEANS THE LIST'S LENGTH IS NOT A
+   * COUNT OF BLOCKERS and never falls to zero on a fully-declared round — a
+   * gate that counts it gets a round that can never look settled. `wolf.test.ts`
+   * fails on that rather than leaving it to this paragraph.
    *
    * `value` is the option in effect, so the picker can mark it engaged.
    * `lines` is how the GAME states the resolved position — stacked verbatim,
