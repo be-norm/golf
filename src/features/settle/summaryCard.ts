@@ -74,7 +74,12 @@ export interface GamePanel {
    * — a pushed Nassau bet still belongs in its ledger — so an all-push round
    * shows three "push" rows rather than "No money moved."
    */
-  lines: { label: string; value: string; depth: number }[]
+  /**
+   * `amountCents` is what this line did to the player its text names — green
+   * when they collected, red when they paid. Only for `kind: 'lines'`; a
+   * ledger's rows are bets rather than payments.
+   */
+  lines: { label: string; value: string; depth: number; amountCents?: number }[]
   /**
    * WHAT THIS GAME MOVED, per player — the tier that decomposes FINAL
    * STANDINGS (MAI-88).
@@ -335,7 +340,15 @@ export function buildSummaryCard(
         kind: ledger ? ('ledger' as const) : ('lines' as const),
         lines: ledger
           ? d.detailLines!.map((l) => ({ label: l.label, value: l.value, depth: l.depth ?? 0 }))
-          : d.settlement.lines.map((l) => ({ label: '', value: l.label, depth: 0 })),
+          : d.settlement.lines.map((l) => ({
+              label: '',
+              value: l.label,
+              depth: 0,
+              // What this line did to the player it names — coloured by the
+              // screen, appended plainly by the painter (which draws all money
+              // in one weight). Absent for a line with no single subject.
+              ...(l.headlineCents !== undefined && { amountCents: l.headlineCents }),
+            })),
         // Off `perPlayerCents`, NOT off `lines`: a ledger's lines are bets
         // rather than payments, so summing them would miss a game entirely.
         money: moneyRowsFrom(d.settlement.perPlayerCents, round.players),

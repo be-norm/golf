@@ -18,6 +18,21 @@ export function formatCentsSigned(cents: number): string {
 export interface SettlementLine {
   label: string
   perPlayerCents: Record<Uuid, number>
+  /**
+   * THE MOVEMENT THIS LINE IS ABOUT — the signed swing for the one player its
+   * label names, so a surface can colour it: green for the winner of a hole,
+   * red for whoever is left holding the snake.
+   *
+   * Declared by the engine rather than derived from `perPlayerCents`, because
+   * no rule over the numbers alone can find it. "Biggest movement" is right for
+   * a winner collecting from three others and for a holder paying them, and
+   * WRONG heads-up, where the two are equal and opposite and the tie-break
+   * would put a green +$5 on a line reading "A pays $5".
+   *
+   * Optional: a line with no single subject (a team game's, where two players
+   * win together) simply says nothing rather than picking one of them.
+   */
+  headlineCents?: number
 }
 
 export interface Settlement {

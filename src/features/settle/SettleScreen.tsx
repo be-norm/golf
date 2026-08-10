@@ -153,7 +153,21 @@ export function SettleScreen() {
             ) : (
               <ul className="space-y-1 text-lg text-stone-300">
                 {g.lines.map((line, i) => (
-                  <li key={i}>{line.value}</li>
+                  <li key={i}>
+                    {line.value}
+                    {/* What the line did to the player it names, in the same
+                        green/red the totals below use — so a reader can see at
+                        a glance who collected and who paid, without adding the
+                        stakes up themselves. */}
+                    {line.amountCents !== undefined && (
+                      <span
+                        className={line.amountCents > 0 ? 'text-felt-300' : 'text-flag-500'}
+                      >
+                        {' '}
+                        ({formatCentsSigned(line.amountCents)})
+                      </span>
+                    )}
+                  </li>
                 ))}
               </ul>
             )}

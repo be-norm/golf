@@ -152,6 +152,9 @@ function derive(
         others === 1
           ? `${nameOf.get(held.holderId)} pays ${formatCents(held.potCents)}`
           : `${nameOf.get(held.holderId)} pays ${formatCents(held.potCents)} to each of ${others} others`,
+      // the line names the holder, so the money it shows is what it costs
+      // THEM — the whole pot to every other player, not the per-head figure
+      headlineCents: -held.potCents * others,
       perPlayerCents: Object.fromEntries(
         playerIds.map((id) => [
           id,

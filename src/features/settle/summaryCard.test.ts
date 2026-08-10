@@ -670,6 +670,10 @@ describe('side-bet panels', () => {
     // unsigned "Mike · $32" onto the card in the first place
     expect(snake.kind).toBe('lines')
     expect(snake.lines.map((l) => l.value)).toEqual(['Bob pays $32 to each of 3 others'])
+    // …and what it cost the player it names: the pot to each of three, NEGATIVE,
+    // which is what the screen paints red. Not the per-head $32 — the panel has
+    // to reconcile with the totals underneath it.
+    expect(snake.lines[0]!.amountCents).toBe(-9600)
   })
 
   it('does not repeat the game name inside its own block', () => {
@@ -680,5 +684,40 @@ describe('side-bet panels', () => {
     expect(c.games.find((g) => g.name === 'Long Drive')!.lines.map((l) => l.value)).toEqual([
       'Hole 3 — Cal',
     ])
+  })
+
+  /** A hole a player WON shows what they made, positive, which the screen
+   *  paints green — $2 from each of the other three. */
+  it('shows what each award line made the player it names', () => {
+    const c = settled()
+    expect(c.games.find((g) => g.name === 'Closest to the Pin')!.lines[0]!.amountCents).toBe(600)
+    expect(c.games.find((g) => g.name === 'Long Drive')!.lines[0]!.amountCents).toBe(600)
+  })
+
+  /**
+   * HEADS-UP IS WHY THE ENGINE DECLARES THIS instead of the model picking the
+   * biggest movement out of `perPlayerCents`. With two players the winner's
+   * gain and the loser's loss are equal and opposite, so any tie-break over the
+   * numbers alone would eventually put a green +$5 on a line reading "A pays $5".
+   */
+  it('gets the sign right heads-up, where the two movements are equal', () => {
+    const round = makeRound({
+      players: makePlayers([{ name: 'Ann' }, { name: 'Bob' }]),
+      holes: 'front9',
+      games: [{ type: 'snake', config: { potCents: 500, doubling: false } }],
+    })
+    const log = new EventLog(round.id)
+    log.scoreByHole(round, { Ann: [4, 4], Bob: [4, 4] }, [1, 2])
+    log.append({
+      type: 'game/event',
+      gameId: round.games[0]!.gameId,
+      kind: 'snake/bite',
+      data: { hole: 2, playerId: 'p-ann' },
+    })
+    log.append({ type: 'round/completed' })
+
+    const snake = card(round, log).games[0]!
+    expect(snake.lines[0]!.value).toBe('Ann pays $5')
+    expect(snake.lines[0]!.amountCents).toBe(-500)
   })
 })
