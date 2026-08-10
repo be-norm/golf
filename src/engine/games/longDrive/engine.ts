@@ -81,7 +81,8 @@ function derive(
     eligible,
     group: GROUP,
     eventKind: 'longDrive/award',
-    lineLabel: (hole, winner) => `Hole ${hole} — ${winner} longest drive`,
+    // Just the hole and the name — the panel heading already says the game.
+    lineLabel: (hole, winner) => `Hole ${hole} — ${winner}`,
   })
 
   const unclaimed = holeResults.filter((r) => r.kind === 'unclaimed').map((r) => r.hole)

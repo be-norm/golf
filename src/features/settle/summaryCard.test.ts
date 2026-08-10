@@ -628,3 +628,57 @@ describe('buildSummaryCard', () => {
     expect(card(round, log).subtitle).toBe('9 holes · 18 Jul 2026')
   })
 })
+
+/**
+ * THE SIDE-BETS PANEL SAYS WHAT HAPPENED TO THE MONEY, ONCE.
+ *
+ * Each block is already headed by the game's own label, so a settlement line
+ * repeating it — "Hole 4 — Ben closest to the pin" under CLOSEST TO THE PIN —
+ * spends the card's width saying nothing. And Snake shipped `detailLines` on a
+ * settled round, which is what makes a panel render as a LEDGER instead of its
+ * money lines: the card showed "Snake · Mike · $32", a number whose SIGN the
+ * reader cannot recover. He pays it, to each of the others.
+ */
+describe('side-bet panels', () => {
+  const settled = () => {
+    const round = makeRound({
+      players: makePlayers([{ name: 'Ann' }, { name: 'Bob' }, { name: 'Cal' }, { name: 'Dee' }]),
+      holes: 'front9',
+      games: [
+        { type: 'snake', config: { potCents: 3200, doubling: false } },
+        { type: 'ctp', config: { stakeCents: 200 } },
+        { type: 'longDrive', config: { stakeCents: 200, holes: 'par5s' } },
+      ],
+    })
+    const log = new EventLog(round.id)
+    log.scoreByHole(
+      round,
+      { Ann: [4, 4, 4, 3, 4], Bob: [4, 4, 4, 3, 4], Cal: [4, 4, 4, 3, 4], Dee: [4, 4, 4, 3, 4] },
+      [1, 2, 3, 4, 5],
+    )
+    const g = (i: number) => round.games[i]!.gameId
+    log.append({ type: 'game/event', gameId: g(0), kind: 'snake/bite', data: { hole: 2, playerId: 'p-bob' } })
+    log.append({ type: 'game/event', gameId: g(1), kind: 'ctp/award', data: { hole: 4, playerId: 'p-ann' } })
+    log.append({ type: 'game/event', gameId: g(2), kind: 'longDrive/award', data: { hole: 3, playerId: 'p-cal' } })
+    log.append({ type: 'round/completed' })
+    return card(round, log)
+  }
+
+  it('states the snake as a payment, not as an unsigned number', () => {
+    const snake = settled().games.find((g) => g.name === 'Snake')!
+    // MONEY LINES, not the live-position ledger — which is what let an
+    // unsigned "Mike · $32" onto the card in the first place
+    expect(snake.kind).toBe('lines')
+    expect(snake.lines.map((l) => l.value)).toEqual(['Bob pays $32 to each of 3 others'])
+  })
+
+  it('does not repeat the game name inside its own block', () => {
+    const c = settled()
+    expect(c.games.find((g) => g.name === 'Closest to the Pin')!.lines.map((l) => l.value)).toEqual([
+      'Hole 4 — Ann',
+    ])
+    expect(c.games.find((g) => g.name === 'Long Drive')!.lines.map((l) => l.value)).toEqual([
+      'Hole 3 — Cal',
+    ])
+  })
+})

@@ -46,7 +46,12 @@ function derive(
     eligible: (hole) => ctx.par(hole) === 3,
     group: GROUP,
     eventKind: 'ctp/award',
-    lineLabel: (hole, winner) => `Hole ${hole} — ${winner} closest to the pin`,
+    // JUST THE HOLE AND THE NAME. Every surface that renders a settlement
+    // line puts the game's own label directly above it — the settle panel and
+    // the share card both head the block with `gameLabel` — so spelling the
+    // game out again gave three lines reading "closest to the pin" under a
+    // heading reading CLOSEST TO THE PIN.
+    lineLabel: (hole, winner) => `Hole ${hole} — ${winner}`,
   })
 
   const unclaimed = holeResults.filter((r) => r.kind === 'unclaimed').map((r) => r.hole)

@@ -144,7 +144,14 @@ function derive(
   const settlement: Settlement = emptySettlement(playerIds)
   if (owes && held) {
     addLine(settlement, {
-      label: `${nameOf.get(held.holderId)} holds the snake`,
+      // WHAT ACTUALLY HAPPENS TO THE MONEY. "Mike holds the snake" beside a
+      // heading reading SNAKE says the game twice and the payment never — a
+      // reader seeing "Mike · $32" could not tell whether he won or lost it,
+      // and the answer is that he pays that much to each of the others.
+      label:
+        others === 1
+          ? `${nameOf.get(held.holderId)} pays ${formatCents(held.potCents)}`
+          : `${nameOf.get(held.holderId)} pays ${formatCents(held.potCents)} to each of ${others} others`,
       perPlayerCents: Object.fromEntries(
         playerIds.map((id) => [
           id,
@@ -167,14 +174,25 @@ function derive(
     held?.holderId === p.playerId ? 'holds the snake' : undefined,
   )
 
-  const detailLines = [
-    {
-      label: 'Snake',
-      value: held
-        ? `${nameOf.get(held.holderId)} · ${formatCents(held.potCents)}`
-        : 'nobody has it',
-    },
-  ]
+  /**
+   * THE LIVE POSITION, and only while it is live.
+   *
+   * `detailLines` is what makes a panel render as a LEDGER instead of its money
+   * lines (`summaryCard.ts`), so shipping this on a settled round put "Snake ·
+   * Mike · $32" on the share card where the payment belonged — a number a
+   * reader could not tell the sign of. Once the money moves the settlement line
+   * says it properly, so this stands down.
+   */
+  const detailLines = owes
+    ? undefined
+    : [
+        {
+          label: 'Snake',
+          value: held
+            ? `${nameOf.get(held.holderId)} · ${formatCents(held.potCents)}`
+            : 'nobody has it',
+        },
+      ]
 
   // The bar recaps the hole it last changed hands on — "H7 · Ben has it · $4"
   // — which is both what just happened and who is carrying it now.
@@ -256,7 +274,7 @@ function derive(
     standings,
     summary: summaryString(summaryParts),
     summaryParts,
-    detailLines,
+    ...(detailLines && { detailLines }),
     // What the pinned bar's money aggregate cannot say: the snake is worth
     // something to somebody right now, and settles nothing until the round
     // ends. Dropped once it IS money — the aggregate reports that itself, and
