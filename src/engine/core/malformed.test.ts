@@ -77,11 +77,17 @@ describe('a malformed game never takes a screen down', () => {
       ])
 
     /**
-     * Scored AND FINISHED, unlike the rest of this file. A match only pays when
-     * it is decided, so a three-hole prefix of a nine settles nothing whatever
-     * its teams look like — a guard test written against one would pass on a
-     * broken schema and prove precisely nothing. Completing the round finalizes
-     * the remaining holes (halved, nobody posted) and closes the match.
+     * Scored AND FINISHED, unlike the rest of this file: a match only pays once
+     * it is DECIDED, and a three-hole prefix of a nine never is. Completing the
+     * round finalizes the rest (halved, nobody posted) and closes the match.
+     *
+     * The guards below do not need that — they assert the game is refused, and
+     * `deriveRound` omits it whether or not it would have settled. The CONTROL
+     * needs it. Against an undecided match every config settles `{0, 0}`, so
+     * "the total is zero" is true of a match that pays nothing at all, and a
+     * regression making Match Play never settle would have passed. That is why
+     * the control also asserts money actually moved, and why the figures quoted
+     * below are measured against a loosened schema rather than reasoned about.
      */
     const settled = (round: Round) => {
       const log = new EventLog()
@@ -98,11 +104,16 @@ describe('a malformed game never takes a screen down', () => {
      *
      * TWO players against nobody, deliberately. A lone player against an empty
      * side hits `sideStake`'s outnumbered branch and multiplies by the other
-     * side's size — zero — so 1v0 quietly pays nothing and would hide this.
+     * side's size — zero — so a 1v0 settles nothing and would make the figure
+     * above unreproducible.
+     *
+     * BOTH SIDES, because the rule is `a.length > 0 && b.length > 0` and
+     * dropping either conjunct is a separate way to reopen this. One case
+     * leaves the other half of the rule unguarded.
      */
     it('refuses a side with nobody on it', () => {
-      const { derivations } = settled(twoSided({ a: ['p-a', 'p-b'], b: [] }))
-      expect(derivations.has('game-1')).toBe(false)
+      expect(settled(twoSided({ a: ['p-a', 'p-b'], b: [] })).derivations.has('game-1')).toBe(false)
+      expect(settled(twoSided({ a: [], b: ['p-a', 'p-b'] })).derivations.has('game-1')).toBe(false)
     })
 
     /**
@@ -133,6 +144,48 @@ describe('a malformed game never takes a screen down', () => {
       const cents = Object.values(derivations.get('game-1')!.settlement.perPlayerCents)
       expect(cents.some((c) => c !== 0)).toBe(true)
       expect(cents.reduce((a, b) => a + b, 0)).toBe(0)
+    })
+
+    /**
+     * THE ONE THAT SURVIVES THE SCHEMA CHANGING, and the reason it is here
+     * rather than in the engine's own fixtures.
+     *
+     * Every guard above asserts a game is REFUSED, so all of them are really
+     * assertions about `teamsSchema`. The engine's settlement is still built on
+     * the assumption that the sides it is handed are non-empty and disjoint —
+     * `sides[loseSide].map` debits nobody when a side is empty, and
+     * `Object.fromEntries` collapses a duplicated id to one credit while the
+     * opponent is charged for two. Match Play's own `meta` comment openly
+     * contemplates relaxing the partition rule so two of a foursome can play
+     * while the others sit out. Whoever does that will loosen the schema, watch
+     * these three tests turn red, adjust them, and reopen the hole with nothing
+     * left standing between a hand-edited round file and money out of nothing.
+     *
+     * So state the invariant instead of the gate: whatever sides a game arrives
+     * carrying, it either does not settle or it settles to zero. True today via
+     * the refusals, and still true — still checked — the day the refusals go.
+     */
+    it('any team shape either settles zero-sum or does not settle at all', () => {
+      const SHAPES = [
+        { a: ['p-a'], b: ['p-b'] },
+        { a: ['p-a', 'p-b'], b: [] },
+        { a: [], b: ['p-a', 'p-b'] },
+        { a: [], b: [] },
+        { a: ['p-a', 'p-a'], b: ['p-b'] },
+        { a: ['p-a'], b: ['p-b', 'p-b'] },
+        { a: ['p-a'], b: ['p-a'] },
+        { a: ['p-a', 'p-b'], b: ['p-a'] },
+        { a: ['p-ghost'], b: ['p-b'] },
+      ]
+      for (const teams of SHAPES) {
+        const d = settled(twoSided(teams)).derivations.get('game-1')
+        if (!d) continue // refused outright — the defence we have today
+        const cents = Object.values(d.settlement.perPlayerCents)
+        expect(
+          cents.reduce((a, b) => a + b, 0),
+          JSON.stringify(teams),
+        ).toBe(0)
+      }
     })
   })
 
