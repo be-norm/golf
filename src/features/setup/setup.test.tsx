@@ -560,6 +560,16 @@ describe('SetupScreen — choosing games', () => {
       expect(within(card).getByText(/Wolf needs exactly 4 players/)).toBeInTheDocument()
       // the duplicate too, which no number of players fixes
       expect(within(card).getByText(/identical settings/)).toBeInTheDocument()
+
+      // Wolf names the count in its own words, so the catalogue note restates
+      // it. That is the accepted price of never omitting the roster — and it
+      // goes LAST, landing beside the engine's sentence so the two read as one
+      // fact rather than two complaints.
+      const text = card.textContent ?? ''
+      expect(text).toContain('Needs 4 players')
+      expect(text.indexOf('Wolf needs exactly 4 players')).toBeLessThan(
+        text.indexOf('Needs 4 players'),
+      )
     }
   })
 
