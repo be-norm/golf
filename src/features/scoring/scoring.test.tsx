@@ -1056,7 +1056,7 @@ describe('ScoringScreen — input chips', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Bob' }))
 
     // Ann is the wolf on hole 1 and rides with Bob
-    await screen.findByText('(W) Ann & Bob')
+    await screen.findByText('Ann (W) & Bob')
     expect(screen.getByText('vs.')).toBeInTheDocument()
     expect(screen.getByText('Cal & Dee')).toBeInTheDocument()
     // no glyph on a partnered pick — there is no mode to explain
@@ -1077,7 +1077,7 @@ describe('ScoringScreen — input chips', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Cal' }))
 
-    await screen.findByText('(W) Ann & Cal')
+    await screen.findByText('Ann (W) & Cal')
     const events = await eventStore.list(round.id)
     expect(events.map((e) => (e as { data: { choice: string } }).data.choice)).toEqual([
       'p-bob',
@@ -1098,11 +1098,11 @@ describe('ScoringScreen — input chips', () => {
     const round = await wolfRound('round-input-same')
 
     fireEvent.click(await screen.findByRole('button', { name: 'Bob' }))
-    await screen.findByText('(W) Ann & Bob')
+    await screen.findByText('Ann (W) & Bob')
     fireEvent.click(screen.getByRole('button', { name: 'Adjust' }))
     fireEvent.click(screen.getByRole('button', { name: 'Bob' }))
 
-    await screen.findByText('(W) Ann & Bob')
+    await screen.findByText('Ann (W) & Bob')
     expect(await eventStore.list(round.id)).toHaveLength(1)
   })
 
@@ -1137,7 +1137,7 @@ describe('ScoringScreen — input chips', () => {
       'p-bob',
     ])
     // last write wins, so the teams are the ones the third tap meant
-    await screen.findByText('(W) Ann & Bob')
+    await screen.findByText('Ann (W) & Bob')
   })
 
   /**
@@ -1152,7 +1152,7 @@ describe('ScoringScreen — input chips', () => {
     const round = await wolfRound('round-input-revert')
 
     fireEvent.click(await screen.findByRole('button', { name: 'Bob' }))
-    await screen.findByText('(W) Ann & Bob')
+    await screen.findByText('Ann (W) & Bob')
     fireEvent.click(screen.getByRole('button', { name: 'Adjust' }))
     // Cal, then straight back to Bob — no await between, so the panel still
     // says Bob when the second tap lands
@@ -1170,7 +1170,7 @@ describe('ScoringScreen — input chips', () => {
       'p-bob',
     ])
     // and the teams the scorekeeper meant are the ones on screen
-    await screen.findByText('(W) Ann & Bob')
+    await screen.findByText('Ann (W) & Bob')
   })
 
   /**
@@ -1205,7 +1205,7 @@ describe('ScoringScreen — input chips', () => {
 
     // answering one leaves the other still asking
     fireEvent.click(screen.getAllByRole('button', { name: 'Bob' })[0]!)
-    await screen.findByText('(W) Ann & Bob')
+    await screen.findByText('Ann (W) & Bob')
     expect(screen.getAllByRole('button', { name: /Lone Wolf/ })).toHaveLength(1)
     expect(screen.getAllByRole('button', { name: 'Adjust' })).toHaveLength(1)
   })
@@ -1244,7 +1244,7 @@ describe('ScoringScreen — input chips', () => {
 
     // the teams are readable — before this they vanished on tap and a settled
     // round showed nothing at all
-    await screen.findByText('(W) Ann & Bob')
+    await screen.findByText('Ann (W) & Bob')
     expect(screen.queryByRole('button', { name: 'Adjust' })).not.toBeInTheDocument()
     // and the picker cannot be reached another way
     expect(screen.queryByRole('button', { name: /Lone Wolf/ })).not.toBeInTheDocument()

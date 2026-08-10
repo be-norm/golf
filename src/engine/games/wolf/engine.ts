@@ -312,11 +312,20 @@ function derive(
   // for lone and the same wolf in shades for blind — each followed by the word,
   // because a 16px picture cannot teach what "blind" costs (core/glyphs.ts).
   const wolfSideLabel = (r: WolfHoleResult): string => {
-    const names = joinNames(r.sides!.wolf, nameOf)
     const kind = r.pick!.kind
-    return kind === 'partner'
-      ? `(W) ${names}`
-      : `${kind === 'lone' ? glyph('wolf') : glyph('wolf-shades')} ${names} (${kind})`
+    // SOLO: the side is one player, so nothing is ambiguous and the glyph leads
+    // the line as the mode's mark.
+    if (kind !== 'partner') {
+      const mark = kind === 'lone' ? glyph('wolf') : glyph('wolf-shades')
+      return `${mark} ${joinNames(r.sides!.wolf, nameOf)} (${kind})`
+    }
+    // PARTNERED: `(W)` marks the PLAYER, not the pair. Leading the pair with it
+    // left "which of these two called it?" answerable only by knowing that
+    // `sides.wolf` happens to put the wolf first — so on the commonest hole
+    // shape the ledger still didn't say whose hole it was.
+    const [w, ...rest] = r.sides!.wolf
+    const partner = rest.length > 0 ? ` & ${joinNames(rest, nameOf)}` : ''
+    return `${nameOf.get(w!)} (W)${partner}`
   }
   const packLabel = (r: WolfHoleResult): string => joinNames(r.sides!.pack, nameOf)
   /** The teams, as the scoring screen stacks them above the score rows. */
@@ -336,8 +345,13 @@ function derive(
     const inputs: InputRequest[] = []
     for (const r of holeResults) {
       if (!r.pick) {
-        const anyScore = playerIds.some((id) => ctx.gross.get(id)?.get(r.hole) !== undefined)
-        if (!anyScore && r.hole !== frontier) continue
+        const anyScore = ctx.anyScored(r.hole)
+        // The frontier pre-prompt is "the tee you are standing on" — once the
+        // round is over nobody is standing on it, and asking for a pick on a
+        // hole nobody played is the same fabrication `derive` refuses further
+        // up: a group walking in on the 12th would be asked about the 13th
+        // (MAI-38).
+        if (!anyScore && (ctx.completed || r.hole !== frontier)) continue
       }
       const wolfName = nameOf.get(r.wolfId)
       inputs.push({
@@ -440,7 +454,51 @@ function derive(
       : [`${packLabel(r)} beat ${wolfSideLabel(r)} — ${won}`, ...cause]
   }
 
-  return { standings, summary, summaryParts, holeSummary, requiredInputs, settlement }
+  /**
+   * A HOLE THAT WAS PLAYED AND NEVER DECLARED PAYS NOTHING, and until now the
+   * only place that said so was the hole's own panel — one hole out of
+   * eighteen, on a screen you have to already be standing on.
+   *
+   * That was survivable while a missing pick meant "nobody tapped it". It stopped
+   * being survivable when the staleness rule widened to lone and blind (MAI-84):
+   * a score correction on an earlier hole can now drop a declaration that was
+   * made, and on a solo call that hole is the biggest swing on the card — six or
+   * nine stakes — quietly settling for zero.
+   *
+   * `notes` is the round-level channel for exactly this, it renders on both the
+   * standings sheet and the settle screen, and it is NOT money (MAI-40), so the
+   * "No money moved." signal stays honest.
+   *
+   * ONLY ONCE THE ROUND IS OVER, which is the same rule CTP's dead money
+   * follows and for the same reason: `ctx.finalized` goes true the moment the
+   * last score lands, so a hole would report itself dead while the group is
+   * still standing on that tee with the prompt in front of them. A thing is
+   * missing exactly when it can no longer be supplied — and by then the money
+   * is final, the settle screen is what they are looking at, and Reopen is the
+   * answer. Holes nobody played are skipped: they have nothing to lose.
+   *
+   * Plain text — `notes` is one of the channels no screen decodes, so a glyph
+   * here would reach the share card's painter as a literal token.
+   */
+  const missed = ctx.completed
+    ? holeResults.filter((r) => !r.pick && ctx.anyScored(r.hole)).map((r) => r.hole)
+    : []
+  const notes =
+    missed.length > 0
+      ? [
+          `${missed.length === 1 ? 'Hole' : 'Holes'} ${missed.join(', ')}: no wolf declared — nothing settled there.`,
+        ]
+      : undefined
+
+  return {
+    standings,
+    summary,
+    summaryParts,
+    holeSummary,
+    requiredInputs,
+    settlement,
+    ...(notes && { notes }),
+  }
 }
 
 /** The one name for this game — `meta.name` and every message that has to

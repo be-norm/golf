@@ -77,14 +77,14 @@ describe('wolf — golden fixture (hand-verified)', () => {
     // Gross round, so the scores are bare numbers rather than "net 4".
     //
     // Hand-derived from the card above, one per outcome shape:
-    expect(d.holeSummary(1)).toEqual(['(W) A & B win with A\'s 4']) // wolf side, partnered
+    expect(d.holeSummary(1)).toEqual(['A (W) & B win with A\'s 4']) // wolf side, partnered
     // PACK WIN: the wolf is still named. Winners lead, but a pack win has no
     // wolf in it, so without the losing side here the two names in the money
     // row (C -$1 · D -$1) can't say which of them called the hole.
-    expect(d.holeSummary(3)).toEqual(['A & B beat (W) C & D — A\'s 4'])
-    expect(d.holeSummary(7)).toEqual(['(W) C & A win with C\'s 3'])
+    expect(d.holeSummary(3)).toEqual(['A & B beat C (W) & D — A\'s 4'])
+    expect(d.holeSummary(7)).toEqual(['C (W) & A win with C\'s 3'])
     // both partners posted the winning 4, so naming either would be a half-truth
-    expect(d.holeSummary(8)).toEqual(['(W) D & A win with 4'])
+    expect(d.holeSummary(8)).toEqual(['D (W) & A win with 4'])
     // lone win: one player on the side, so no possessive — "B wins with B's 3"
     // would just say B twice. The cause line carries only the multiplier, since
     // the headline's label already says who and which mode.
@@ -103,7 +103,7 @@ describe('wolf — golden fixture (hand-verified)', () => {
     // explain, and "(lone)" is already in the label
     expect(d.holeSummary(5)).toEqual([':wolf: A (lone) — halved at 4'])
     // the trailing player takes the last wolf — D, not C, under these totals
-    expect(d.holeSummary(9)).toEqual(['(W) D & B — halved at 4'])
+    expect(d.holeSummary(9)).toEqual(['D (W) & B — halved at 4'])
     // bar recaps the latest decided hole (h9: D rides with B, 4 v 4 → halved)
     expect(d.summaryParts![0]!.label).toBe('H9')
   })
@@ -203,7 +203,7 @@ describe('wolf — golden fixture (hand-verified)', () => {
     const d = deriveRound(round, log.events).derivations.get('game-1')!
     expect(d.requiredInputs()[0]!.answered).toEqual({
       value: 'p-b',
-      lines: ['(W) A & B', 'vs.', 'C & D'],
+      lines: ['A (W) & B', 'vs.', 'C & D'],
     })
 
     // Changing the pick is one more event of the same kind — no retraction,
@@ -212,7 +212,7 @@ describe('wolf — golden fixture (hand-verified)', () => {
     const after = deriveRound(round, log.events).derivations.get('game-1')!
     expect(after.requiredInputs()[0]!.answered).toEqual({
       value: 'p-c',
-      lines: ['(W) A & C', 'vs.', 'B & D'],
+      lines: ['A (W) & C', 'vs.', 'B & D'],
     })
     // and the money follows the correction: A+C (4) beat B,D (5)
     expect(after.settlement.perPlayerCents).toEqual({
@@ -246,7 +246,7 @@ describe('wolf — golden fixture (hand-verified)', () => {
     log.append({ type: 'round/completed' })
 
     const d = deriveRound(round, log.events).derivations.get('game-1')!
-    expect(d.holeSummary(1)).toEqual(['(W) A & B win with A\'s 4'])
+    expect(d.holeSummary(1)).toEqual(['A (W) & B win with A\'s 4'])
     // the teams, not a verdict
     // `vs.` is the same token the scoring panel stacks — one wording for one fact
     expect(d.holeSummary(2)).toEqual([':wolf: B (lone) vs. A & C & D'])
@@ -350,6 +350,77 @@ describe('wolf — golden fixture (hand-verified)', () => {
     // the prompt returns so the group can re-declare
     expect(after.holeSummary(9)).toEqual(['Wolf: D'])
     expect(after.requiredInputs().some((i) => i.hole === 9 && !i.answered)).toBe(true)
+  })
+
+  /**
+   * A PLAYED HOLE THAT WAS NEVER DECLARED PAYS NOTHING, and the only place that
+   * said so was the hole's own panel — one hole out of eighteen, on a screen
+   * you have to already be standing on. Survivable while a missing pick meant
+   * "nobody tapped it"; not survivable once the staleness rule can DROP a
+   * declaration that was made, on a solo hole worth six or nine stakes.
+   *
+   * `notes` is the round-level channel for it, and it renders on the standings
+   * sheet and the settle screen both.
+   */
+  it('says on the round when a played hole was never declared', () => {
+    const players = makePlayers([{ name: 'A' }, { name: 'B' }, { name: 'C' }, { name: 'D' }])
+    const round = makeRound({
+      players,
+      holes: 'front9',
+      games: [
+        { type: 'wolf', config: { pointCents: 100, rotation: ['p-a', 'p-b', 'p-c', 'p-d'] } },
+      ],
+    })
+    const log = new EventLog()
+    log.scoreByHole(round, { A: [4, 4], B: [5, 5], C: [5, 5], D: [5, 5] }, [1, 2])
+    pick(log, 2, 'p-c')
+
+    // MID-ROUND IT SAYS NOTHING, even though hole 1 is finalized and undeclared
+    // — the group may still be about to record it, and a round-level "dead
+    // money" claim while the prompt is on screen is the nag CTP's note avoids.
+    expect(deriveRound(round, log.events).derivations.get('game-1')!.notes).toBeUndefined()
+
+    log.append({ type: 'round/completed' })
+    const d = deriveRound(round, log.events).derivations.get('game-1')!
+    expect(d.notes).toEqual(['Hole 1: no wolf declared — nothing settled there.'])
+    // …and it is NOT a settlement line: "No money moved." must stay honest (MAI-40)
+    expect(d.settlement.lines.every((l) => !l.label.includes('no wolf'))).toBe(true)
+  })
+
+  /**
+   * …and a completed round stops asking about holes nobody played. The frontier
+   * pre-prompt is "the tee you are standing on"; once the group has walked in,
+   * nobody is standing on it (MAI-38).
+   */
+  it('stops pre-prompting the next tee once the round is over', () => {
+    const players = makePlayers([{ name: 'A' }, { name: 'B' }, { name: 'C' }, { name: 'D' }])
+    const round = makeRound({
+      players,
+      holes: 'front9',
+      games: [
+        { type: 'wolf', config: { pointCents: 100, rotation: ['p-a', 'p-b', 'p-c', 'p-d'] } },
+      ],
+    })
+    const log = new EventLog()
+    log.scoreByHole(round, { A: [4], B: [5], C: [5], D: [5] }, [1])
+    pick(log, 1, 'p-b')
+
+    // mid-round, hole 2 is the tee they are walking to
+    expect(
+      deriveRound(round, log.events)
+        .derivations.get('game-1')!
+        .requiredInputs()
+        .map((i) => i.hole),
+    ).toEqual([1, 2])
+
+    log.append({ type: 'round/completed' })
+    // finished on the 1st: hole 2 was never played, so there is nothing to ask
+    expect(
+      deriveRound(round, log.events)
+        .derivations.get('game-1')!
+        .requiredInputs()
+        .map((i) => i.hole),
+    ).toEqual([1])
   })
 
   it('honours a pick recorded before the wolf was stamped on it', () => {
