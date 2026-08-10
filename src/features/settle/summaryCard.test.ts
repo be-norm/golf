@@ -720,4 +720,50 @@ describe('side-bet panels', () => {
     expect(snake.lines[0]!.value).toBe('Ann pays $5')
     expect(snake.lines[0]!.amountCents).toBe(-500)
   })
+
+  /**
+   * THE GROUPED PANEL IS WHERE THIS MATTERS MOST, and where it was missing.
+   *
+   * A round with a main game and 2+ side bets folds them into one "Side bets"
+   * ledger (MAI-50) — several games deep, so "who collected and who paid" is
+   * harder to hold in your head there than anywhere else. The fold dropped
+   * `amountCents` on the way through, so the per-line money was invisible in
+   * exactly that panel.
+   *
+   * And a note must not name its own game: the fold ATTRIBUTES notes, because
+   * an unattributed one has no owner once several games share a panel. Both
+   * doing it produced "Closest to the Pin: Closest to the pin went unclaimed…".
+   */
+  it('carries the per-line money and attributes notes exactly once when folded', () => {
+    const round = makeRound({
+      players: makePlayers([{ name: 'Ann' }, { name: 'Bob' }, { name: 'Cal' }]),
+      holes: 'front9',
+      games: [
+        { type: 'skins', config: { stakeCents: 100, carryover: true } },
+        { type: 'ctp', config: { stakeCents: 200 } },
+        { type: 'snake', config: { potCents: 500, doubling: false } },
+      ],
+    })
+    const log = new EventLog(round.id)
+    log.scoreByHole(round, { Ann: [3, 4, 4, 4], Bob: [4, 4, 4, 4], Cal: [4, 4, 4, 4] }, [1, 2, 3, 4])
+    log.append({
+      type: 'game/event',
+      gameId: round.games[2]!.gameId,
+      kind: 'snake/bite',
+      data: { hole: 2, playerId: 'p-cal' },
+    })
+    log.append({ type: 'round/completed' })
+
+    const grouped = card(round, log).games.find((g) => g.name === 'Side bets')!
+    expect(grouped.kind).toBe('ledger')
+
+    // CTP's par 3 (hole 4) went unawarded, so its only content is the note
+    const snakeLine = grouped.lines.find((l) => l.value.includes('pays'))!
+    expect(snakeLine.label).toBe('Snake')
+    expect(snakeLine.amountCents).toBe(-1000)
+
+    // the game is named ONCE — by the fold, not by the note
+    const note = grouped.notes.find((n) => n.includes('Unclaimed'))!
+    expect(note).toBe('Closest to the Pin: Unclaimed on hole 4 — nobody was given it, so nothing was paid')
+  })
 })

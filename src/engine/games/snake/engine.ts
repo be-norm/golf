@@ -170,7 +170,7 @@ function derive(
   // exactly the round it was written for (MAI-40).
   const notes =
     ctx.completed && !held
-      ? ['Nobody took the snake — nothing was paid']
+      ? ['Nobody took it all round — nothing was paid']
       : undefined
 
   const standings = standingsFromSettlement(players, settlement, (p) =>

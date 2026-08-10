@@ -113,8 +113,8 @@ function derive(
       // inside a PNG people send each other. `meta.rules` below is HTML and
       // spends them freely.
       holes === 'par5s'
-        ? 'No par 5s in the holes you are playing — long drive has nothing to play for'
-        : 'None of the holes you are playing carry the long drive — nothing to play for',
+        ? 'No par 5s in the holes you are playing — nothing to play for'
+        : 'None of the holes you are playing carry this bet — nothing to play for',
     )
   }
   if (unclaimed.length > 0) {
@@ -125,9 +125,11 @@ function derive(
     // card. Past a handful the list stops being something anybody reads.
     const them = unclaimed.length === 1 ? 'it' : 'them'
     notes.push(
+      // Never prefixed with the game — see CTP. The grouped side-bets panel
+      // attributes it, and every other surface has the heading right above.
       unclaimed.length > 4
-        ? `${driveLabel(unclaimed.length)} went unclaimed — nobody was given ${them}, so nothing was paid`
-        : `${GROUP} went unclaimed on ${unclaimed.length === 1 ? 'hole' : 'holes'} ` +
+        ? `${unclaimed.length} holes went unclaimed — nobody was given ${them}, so nothing was paid`
+        : `Unclaimed on ${unclaimed.length === 1 ? 'hole' : 'holes'} ` +
           `${unclaimed.join(', ')} — nobody was given ${them}, so nothing was paid`,
     )
   }
@@ -153,7 +155,7 @@ function derive(
     if (!r || r.kind === 'pending') return []
     if (r.kind === 'unclaimed') {
       return [
-        `${GROUP} — unclaimed`,
+        'Unclaimed',
         '↳ nobody was given it by the end of the round, so the hole paid nothing',
       ]
     }
@@ -162,9 +164,9 @@ function derive(
     // (a one-player round, which `importRound` accepts) there is no swing to
     // explain, and the settlement has no line either.
     const others = playerIds.length - 1
-    if (others === 0) return [`${nameOf.get(r.winnerId)} longest drive`]
+    if (others === 0) return [`${nameOf.get(r.winnerId)} longest`]
     return [
-      `${nameOf.get(r.winnerId)} longest drive`,
+      `${nameOf.get(r.winnerId)} longest`,
       `↳ ${formatCents(stakeCents)} from each of ${others} other player${others === 1 ? '' : 's'}` +
         ` — ${formatCents(stakeCents * others)}`,
     ]

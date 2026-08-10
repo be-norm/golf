@@ -262,6 +262,11 @@ function groupSideBets(panels: readonly GamePanel[]): GamePanel {
         // name, so fold the inner one into the value rather than lose it.
         value: l.label ? `${l.label} · ${l.value}` : l.value,
         depth: l.depth,
+        // CARRIED THROUGH THE FOLD. Dropping it here made the per-line money
+        // invisible in exactly the panel that needs it most — a grouped card is
+        // several games deep, so "who collected and who paid" is harder to hold
+        // in your head there than anywhere else.
+        ...(l.amountCents !== undefined && { amountCents: l.amountCents }),
       }))
     }),
     // The group's money is its members' summed, so the per-panel tier still
@@ -269,6 +274,10 @@ function groupSideBets(panels: readonly GamePanel[]): GamePanel {
     // Re-filtered after summing: a player up $5 in one side bet and down $5 in
     // another moved nothing overall, and a "$0" would be noise.
     money: sumMoney(panels),
+    // Prefixed because an unattributed note has no owner in a grouped panel —
+    // which is exactly why a note must not name its own game (see the engines):
+    // "Closest to the Pin: Closest to the pin went unclaimed on hole 7" is what
+    // that reads like when both do it.
     notes: panels.flatMap((p) => p.notes.map((n) => `${p.name}: ${n}`)),
   }
 }

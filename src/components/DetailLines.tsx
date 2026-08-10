@@ -1,7 +1,11 @@
+import { formatCentsSigned } from '../engine/core/money'
+
 interface Line {
   label: string
   value: string
   depth?: number
+  /** what this line did to the player its text names — green up, red down */
+  amountCents?: number
 }
 
 /**
@@ -24,7 +28,15 @@ export function DetailLines({ lines, valueClass = 'text-stone-200' }: { lines: L
           <span className="font-display max-w-[45%] shrink-0 truncate text-[9px] uppercase text-coin-400">
             {line.label}
           </span>
-          <span className={`text-lg tabular-nums ${valueClass}`}>{line.value}</span>
+          <span className={`text-lg tabular-nums ${valueClass}`}>
+            {line.value}
+            {line.amountCents !== undefined && (
+              <span className={line.amountCents > 0 ? 'text-felt-300' : 'text-flag-500'}>
+                {' '}
+                ({formatCentsSigned(line.amountCents)})
+              </span>
+            )}
+          </span>
         </li>
       ))}
     </ul>

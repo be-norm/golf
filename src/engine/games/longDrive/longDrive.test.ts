@@ -81,14 +81,15 @@ describe('longDrive — golden fixtures (hand-verified)', () => {
       { hole: 8, kind: 'unclaimed' },
     ])
     expect(ld.notes).toEqual([
-      'Long drive went unclaimed on hole 8 — nobody was given it, so nothing was paid',
+      'Unclaimed on hole 8 — nobody was given it, so nothing was paid',
     ])
     expect(ld.standings[0]).toMatchObject({ label: 'B', amountCents: 600, detail: '1 long drive' })
     expect(ld.standings[1]).toMatchObject({ detail: '0 long drives' })
     // the bar recaps the latest DECIDED hole — hole 8, which nobody won
     expect(ld.summaryParts).toEqual([{ label: 'H8', value: 'nobody kept it' }])
+    // the block heading already says the game, so the line says who
     expect(ld.holeSummary(3)).toEqual([
-      'B longest drive',
+      'B longest',
       '↳ $2 from each of 3 other players — $6',
     ])
   })
@@ -130,7 +131,7 @@ describe('longDrive — golden fixtures (hand-verified)', () => {
     log.append({ type: 'round/completed' })
 
     expect(ldOf(round, log).notes).toEqual([
-      'Long drive went unclaimed on holes 3, 8 — nobody was given them, so nothing was paid',
+      'Unclaimed on holes 3, 8 — nobody was given them, so nothing was paid',
     ])
   })
 
@@ -147,7 +148,7 @@ describe('longDrive — golden fixtures (hand-verified)', () => {
     log.append({ type: 'round/completed' })
 
     expect(ldOf(round, log).notes).toEqual([
-      '8 long drives went unclaimed — nobody was given them, so nothing was paid',
+      '8 holes went unclaimed — nobody was given them, so nothing was paid',
     ])
     // …and EXACTLY FOUR still name themselves, which is what makes the
     // threshold a threshold rather than a number the test agrees with. Six
@@ -157,7 +158,7 @@ describe('longDrive — golden fixtures (hand-verified)', () => {
     for (const h of [1, 2]) award(four, h, 'p-a')
     four.append({ type: 'round/completed' })
     expect(ldOf(round, four).notes).toEqual([
-      'Long drive went unclaimed on holes 3, 4, 5, 6 — nobody was given them, so nothing was paid',
+      'Unclaimed on holes 3, 4, 5, 6 — nobody was given them, so nothing was paid',
     ])
   })
 
@@ -190,7 +191,7 @@ describe('longDrive — golden fixtures (hand-verified)', () => {
     const fresh = ldOf(round, new EventLog())
     expect(fresh.designated).toEqual([])
     expect(fresh.notes).toEqual([
-      'No par 5s in the holes you are playing — long drive has nothing to play for',
+      'No par 5s in the holes you are playing — nothing to play for',
     ])
     expect(fresh.summaryParts).toEqual([{ label: '', value: 'no holes to play for' }])
     for (const hole of [1, 2, 3, 4, 5, 6, 7, 8, 9]) expect(fresh.awards!(hole)).toEqual([])
@@ -287,7 +288,7 @@ describe('longDrive — golden fixtures (hand-verified)', () => {
 
     expect(ld.designated).toEqual([])
     expect(ld.notes).toEqual([
-      'None of the holes you are playing carry the long drive — nothing to play for',
+      'None of the holes you are playing carry this bet — nothing to play for',
     ])
     expect(ld.holeResults).toEqual([])
     assertZeroSum(ld.settlement)
@@ -305,7 +306,7 @@ describe('longDrive — golden fixtures (hand-verified)', () => {
 
     expect(ld.settlement.perPlayerCents).toEqual({ 'p-a': 1000, 'p-b': -1000 })
     expect(ld.holeSummary(3)).toEqual([
-      'A longest drive',
+      'A longest',
       '↳ $5 from each of 1 other player — $5',
     ])
   })
