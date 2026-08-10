@@ -43,12 +43,18 @@ describe('replay invariants (fast-check)', () => {
    * fix was a `notes` channel on the derivation, and this is the guard that
    * keeps the next game from reaching for the same shortcut (MAI-40).
    *
-   * `addLine` now REFUSES a line that moves nothing, which makes this
-   * structural for every engine that settles through it — so what this property
-   * still earns is the engines that DON'T. Wolf writes `perPlayerCents`
-   * directly (and is skipped below), and any future engine emitting
-   * aggregate-only rows would do the same. Keep both: the choke point cannot
-   * see a line it is never handed.
+   * READ THIS BEFORE TRUSTING IT: `addLine` now refuses a line that moves
+   * nothing, and every engine this loop actually checks settles through it — so
+   * over TODAY'S catalog this property is VACUOUS. It cannot fail, and deleting
+   * `addLine`'s guard would not turn it red. (Wolf is the one direct writer of
+   * `settlement.lines`, and it is skipped below for its own known violation, so
+   * it is not the exception that rescues this.)
+   *
+   * It is kept as a FORWARD guard, for the next engine that writes
+   * `settlement.lines` directly the way Wolf does — the choke point cannot see
+   * a line it is never handed. That is the whole of what it buys, and pretending
+   * otherwise is how somebody weakens `addLine`, sees green here, and believes
+   * they were covered.
    */
   it('every settlement line moves money', () => {
     fc.assert(
