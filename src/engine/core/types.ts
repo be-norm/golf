@@ -267,12 +267,23 @@ export interface Round {
    * it, sync carries the whole round as a blob, and `importRound` validates the
    * round with `z.looseObject`.
    *
-   * OPEN QUESTION FOR SNAKE (MAI-58): a game cannot require this. `validateSetup`
-   * sees config, players and siblings — never the round — so an engine that
-   * reads putts cannot refuse a round with tracking off, and would derive
-   * nothing while looking healthy. Resolve it there, either with an
-   * engine-declared need that setup reads to switch this on, or by widening
-   * validation to see the round. Don't let it stay implicit.
+   * A GAME STILL CANNOT REQUIRE IT, and it does not need to (MAI-58, resolving
+   * the open question this comment used to carry). `validateSetup` sees config,
+   * players and siblings — never the round — so an engine reading putts can
+   * never refuse a round with tracking off. The answer was the other one: the
+   * engine DECLARES the need (`meta.reads`), setup reads that declaration and
+   * switches this on, and the group is told which game asked rather than being
+   * offered a question they have no way to answer.
+   *
+   * This field is the FROZEN answer, and it stays authoritative: a round that
+   * collected putts for a game this build no longer ships must keep showing
+   * them, which is why setup stamps it rather than every screen re-deriving it.
+   * But it is not the only way to reach the affordance — a round that arrives
+   * WITHOUT it while holding a game that reads putts (an import, a
+   * hand-edited log, a build that predates the game) would otherwise render no
+   * entry control at all, and the game would derive nothing while looking
+   * perfectly healthy. So the scoring screen offers putts on
+   * `trackPutts || roundReads('putts', games)` — an OR, never a replacement.
    */
   trackPutts?: boolean
   /**
