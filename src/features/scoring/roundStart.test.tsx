@@ -53,7 +53,7 @@ describe('RoundStartScreen', () => {
 
     expect(
       await screen.findByText(
-        'No par 5s in the holes you are playing — long drive has nothing to play for',
+        'No par 5s in the holes you are playing — nothing to play for',
       ),
     ).toBeInTheDocument()
   })

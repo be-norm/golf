@@ -61,7 +61,11 @@ function derive(
   const notes =
     unclaimed.length > 0
       ? [
-          `${GROUP} went unclaimed on ${unclaimed.length === 1 ? 'hole' : 'holes'} ` +
+          // NOT PREFIXED WITH THE GAME. Every surface renders a note inside
+          // the game's own block, and the grouped side-bets panel prefixes it
+          // with the name itself — so naming it here produced "Closest to the
+          // Pin: Closest to the pin went unclaimed on hole 7".
+          `Unclaimed on ${unclaimed.length === 1 ? 'hole' : 'holes'} ` +
             `${unclaimed.join(', ')} — nobody was given ` +
             `${unclaimed.length === 1 ? 'it' : 'them'}, so nothing was paid`,
         ]
@@ -91,7 +95,7 @@ function derive(
     if (!r || r.kind === 'pending') return []
     if (r.kind === 'unclaimed') {
       return [
-        `${GROUP} — unclaimed`,
+        'Unclaimed',
         '↳ nobody was given it by the end of the round, so the hole paid nothing',
       ]
     }
@@ -100,9 +104,11 @@ function derive(
     // pay it (a one-player round, which `importRound` accepts) there is no
     // swing to explain, and the settlement has no line either.
     const others = playerIds.length - 1
-    if (others === 0) return [`${nameOf.get(r.winnerId)} closest to the pin`]
+    // The hole ledger heads its list with the game, and the standings sheet
+    // heads the block with it — so this says who, not what game it was.
+    if (others === 0) return [`${nameOf.get(r.winnerId)} closest`]
     return [
-      `${nameOf.get(r.winnerId)} closest to the pin`,
+      `${nameOf.get(r.winnerId)} closest`,
       `↳ ${formatCents(stakeCents)} from each of ${others} other player${others === 1 ? '' : 's'}` +
         ` — ${formatCents(stakeCents * others)}`,
     ]

@@ -61,7 +61,7 @@ describe('snake — golden fixtures (hand-verified)', () => {
     expect(snake.holderId).toBeUndefined()
     expect(snake.settlement.lines).toHaveLength(0)
     assertZeroSum(snake.settlement)
-    expect(snake.notes).toEqual(['Nobody took the snake — nothing was paid'])
+    expect(snake.notes).toEqual(['Nobody took it all round — nothing was paid'])
     expect(snake.summaryParts).toEqual([{ label: '', value: 'no snake yet' }])
     expect(snake.detailLines).toEqual([{ label: 'Snake', value: 'nobody has it' }])
   })

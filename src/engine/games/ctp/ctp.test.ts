@@ -71,14 +71,15 @@ describe('ctp — golden fixtures (hand-verified)', () => {
       { hole: 7, kind: 'unclaimed' },
     ])
     expect(ctp.notes).toEqual([
-      'Closest to the pin went unclaimed on hole 7 — nobody was given it, so nothing was paid',
+      'Unclaimed on hole 7 — nobody was given it, so nothing was paid',
     ])
     expect(ctp.standings[0]).toMatchObject({ label: 'B', amountCents: 600, detail: '1 CTP' })
     expect(ctp.standings[1]).toMatchObject({ detail: '0 CTPs' })
     // the bar recaps the latest DECIDED hole — hole 7, which nobody won
     expect(ctp.summaryParts).toEqual([{ label: 'H7', value: 'nobody inside' }])
+    // the block heading already says the game, so the line says who
     expect(ctp.holeSummary(4)).toEqual([
-      'B closest to the pin',
+      'B closest',
       '↳ $2 from each of 3 other players — $6',
     ])
   })
@@ -92,7 +93,7 @@ describe('ctp — golden fixtures (hand-verified)', () => {
     log.append({ type: 'round/completed' })
 
     expect(ctpOf(round, log).notes).toEqual([
-      'Closest to the pin went unclaimed on holes 4, 7 — nobody was given them, so nothing was paid',
+      'Unclaimed on holes 4, 7 — nobody was given them, so nothing was paid',
     ])
   })
 
@@ -256,7 +257,7 @@ describe('ctp — golden fixtures (hand-verified)', () => {
 
     expect(ctp.settlement.perPlayerCents).toEqual({ 'p-a': 1000, 'p-b': -1000 })
     expect(ctp.holeSummary(4)).toEqual([
-      'A closest to the pin',
+      'A closest',
       '↳ $5 from each of 1 other player — $5',
     ])
   })
