@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { createMemoryRouter, RouterProvider } from 'react-router'
 import '../../engine/games'
-import { makePlayers, makeRound } from '../../engine/test/harness'
+import { makeCourse, makePlayers, makeRound } from '../../engine/test/harness'
 import { db } from '../../db/schema'
 import { eventStore } from '../../db/eventStore'
 import { routes } from '../../app/routes'
@@ -25,6 +25,57 @@ function strokeRow(name: string): HTMLElement {
 }
 
 describe('RoundStartScreen', () => {
+  /**
+   * MAI-57. A game that can never pay anything says so AT THE FIRST TEE, which
+   * is the last moment the group can do anything about it — every other note in
+   * the catalog waits for `ctx.completed`, i.e. the settle screen, by which
+   * time it is only an epitaph. The screen renders whatever a game has to say
+   * without knowing any golf, so this is also the guard on that channel staying
+   * quiet for everyone else.
+   */
+  it('states a bet that can never pay, before anybody tees off', async () => {
+    // a card with no par 5 anywhere, so `holes: 'par5s'` designates nothing
+    const par34s = makeCourse(
+      [4, 4, 4, 3, 4, 4, 3, 4, 4, 4, 4, 3, 4, 4, 4, 3, 4, 4],
+      [5, 13, 1, 9, 17, 3, 11, 7, 15, 6, 2, 16, 10, 4, 8, 18, 12, 14],
+    )
+    const round = makeRound({
+      course: par34s,
+      players: makePlayers([{ name: 'Ann' }, { name: 'Bo' }]),
+      games: [
+        { type: 'skins', config: { stakeCents: 100, carryover: true } },
+        { type: 'longDrive', config: { stakeCents: 200, holes: 'par5s' } },
+      ],
+    })
+    round.id = 'round-inert-bet'
+    await db.rounds.put(round)
+    renderStart('round-inert-bet')
+
+    expect(
+      await screen.findByText(
+        'No par 5s in the holes you are playing — long drive has nothing to play for',
+      ),
+    ).toBeInTheDocument()
+  })
+
+  /** …and nothing to say means nothing said. Every shipped note but the inert
+   *  one is gated on `ctx.completed`, so a fresh round is silent. */
+  it('says nothing at the first tee when no game has anything to report', async () => {
+    const round = makeRound({
+      players: makePlayers([{ name: 'Ann' }, { name: 'Bo' }]),
+      games: [
+        { type: 'skins', config: { stakeCents: 100, carryover: true } },
+        { type: 'longDrive', config: { stakeCents: 200, holes: 'par5s' } },
+      ],
+    })
+    round.id = 'round-quiet-start'
+    await db.rounds.put(round)
+    renderStart('round-quiet-start')
+
+    await screen.findByText('Long Drive')
+    expect(screen.queryByText(/nothing to play for/)).not.toBeInTheDocument()
+  })
+
   it('shows each player their per-game stroke count at 80% before scoring', async () => {
     // Scratch vs CH 18 at 80% off-low: applyAllowance(18,80)=14 → high plays 14,
     // scratch plays 0. No score events — allocation is score-independent.
