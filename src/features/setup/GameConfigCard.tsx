@@ -1,6 +1,14 @@
+import { useId } from 'react'
 import type { GameEngine } from '../../engine/catalog'
 import type { HandicapSettings, Uuid } from '../../engine/core/types'
-import { ConfigField, isPlayable, playerCountNote, type FieldPlayer } from './ConfigField'
+import {
+  ConfigField,
+  isPlayable,
+  playerCountNote,
+  stakeSummary,
+  type FieldPlayer,
+} from './ConfigField'
+import { DisclosureArrow } from './DisclosureArrow'
 import { HandicapControls } from './HandicapControls'
 
 export interface GameDraft {
@@ -47,13 +55,39 @@ interface Props {
   label: string
   players: FieldPlayer[]
   draft: GameDraft
+  /** Whether the settings are showing. Owned by SetupScreen — see `collapsed`. */
+  open: boolean
+  onToggle: () => void
   onChange: (draft: GameDraft) => void
   onRemove: () => void
   onRules: () => void
 }
 
-/** A chosen MAIN game: everything it can be configured with, open on the page. */
-export function GameConfigCard({ engine, label, players, draft, onChange, onRemove, onRules }: Props) {
+/**
+ * A chosen MAIN game: everything it can be configured with, open by default and
+ * foldable away.
+ *
+ * Open by DEFAULT is the whole of MAI-89 — a card whose settings are behind a
+ * tap reads as a card with no settings, and groups teed off on stakes they
+ * never knew they could change. The fold is for afterwards: once a bet is set
+ * up, it is a line you want out of the way of the rest of the screen.
+ *
+ * Collapsed it keeps its stake, and keeps any reason it cannot be played. It
+ * loses the blurb, the fields and the rules link — one line, the same shape a
+ * collapsed `SideBetRow` takes, because a fold that saves three lines out of
+ * eight is not worth offering.
+ */
+export function GameConfigCard({
+  engine,
+  label,
+  players,
+  draft,
+  open,
+  onToggle,
+  onChange,
+  onRemove,
+  onRules,
+}: Props) {
   const config = (draft.config ?? {}) as Record<string, unknown>
   const setConfigValue = (key: string, value: unknown) =>
     onChange({ ...draft, config: { ...config, [key]: value } })
@@ -62,16 +96,32 @@ export function GameConfigCard({ engine, label, players, draft, onChange, onRemo
   // tee-off, but the card should say why on its own rather than leaving the
   // reason somewhere else on the screen.
   const stranded = !isPlayable(engine, players.length)
+  const stake = stakeSummary(engine, config)
+  // scoped per instance: the screen renders several of these, and two panels
+  // sharing an id would point every aria-controls at the same element
+  const panelId = useId()
 
   return (
-    <div className="pixel border-felt-500 bg-felt-900/60">
+    // A named GROUP because every card on this screen now renders its fields at
+    // once, so "Skin value", "Handicaps" and "Allowance" repeat down the page.
+    // `gameName` keeps the CONTROLS apart (ConfigField); this is what gives the
+    // card itself a boundary to navigate by.
+    <div role="group" aria-label={label} className="pixel border-felt-500 bg-felt-900/60">
       <div className="flex items-start justify-between gap-3 px-4 pb-1 pt-4">
-        <div className="min-w-0 flex-1">
-          <span className="text-lg font-bold">{label}</span>
-          <p className={`text-sm ${stranded ? 'text-flag-500' : 'text-stone-400'}`}>
-            {stranded ? playerCountNote(engine) : engine.meta.blurb}
-          </p>
-        </div>
+        <button
+          className="flex min-w-0 flex-1 items-center justify-between gap-3 text-left"
+          aria-expanded={open}
+          // only while it exists: the panel is unmounted when closed, and
+          // aria-controls pointing at nothing is an ARIA error
+          aria-controls={open ? panelId : undefined}
+          onClick={onToggle}
+        >
+          <span className="min-w-0 truncate text-lg font-bold">{label}</span>
+          <span className="flex shrink-0 items-center gap-2">
+            {!open && stake && <span className="tabular-nums text-stone-300">{stake}</span>}
+            <DisclosureArrow open={open} />
+          </span>
+        </button>
         <button
           aria-label={`remove ${label}`}
           onClick={onRemove}
@@ -80,31 +130,40 @@ export function GameConfigCard({ engine, label, players, draft, onChange, onRemo
           ✕
         </button>
       </div>
-      <button
-        aria-label={`${label} rules`}
-        onClick={onRules}
-        className="font-display px-4 pb-3 pt-1 text-[10px] uppercase text-felt-400"
-      >
-        Rules ▶
-      </button>
 
-      <div className="space-y-4 border-t border-felt-800/60 px-4 py-4">
-        {engine.configFields.map((field) => (
-          <ConfigField
-            key={field.key}
-            field={field}
-            value={config[field.key]}
-            players={players}
-            gameName={label}
-            onChange={(v) => setConfigValue(field.key, v)}
-          />
-        ))}
-        <HandicapControls
-          handicap={draft.handicap}
-          gameName={label}
-          onChange={(handicap) => onChange({ ...draft, handicap })}
-        />
-      </div>
+      {/* OUTSIDE the fold: it is why tee-off is blocked, so it must not be a
+          thing you can hide by tidying the screen up. */}
+      {stranded && <p className="px-4 pb-3 text-sm text-flag-500">{playerCountNote(engine)}</p>}
+
+      {open && (
+        <div id={panelId}>
+          {!stranded && <p className="px-4 pb-3 text-sm text-stone-400">{engine.meta.blurb}</p>}
+          <div className="space-y-4 border-t border-felt-800/60 px-4 py-4">
+            {engine.configFields.map((field) => (
+              <ConfigField
+                key={field.key}
+                field={field}
+                value={config[field.key]}
+                players={players}
+                gameName={label}
+                onChange={(v) => setConfigValue(field.key, v)}
+              />
+            ))}
+            <HandicapControls
+              handicap={draft.handicap}
+              gameName={label}
+              onChange={(handicap) => onChange({ ...draft, handicap })}
+            />
+            <button
+              aria-label={`${label} rules`}
+              onClick={onRules}
+              className="font-display text-[10px] uppercase text-felt-400"
+            >
+              Rules ▶
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

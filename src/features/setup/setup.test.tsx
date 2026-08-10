@@ -99,6 +99,18 @@ async function pickGame(name: string, section: 'main' | 'side' = 'main') {
   await userEvent.click(await within(await picker()).findByText(name))
 }
 
+/**
+ * The chosen-game cards, in screen order: main games first, then side bets.
+ *
+ * Every card is a named group (MAI-89) and nothing else on the screen is one,
+ * so this is the way to reach one game's controls now that they are all mounted
+ * at once. Deliberately positional rather than `{ name: 'Skins (#1)' }`: that
+ * "#1" is `gameLabel`'s LAST-RESORT discriminator, reached only because two
+ * default Skins match on every earlier axis, and naming it here would couple
+ * this file to a ladder that has nothing to do with setup.
+ */
+const gameCards = () => screen.getAllByRole('group')
+
 /** The picker sheet's content region. */
 const picker = () => screen.findByRole('region', { name: 'Game picker' })
 const pickerClosed = () =>
@@ -357,9 +369,11 @@ describe('SetupScreen — choosing games', () => {
     await pickGame('Skins')
     await pickGame('Skins', 'side')
 
-    // make them differ, or they are a duplicate and tee-off is blocked. Only
-    // the main card's stake is mounted — the side row is collapsed.
-    await userEvent.click(screen.getByRole('button', { name: /^increase Skin value/ }))
+    // make them differ, or they are a duplicate and tee-off is blocked. BOTH
+    // stakes are mounted now (MAI-89), so raise the main game's specifically.
+    await userEvent.click(
+      within(gameCards()[0]!).getByRole('button', { name: /^increase Skin value/ }),
+    )
 
     await teeOff()
     await waitFor(async () => expect(await roundFor('penmar')).toBeDefined())
@@ -386,10 +400,11 @@ describe('SetupScreen — choosing games', () => {
     await toStepTwo()
     await pickGame('Skins', 'side')
     await pickGame('Skins', 'side')
-    // a side-bet row is collapsed until tapped, so open one to reach its stake
+    // both side bets arrive open, so raise the first one's stake straight away
     // and make the two differ (identical settings block tee-off)
-    await userEvent.click(screen.getAllByRole('button', { expanded: false })[0]!)
-    await userEvent.click(screen.getByRole('button', { name: /^increase Skin value/ }))
+    await userEvent.click(
+      within(gameCards()[0]!).getByRole('button', { name: /^increase Skin value/ }),
+    )
 
     await teeOff()
     await waitFor(async () => expect(await roundFor('penmar')).toBeDefined())
@@ -423,9 +438,81 @@ describe('SetupScreen — choosing games', () => {
     await pickGame('Skins', 'side')
 
     expect(screen.getByText('Nothing picked yet')).toBeInTheDocument()
-    // it sits under SIDE BETS, as a compact row rather than a full card
+    // it sits under SIDE BETS, and the MAIN section is the one still empty
     expect(screen.getByRole('button', { name: 'remove Skins' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /More side bets/ })).toBeInTheDocument()
+  })
+
+  /**
+   * MAI-89. A side bet used to arrive FOLDED, so its stake, its handicap policy
+   * and even its rules link were behind an unlabelled ▶ that nothing invited
+   * you to press — groups teed off on a default dollar they never knew was
+   * theirs to change. The fold stays; the default flips.
+   */
+  it('opens a side bet on the settings the moment it is added', async () => {
+    await toStepTwo()
+    await pickGame('Skins', 'side')
+
+    const card = within(gameCards()[0]!)
+    expect(card.getByRole('button', { name: /^increase Skin value/ })).toBeInTheDocument()
+    expect(card.getByText('Handicaps')).toBeInTheDocument()
+    expect(card.getByRole('button', { name: 'Skins rules' })).toBeInTheDocument()
+    expect(card.getByRole('button', { name: /^Skins/, expanded: true })).toBeInTheDocument()
+  })
+
+  /** The main card gains the affordance it never had: it can be put away too. */
+  it('folds one card away without touching its neighbour', async () => {
+    await toStepTwo()
+    await pickGame('Skins')
+    await pickGame('Closest to the Pin', 'side')
+
+    const [skins, ctp] = gameCards()
+    await userEvent.click(within(skins!).getByRole('button', { name: /^Skins/, expanded: true }))
+
+    // folded: the fields are gone, the stake it is known by is not
+    expect(within(skins!).queryByRole('button', { name: /^increase Skin value/ })).toBeNull()
+    expect(
+      within(skins!).getByRole('button', { name: /^Skins/, expanded: false }),
+    ).toBeInTheDocument()
+    expect(within(skins!).getByText('$1')).toBeInTheDocument()
+    // and the one beside it is untouched
+    expect(within(ctp!).getByText('Handicaps')).toBeInTheDocument()
+  })
+
+  /**
+   * "…and stays that way unless I collapse it", in both directions: the game
+   * you added arrives open, and the one you folded stays folded.
+   */
+  it('leaves the cards already on screen alone when another game is added', async () => {
+    await toStepTwo()
+    await pickGame('Skins')
+    await userEvent.click(screen.getByRole('button', { name: /^Skins/, expanded: true }))
+    await pickGame('Closest to the Pin', 'side')
+
+    const [skins, ctp] = gameCards()
+    expect(
+      within(skins!).getByRole('button', { name: /^Skins/, expanded: false }),
+    ).toBeInTheDocument()
+    expect(
+      within(ctp!).getByRole('button', { name: /Closest to the Pin/, expanded: true }),
+    ).toBeInTheDocument()
+  })
+
+  /**
+   * Why the fold is state on SetupScreen and not inside the cards: this step is
+   * a conditional branch of one component, so `← Back` unmounts every card on
+   * it. Held locally, a screen the user had just tidied would silently spring
+   * back open on the way forward.
+   */
+  it('remembers a folded card across a trip back through the steps', async () => {
+    await toStepTwo()
+    await pickGame('Skins')
+    await userEvent.click(screen.getByRole('button', { name: /^Skins/, expanded: true }))
+
+    await userEvent.click(screen.getByText('← Back'))
+    await userEvent.click(screen.getByRole('button', { name: 'Continue' }))
+
+    expect(await screen.findByRole('button', { name: /^Skins/, expanded: false })).toBeInTheDocument()
   })
 
   it('tees off a side-bets-only round, storing no role for it', async () => {

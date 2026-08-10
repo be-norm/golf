@@ -89,6 +89,31 @@ export function SetupScreen() {
   const [picker, setPicker] = useState<'main' | 'side'>()
 
   /**
+   * Which chosen games the user has FOLDED AWAY (MAI-89).
+   *
+   * COLLAPSED ids, not expanded ones — which is what makes "every card is open
+   * by default", "a game added later arrives open" and "adding a game disturbs
+   * nothing already on the screen" one property of the empty set rather than
+   * three behaviours to keep in step.
+   *
+   * Up here rather than inside the cards because the games step unmounts on
+   * every `← Back`, which would silently re-open everything the user had just
+   * tidied away. Same call `GamePickerSheet` makes about its grouping: a view
+   * preference should survive.
+   *
+   * Never pruned on remove. `newId` is UUIDv7 (invariant #8) so an id is never
+   * minted twice — a removed game's entry can't attach itself to anything, and
+   * the set dies with the screen.
+   */
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set())
+  const toggleCollapsed = (gameId: string) =>
+    setCollapsed((prev) => {
+      const next = new Set(prev)
+      if (!next.delete(gameId)) next.add(gameId)
+      return next
+    })
+
+  /**
    * Auto-open the picker ONCE, the first time step 2 is reached with nothing
    * chosen — the empty state is otherwise a dead end behind a disabled button.
    *
@@ -748,6 +773,8 @@ export function SetupScreen() {
                       label={gameLabel(draft, draftGames)}
                       players={players}
                       draft={draft}
+                      open={!collapsed.has(draft.gameId)}
+                      onToggle={() => toggleCollapsed(draft.gameId)}
                       onChange={updateGame}
                       onRemove={() => removeGame(draft.gameId)}
                       onRules={() => setRulesFor(draft.type)}
@@ -776,6 +803,8 @@ export function SetupScreen() {
                   label={gameLabel(draft, draftGames)}
                   players={players}
                   draft={draft}
+                  open={!collapsed.has(draft.gameId)}
+                  onToggle={() => toggleCollapsed(draft.gameId)}
                   onChange={updateGame}
                   onRemove={() => removeGame(draft.gameId)}
                   onRules={() => setRulesFor(draft.type)}

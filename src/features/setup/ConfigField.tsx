@@ -193,11 +193,11 @@ export function ConfigField({
 }
 
 /**
- * The read-only stake shown on a COLLAPSED side-bet row — the one number a
- * side bet is identified by in conversation ("the dollar skins").
+ * The read-only stake shown on a FOLDED card, in either section — the one
+ * number a bet is identified by in conversation ("the dollar skins").
  *
- * Display only. Every edit, in both sections, goes through `ConfigField`; this
- * exists so a collapsed row can be one line instead of two.
+ * Display only. Every edit goes through `ConfigField`; this exists so a folded
+ * card can say what it is in one line instead of saying nothing.
  */
 export function stakeSummary(engine: GameEngine, config: Record<string, unknown>): string | undefined {
   const money = engine.configFields.find((f) => f.kind === 'money')
