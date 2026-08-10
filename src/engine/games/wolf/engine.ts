@@ -35,9 +35,12 @@ export type WolfConfig = z.infer<typeof wolfConfigSchema>
  * and half the downside, which made going lone the answer roughly always and
  * collapsed the decision the game is built on (MAI-83).
  *
- * Ties halve the hole. After the rotation runs out (holes 17–18, or the 9th
- * hole of a nine), the player with the fewest points is the wolf — still the
- * trailing player now that the totals can go negative.
+ * Ties halve the hole. After the rotation runs out (the last two holes of an
+ * 18 with four players, or the 9th of a nine), the player with the fewest
+ * points is the wolf — still the trailing player now that the totals can go
+ * negative. The rotation counts POSITIONS in `ctx.holesPlayed`, not hole
+ * numbers, so a round teeing off on 10 simply hands the first wolf the 10th
+ * tee and the tail lands on the last two holes walked (MAI-41).
  *
  * LONE AND BLIND ARE SYMMETRIC ON PURPOSE, and that is a design decision, not
  * an oversight. It means going lone breaks even only when your single ball
@@ -147,8 +150,8 @@ function derive(
     // Recomputing is the wrong answer, because who the wolf was is not a
     // derivation — it is a THING THAT HAPPENED on that tee, and the group
     // recorded it. Treating the stamp as a tripwire (the first attempt) threw
-    // away the declaration AND the hole's money on both 17 and 18 of an
-    // ordinary round; treating it as the authority keeps the hole exactly as it
+    // away the declaration AND the hole's money on both of an ordinary round's
+    // last two holes; treating it as the authority keeps the hole exactly as it
     // was played. It also closes the bug this stamp was added for — a lone call
     // can no longer become somebody else's, because it stays attached to the
     // player who made it.
@@ -562,7 +565,7 @@ export const wolfEngine: GameEngine<WolfConfig> = {
         'The Wolf rotates each hole in your setup order — everyone takes a turn every four holes.',
         'Watching the tee shots, the Wolf picks a partner for the hole — or declares Lone Wolf and plays 1 against 3. Declaring Blind Wolf (before anyone swings) raises the stakes further.',
         'Best net ball of each side decides the hole. A tie halves it — nobody scores.',
-        'When the rotation runs out (holes 17–18, or the 9th of a nine), the player with the fewest points is the Wolf.',
+        'When the rotation runs out (the last two holes of an 18, or the 9th of a nine), the player with the fewest points is the Wolf.',
         "Missing a score? A side's best ball counts whoever posted.",
       ],
       scoring: [

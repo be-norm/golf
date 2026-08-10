@@ -166,3 +166,55 @@ describe('allowance % → stroke allocation', () => {
     expect(strokesTotal('Bogey')).toBe(0)
   })
 })
+
+/**
+ * Allocation is a function of the SET of stroke indexes played, never of the
+ * order they are walked in (MAI-41).
+ *
+ * `context.ts` maps `holesPlayed` to stroke indexes, ranks them, and maps the
+ * result back by position — a round-trip that is only correct if both halves
+ * use the same ordering. Teeing off on 10 permutes that list, so if the two
+ * ever came apart, every player's strokes would land on the wrong holes while
+ * their TOTAL stayed right: a silent misallocation that zero-sum cannot see,
+ * because the money still balances when the strokes are wrong.
+ */
+describe('stroke allocation over a round that teed off elsewhere', () => {
+  const NET: HandicapSettings = { mode: 'net', allowancePct: 100, reference: 'offLow' }
+  const strokesByHole = (startHole?: number) => {
+    const players = makePlayers([{ name: 'Scratch', ch: 0 }, { name: 'Bogey', ch: 18 }])
+    const round = makeRound({
+      players,
+      ...(startHole !== undefined && { startHole }),
+      games: [{ type: 'skins', handicap: NET, config: { stakeCents: 100, carryover: false } }],
+    })
+    const ctx = buildRoundContext(round, [])
+    return {
+      ctx,
+      strokes: Object.fromEntries(
+        ctx.holesPlayed.map((h) => [h, ctx.strokesFor(GAME, 'p-bogey', h)]),
+      ),
+    }
+  }
+
+  it('gives every hole the same strokes it would have had from the first tee', () => {
+    const straight = strokesByHole()
+    const wrapped = strokesByHole(10)
+
+    expect(wrapped.ctx.holesPlayed[0]).toBe(10)
+    expect(wrapped.ctx.holesPlayed).toHaveLength(18)
+    // same eighteen holes, same stroke on each — only the walking order differs
+    expect(wrapped.strokes).toEqual(straight.strokes)
+  })
+
+  /**
+   * The 9-of-18 halving keys off how many holes are played and the card's size,
+   * not off which holes — so a wrapped EIGHTEEN is still a full round and must
+   * not be handed half a course handicap. A rule reading `round.holes` or
+   * "starts above 9" would get this wrong.
+   */
+  it('does not mistake a wrapped eighteen for a nine', () => {
+    expect(strokesByHole(10).ctx.holesPlayed).toHaveLength(18)
+    // 18 strokes over 18 holes: one each, exactly as from the first tee
+    expect(Object.values(strokesByHole(10).strokes).every((s) => s === 1)).toBe(true)
+  })
+})

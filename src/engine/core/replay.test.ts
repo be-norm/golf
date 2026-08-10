@@ -3,7 +3,8 @@ import fc from 'fast-check'
 import '../games/index'
 import { deriveRound, getEngine, listEngines } from '../catalog'
 import { EventLog, makePlayers, makeRound, TEST_ONLY_ENGINE_TYPES } from '../test/harness'
-import { arbitraryRoundAndEvents, GAME_FUZZ } from '../test/arbitraries'
+import { arbitraryRotationPair, arbitraryRoundAndEvents, GAME_FUZZ } from '../test/arbitraries'
+import { buildHoleLedger } from '../ledger'
 import { assertZeroSum, minimalTransfers } from './money'
 import type { RoundEvent } from './events'
 import { effectiveEvents } from './replay'
@@ -237,6 +238,105 @@ describe('replay invariants (fast-check)', () => {
           )
         },
       ),
+    )
+  })
+})
+
+/**
+ * Position, not hole number (CLAUDE.md invariant 9, MAI-41).
+ *
+ * Separate from the block above because it is a different KIND of property.
+ * Everything up there is order-blind — it would pass unchanged if every engine
+ * confused a hole's number with its place in the round — which is precisely how
+ * Match Play came to settle nine holes early while balancing to the cent.
+ *
+ * This one compares two rounds that are the same golf played on differently
+ * numbered tee markers, so an engine that reads the numbers where it means the
+ * places has nowhere to hide. See `arbitraryRotationPair`.
+ */
+describe('a wrapped round is the same golf as a straight one (fast-check)', () => {
+  it('every engine settles a rotated round exactly as it settles the straight one', () => {
+    fc.assert(
+      fc.property(arbitraryRotationPair(), ({ startHole, wrapped, straight }) => {
+        const a = deriveRound(wrapped.round, wrapped.log.events).derivations
+        const b = deriveRound(straight.round, straight.log.events).derivations
+
+        expect(a.size).toBe(b.size)
+        for (const [gameId, da] of a) {
+          const db = b.get(gameId)!
+          const type = wrapped.round.games.find((g) => g.gameId === gameId)!.type
+          expect(
+            da.settlement.perPlayerCents,
+            `${type} settles differently from hole ${startHole} than from hole 1`,
+          ).toEqual(db.settlement.perPlayerCents)
+        }
+      }),
+    )
+  })
+
+  /**
+   * …and lands it on the same holes, which the totals above cannot see.
+   *
+   * `buildHoleLedger` replays a prefix per hole, so a positional slip there
+   * moves money to the wrong ROW while the final settlement stays identical —
+   * exactly the failure the old numeric prefix produced, and invisible to every
+   * other property here. Compared by POSITION in the walk, since the two cards
+   * number the same hole differently by construction.
+   *
+   * Summaries are compared only for PRESENCE: they are prose and quote hole
+   * numbers ("Press @12"), so the strings differ for a correct engine while
+   * whether a hole had something to say must not.
+   */
+  it('lands the money on the same holes of the walk, not just the same total', () => {
+    fc.assert(
+      fc.property(arbitraryRotationPair(), ({ startHole, wrapped, straight }) => {
+        const shape = (r: { round: typeof wrapped.round; log: typeof wrapped.log }) => {
+          const { ctx, derivations } = deriveRound(r.round, r.log.events)
+          const at = new Map(ctx.holesPlayed.map((h, i) => [h, i]))
+          return new Map(
+            [...buildHoleLedger(r.round, r.log.events, ctx, derivations)].map(([gameId, rows]) => [
+              gameId,
+              rows.map((row) => ({
+                position: at.get(row.hole),
+                deltas: row.deltas,
+                runningCents: row.runningCents,
+                said: row.summary.length > 0,
+              })),
+            ]),
+          )
+        }
+        const a = shape(wrapped)
+        const b = shape(straight)
+
+        for (const [gameId, rowsA] of a) {
+          const type = wrapped.round.games.find((g) => g.gameId === gameId)!.type
+          expect(
+            rowsA,
+            `${type}'s ledger differs by position from hole ${startHole} vs hole 1`,
+          ).toEqual(b.get(gameId))
+        }
+      }),
+    )
+  })
+
+  /**
+   * The pair really is the same golf — a guard on the generator, not on the
+   * engines. If the renumbered card ever stopped presenting the same pars and
+   * stroke indexes in the same order, the property above would compare two
+   * different rounds and pass by luck.
+   */
+  it('the two cards present the same holes in the same order', () => {
+    fc.assert(
+      fc.property(arbitraryRotationPair(), ({ wrapped, straight }) => {
+        const a = deriveRound(wrapped.round, []).ctx
+        const b = deriveRound(straight.round, []).ctx
+        expect(a.holesPlayed).toHaveLength(18)
+        expect(b.holesPlayed).toEqual(Array.from({ length: 18 }, (_, i) => i + 1))
+        expect(a.holesPlayed.map((h) => a.par(h))).toEqual(b.holesPlayed.map((h) => b.par(h)))
+        expect(a.holesPlayed.map((h) => a.strokeIndex(h))).toEqual(
+          b.holesPlayed.map((h) => b.strokeIndex(h)),
+        )
+      }),
     )
   })
 })

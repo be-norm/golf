@@ -230,6 +230,39 @@ describe('a malformed game never takes a screen down', () => {
     })
   })
 
+  /**
+   * A start hole the card has not got (MAI-41).
+   *
+   * `importRound` casts the round straight to `Round` — it validates the event
+   * log and a game's shape, never `holes` or `startHole` — so an archive can
+   * carry hole 40, hole 0, or a string. `holesForRound` answers with the
+   * range's own default rather than an empty list, because empty here would
+   * mean a round that derives no holes at all: no scores, no money, and a card
+   * the user can still see in their list showing nothing.
+   *
+   * `ctx.par` throws by design on a hole outside the snapshot, so this is not a
+   * cosmetic guard — the fallback is what stops the throw.
+   */
+  it('plays the declared range when the stored start hole is not on the card', () => {
+    const round = withGames([
+      {
+        gameId: 'game-1',
+        type: 'skins',
+        handicap: { mode: 'gross', allowancePct: 100, reference: 'absolute' },
+        config: { stakeCents: 100, carryover: true },
+      },
+    ])
+    // exactly what the round derives with no start hole stored at all
+    const sound = scored(round)
+
+    for (const bad of [40, 0, -1, undefined as unknown as number, 'ten' as unknown as number]) {
+      const { ctx, derivations } = scored({ ...round, startHole: bad })
+      expect(ctx.holesPlayed, `startHole ${String(bad)}`).toEqual(sound.ctx.holesPlayed)
+      const cents = Object.values(derivations.get('game-1')!.settlement.perPlayerCents)
+      expect(cents.reduce((a, b) => a + b, 0)).toBe(0)
+    }
+  })
+
   it('settles the good games in a round that also holds a broken one', () => {
     const round = withGames([
       { gameId: 'game-1', type: 'skins', config: {} },

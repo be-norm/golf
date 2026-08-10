@@ -12,6 +12,7 @@ import {
   scoreMatchHole,
   segmentSpans,
   sideStake,
+  spanFrom,
   stretchLabel,
   toPlayAfterIn,
   type MatchSegment,
@@ -19,6 +20,7 @@ import {
   type MatchSides,
   type MatchState,
 } from '../../core/match'
+import { holeRangeLabel } from '../../core/holes'
 import { addLine, emptySettlement, formatCents, type Settlement } from '../../core/money'
 import { duplicateInstanceProblems } from '../../core/setup'
 import { standingsFromSettlement } from '../../core/standings'
@@ -50,6 +52,16 @@ interface Bet extends MatchState {
   segment: Segment
   /** first hole this bet scores (press start) */
   startHole: number
+  /**
+   * WHERE that hole sits in the segment's span — the comparable half of
+   * `startHole`, and the one every "has this bet started yet?" test uses.
+   *
+   * A round can tee off anywhere and wrap (MAI-41), so `hole >= startHole` is
+   * not "this bet has opened": on an 18 from 10, a press taken on hole 1 (the
+   * tenth hole walked) would retroactively swallow holes 10–18. Positions are
+   * the only thing that orders a wrapped round.
+   */
+  startIdx: number
   /** press depth: 0 = original bet */
   depth: number
 }
@@ -110,23 +122,36 @@ function derive(
   // offering an undo there would be a button that visibly does nothing.
   const autoWanted = new Set<string>()
 
+  // Where each hole sits in its segment's span. THE ordering primitive for this
+  // engine: a wrapped round makes hole numbers useless for "before"/"after"
+  // (core/holes.ts), and every comparison below goes through here instead.
+  // A miss means the hole isn't in that segment at all.
+  const posIn: Record<Segment, ReadonlyMap<number, number>> = {
+    front: new Map(spans.front.map((h, i) => [h, i])),
+    back: new Map(spans.back.map((h, i) => [h, i])),
+    overall: new Map(spans.overall.map((h, i) => [h, i])),
+  }
+
   const bets: Bet[] = (['front', 'back', 'overall'] as const)
     .filter((seg) => spans[seg].length > 0)
     .map((seg) => ({
       id: seg,
       segment: seg,
       startHole: spans[seg][0]!,
+      startIdx: 0,
       depth: 0,
       ...newMatch(spans[seg], spans[seg][0]!),
     }))
 
   for (const press of manualPresses.values()) {
-    if (!spans[press.segment].includes(press.hole)) continue
+    const startIdx = posIn[press.segment].get(press.hole)
+    if (startIdx === undefined) continue
     pressStarts.add(pressKey(press.segment, press.hole))
     bets.push({
       id: `press-${press.segment}-${press.hole}`,
       segment: press.segment,
       startHole: press.hole,
+      startIdx,
       depth: 1,
       ...newMatch(spans[press.segment], press.hole),
     })
@@ -154,9 +179,13 @@ function derive(
   for (const hole of ctx.holesPlayed) {
     const result = holeResult.get(hole)
     if (result === null || result === undefined) continue
-    const active = bets.filter(
-      (b) => b.closedAt === undefined && spans[b.segment].includes(hole) && hole >= b.startHole,
-    )
+    // "in this bet's stretch, at or after where it opened" — one positional
+    // test replacing a membership check plus a hole-number comparison.
+    const active = bets.filter((b) => {
+      if (b.closedAt !== undefined) return false
+      const at = posIn[b.segment].get(hole)
+      return at !== undefined && at >= b.startIdx
+    })
     for (const bet of active) {
       // `prev` is the diff BEFORE this hole. Auto-press fires on CROSSING ±2,
       // not on sitting at it, so the transition is what matters — which is why
@@ -170,6 +199,12 @@ function derive(
         // a hole nobody played degrades to "2 up" (core/match.ts)
         ctx.anyScored(hole),
       )
+      // The NEXT hole of this segment is the next one WALKED, not the next
+      // number up: a press opened after hole 18 of an 18-from-10 round starts
+      // on hole 1, and `find(h => h > hole)` would find nothing and silently
+      // drop the press the rules just called for.
+      const nextIdx = posIn[bet.segment].get(hole)! + 1
+      const nextHole = spans[bet.segment][nextIdx]
       if (
         autoPress &&
         // a bet that just closed is not live, and you cannot press a match
@@ -178,9 +213,8 @@ function derive(
         bet.closedAt === undefined &&
         Math.abs(bet.diff) === 2 &&
         Math.abs(prev) < 2 &&
-        spans[bet.segment].some((h) => h > hole)
+        nextHole !== undefined
       ) {
-        const nextHole = spans[bet.segment].find((h) => h > hole)!
         // recorded even when the slot is already taken — the point is that the
         // rules WANT a press here, which is what makes it non-undoable
         autoWanted.add(pressKey(bet.segment, nextHole))
@@ -193,6 +227,7 @@ function derive(
           id: `auto-${bet.id}-@${nextHole}`,
           segment: bet.segment,
           startHole: nextHole,
+          startIdx: nextIdx,
           depth: bet.depth + 1,
           ...newMatch(spans[bet.segment], nextHole),
         })
@@ -220,14 +255,29 @@ function derive(
   // Every bet — parents and presses — reported the way a golfer tracks it:
   // who's up, by how much, holes left; dormie/closed-out/final when apt.
   const sideShort = sides.short
+  // F9/B9 name the CARD's nines, and they are only true when the round walks
+  // the card in order. Tee off on 10 and the first bet covers holes 10–18 —
+  // calling that "F9" would name the wrong nine, and calling holes 1–9 "B9"
+  // would be a flat lie about the holes the group is finishing on. So the
+  // labels become ordinal there, read off the hole list rather than the round
+  // (the list is what knows; see `stretchLabel`).
+  //
+  // No space in the token: it reaches the pinned bar, where three of these sit
+  // in one line, and `settlement.lines[].label`, which the share card PAINTS
+  // and word-wraps on spaces — the hazard `closeMargin` documents.
+  const cardOrder = ctx.holesPlayed[0] === 1
   const segLabel = (seg: Segment): string =>
     // a collapsed 9-hole nassau's single bet is the nine that was played, which
     // is core/match's rule to name (every match game's single bet needs it)
     seg === 'overall'
-      ? stretchLabel(ctx.holesPlayed, ctx.round.holes)
+      ? stretchLabel(ctx.holesPlayed)
       : seg === 'front'
-        ? 'F9'
-        : 'B9'
+        ? cardOrder
+          ? 'F9'
+          : '1st9'
+        : cardOrder
+          ? 'B9'
+          : '2nd9'
   const betLabel = (b: Bet): string => (b.depth === 0 ? segLabel(b.segment) : `Press @${b.startHole}`)
   // Names the bet in full, for contexts that are a flat list rather than rows
   // nested under their segment: settlement lines and the per-hole notes. Goes
@@ -319,14 +369,22 @@ function derive(
     segment: Segment,
     asOf: number,
   ): { trailing: 'a' | 'b'; by: number; on: Bet } | null => {
-    const decided = spans[segment].filter((h) => h < asOf && (holeResult.get(h) ?? null) !== null)
+    // "before `asOf`" is a position, not a smaller number (core/holes.ts)
+    const asOfIdx = posIn[segment].get(asOf) ?? spans[segment].length
+    const decided = spans[segment]
+      .slice(0, asOfIdx)
+      .filter((h) => (holeResult.get(h) ?? null) !== null)
     const at = decided[decided.length - 1]
     if (at === undefined) return null
     let worst = 0
     let on: Bet | undefined
     for (const b of bets) {
-      if (b.segment !== segment || b.startHole >= asOf) continue
-      if (b.closedAt !== undefined && b.closedAt < asOf) continue
+      if (b.segment !== segment || b.startIdx >= asOfIdx) continue
+      // ...and so is "closed before `asOf`". A bet closed on hole 18 of an
+      // 18-from-10 round has NOT closed before hole 3, which is played five
+      // holes later, however the numbers read.
+      const closedIdx = b.closedAt === undefined ? undefined : posIn[segment].get(b.closedAt)
+      if (closedIdx !== undefined && closedIdx < asOfIdx) continue
       const d = b.history.get(at)
       if (d !== undefined && Math.abs(d) > Math.abs(worst)) {
         worst = d
@@ -357,7 +415,10 @@ function derive(
   const ordered = (['front', 'back', 'overall'] as const).flatMap((seg) =>
     bets
       .filter((b) => b.segment === seg)
-      .sort((a, b) => a.startHole - b.startHole || a.depth - b.depth),
+      // by where the press STARTS in the walk, not by its hole number — on a
+      // wrapped round those disagree, and "@12 · @3" is play order even though
+      // it reads backwards
+      .sort((a, b) => a.startIdx - b.startIdx || a.depth - b.depth),
   )
   const detailLines = ordered.map((b) => ({
     label: betLabel(b),
@@ -413,17 +474,18 @@ function derive(
     if (frontier === undefined) return []
     const actions: GameAction[] = []
     for (const seg of ['front', 'back', 'overall'] as const) {
-      if (!spans[seg].includes(frontier)) continue
+      if (!posIn[seg].has(frontier)) continue
       const taken = pressStarts.has(pressKey(seg, frontier))
       const down = pressDeficit(seg, frontier)
       // all square and unpressed: nothing to catch up on, and no side owns
       // the decision. A press already running still shows, so it can be undone.
       if (!taken && !down) continue
-      const toPlay = spans[seg].filter(
-        (h) => h >= frontier && (holeResult.get(h) ?? null) === null,
-      ).length
-      const last = spans[seg][spans[seg].length - 1]!
-      const span = frontier === last ? `hole ${last}` : `holes ${frontier}–${last}`
+      const rest = spanFrom(spans[seg], frontier)
+      const toPlay = rest.filter((h) => (holeResult.get(h) ?? null) === null).length
+      // Name the holes it actually covers. A wrapped stretch is two runs, and
+      // the old first–last phrasing rendered it "holes 12–9" — a bet quoted to
+      // the person deciding whether to take it has to be a true sentence.
+      const span = rest.length === 1 ? `hole ${rest[0]}` : `holes ${holeRangeLabel(rest)}`
       const why = down ? `${deficitPhrase(down)} · ${toPlay} to play` : `${toPlay} to play`
       // Quote the stake to the side being INVITED to press — the one that's
       // down. In a 2-v-1 the lone player books this bet against each opponent,
@@ -518,7 +580,7 @@ function derive(
   // it reports on the last hole of ITS stretch, not the round's.
   for (const b of ordered) {
     if (!matchClosed(b)) continue
-    const span = spans[b.segment].filter((x) => x >= b.startHole)
+    const span = spanFrom(spans[b.segment], b.startHole)
     const decidedOn = b.closedAt ?? span[span.length - 1]
     const closeAt = decidedOn === undefined ? undefined : ctx.finalizedAt(decidedOn)
     if (closeAt !== undefined) note(closeAt, `${betFullLabel(b)} closes — ${betValue(b)}`)

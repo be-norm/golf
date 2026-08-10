@@ -5,6 +5,7 @@ import '../../engine/games'
 import { getEngine, type GameEngine } from '../../engine/catalog'
 import { gameLabel } from '../../engine/label'
 import { courseHandicapForTee } from '../../engine/core/handicap'
+import { holeRangeLabel, holesForRound } from '../../engine/core/holes'
 import { applyTee, doubleNine } from '../../engine/core/tees'
 import type { Course, GameConfig, RoundHoles, TeeSet } from '../../engine/core/types'
 import { courseRepo, ownsCourse, playerRepo, roundRepo } from '../../db/repos'
@@ -79,6 +80,7 @@ export function SetupScreen() {
   const [picked, setPicked] = useState<Course>()
   const [teeSetId, setTeeSetId] = useState<string>()
   const [holes, setHoles] = useState<RoundHoles>('full18')
+  const [startHole, setStartHole] = useState(1)
   const [players, setPlayers] = useState<PlayerDraft[]>([])
   const [nameInput, setNameInput] = useState('')
   const [showGhin, setShowGhin] = useState(false)
@@ -129,6 +131,9 @@ export function SetupScreen() {
     setPicked(c)
     setTeeSetId(c.teeSets[0]?.id)
     setHoles(c.holeCount === 9 ? 'front9' : 'full18')
+    // a start hole belongs to the card it was picked on — hole 14 means nothing
+    // on a nine, and `playedStart` would only silently correct it
+    setStartHole(1)
     // …and move on. Tees and holes belong to the course you just chose, so
     // asking for them beneath a list of every OTHER course invited the reader
     // to think the list was still the question.
@@ -175,6 +180,57 @@ export function SetupScreen() {
       : playedHoles === 'full18'
         ? undefined
         : 'Nine of eighteen — everyone plays off half their course handicap.'
+
+  /**
+   * Choosing a starting hole, WITHIN the nine (or eighteen) being played.
+   *
+   * A Back 9 offers holes 10–18 and a Front 9 offers 1–9, so the range keeps
+   * its name whatever you pick: a back nine started on 13 plays 13–18 then
+   * 10–12 and never touches the front. `holesForRound` enforces that bound
+   * itself — the picker only declines to offer what the engine would refuse.
+   *
+   * The one exclusion left is a nine played twice around: `doubleNine`
+   * renumbers the card 1–18 and stamps which loop each number is, so an offset
+   * on top would label the closing holes "1st time round" when they were the
+   * second. A 9-hole course playing its NINE has no loop stamps, so it chooses
+   * freely.
+   */
+  const canPickStart = !playTwice
+
+  /**
+   * THE HOLES THIS RANGE OFFERS, which is also exactly the holes it will play —
+   * `holesForRound` with no start hole returns the block in head order, so the
+   * grid cannot drift from the derivation by construction. No second rule, and
+   * nothing for a future edit to keep in sync.
+   */
+  const startOptions = played
+    ? holesForRound({ holes: playedHoles, courseSnapshot: played })
+    : []
+  /**
+   * Self-correcting, like `playedHoles` above: a 14 held from an eighteen must
+   * not survive a tap on Back 9, and a start hole from one course must not
+   * survive a switch to another. Falls back to the block's own head — the same
+   * answer `holesForRound` would reach, reached here so the GRID agrees with it
+   * rather than highlighting a hole the round won't start on.
+   */
+  const playedStart =
+    canPickStart && startOptions.includes(startHole) ? startHole : (startOptions[0] ?? 1)
+
+  // The holes this round will actually walk, derived by the SAME function the
+  // engine will use at tee-off, off `played` (the doubled card where that
+  // applies) rather than `course` — so the sentence on this screen and the
+  // round that gets written cannot say different things.
+  const willPlay = played
+    ? holesForRound({ holes: playedHoles, startHole: playedStart, courseSnapshot: played })
+    : []
+  const startNote =
+    // nothing to promise when the range derives no holes at all — a card whose
+    // numbering can't seat the start tees off empty, and "You'll play ." is a
+    // broken sentence about it. Nothing to say either when the round starts at
+    // its range's own head — the range's name already says that.
+    willPlay.length === 0 || playedStart === startOptions[0]
+      ? undefined
+      : `You'll play ${holeRangeLabel(willPlay)}.`
 
   const addPlayer = (name: string) => {
     const trimmed = name.trim()
@@ -338,6 +394,14 @@ export function SetupScreen() {
       courseSnapshot: applyTee(played, playedTee),
       teeSetId: playedTee.id,
       holes: playedHoles,
+      // Only when it differs from what the range already says, the `trackPutts`
+      // rule below — a round teeing off where its range starts stays byte-for-
+      // byte the shape every round had before MAI-41, and that is also what
+      // keeps `startHole` off any nine (see `holesForRound` on revert safety).
+      // Against the block's own head, which is what `holesForRound` falls back
+      // to — so "stored only when it changes something" stays exactly true on a
+      // card whose numbering surprises us, rather than only on a tidy 1–18 one.
+      ...(playedStart !== startOptions[0] ? { startHole: playedStart } : {}),
       players: roundPlayers,
       games: gameConfigs,
       // Stored only when something needs it, so a round that isn't counting
@@ -461,7 +525,30 @@ export function SetupScreen() {
                   {holeOptions.map(([value, label]) => (
                     <button
                       key={value}
-                      onClick={() => setHoles(value)}
+                      // Re-head the start when the range CHANGES — and only
+                      // then. Re-tapping the range you already chose is not a
+                      // new choice (the same rule `selectCourse` follows), and
+                      // resetting on it would throw away a start hole the user
+                      // picked one tap ago: Back 9, then 13, then a confirming
+                      // tap on Back 9 would tee off on 10.
+                      //
+                      // The reset can't just be dropped either — `playedStart`
+                      // only corrects a hole the new block LACKS, so a 14 held
+                      // from an eighteen would survive a tap on Back 9.
+                      //
+                      // Compared against the RAW `holes`, not `playedHoles`.
+                      // The chip highlighted may be a correction rather than a
+                      // choice — the course is a live query, so an 18-hole card
+                      // edited down to a nine leaves `holes: 'back9'` showing
+                      // as "9 holes". Guarding on the derived value would make
+                      // tapping that chip a no-op, so a revert of the card
+                      // would spring the round back to Back 9 from 13 after
+                      // the user had explicitly picked the nine.
+                      onClick={() => {
+                        if (value === holes) return
+                        setHoles(value)
+                        setStartHole(value === 'back9' ? 10 : 1)
+                      }}
                       className={`px-4 py-2.5 text-lg ${
                         playedHoles === value
                           ? 'pixel border-felt-300 bg-felt-700'
@@ -474,6 +561,34 @@ export function SetupScreen() {
                 </div>
                 {holesNote && <p className="mt-2 text-xs text-stone-500">{holesNote}</p>}
               </div>
+              {canPickStart && startOptions.length > 1 && (
+                <div>
+                  <h2 className="font-display mb-2 text-[10px] uppercase text-stone-400">
+                    Start on hole
+                  </h2>
+                  {/* The range's own holes and no others — a Back 9 offers
+                      10–18, so whatever you tap, the round is still the back
+                      nine. `startOptions` IS what will be played, so this grid
+                      cannot offer a hole the round would refuse. */}
+                  <div className="grid grid-cols-6 gap-1.5">
+                    {startOptions.map((h) => (
+                      <button
+                        key={h}
+                        onClick={() => setStartHole(h)}
+                        aria-pressed={playedStart === h}
+                        className={`py-2.5 text-lg ${
+                          playedStart === h
+                            ? 'pixel border-felt-300 bg-felt-700'
+                            : 'pixel border-stone-700 bg-stone-900/70'
+                        }`}
+                      >
+                        {h}
+                      </button>
+                    ))}
+                  </div>
+                  {startNote && <p className="mt-2 text-xs text-stone-500">{startNote}</p>}
+                </div>
+              )}
             </>
           )}
         </section>

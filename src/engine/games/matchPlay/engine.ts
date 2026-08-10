@@ -157,7 +157,7 @@ function derive(
   // The stretch, not "Match": every surface prints the game's name beside this
   // already, and the ledger row reserves a label gutter whether or not one is
   // given. "18"/"F9"/"B9" is the one thing the heading doesn't say.
-  const label = stretchLabel(span, ctx.round.holes)
+  const label = stretchLabel(span)
   const detailLines = [{ label, value: betValue() }]
   // The bar shows LIVE MATCH STATUS rather than recapping the latest decided
   // hole — the documented match-play exception to the latestHoleSummary

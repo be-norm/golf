@@ -1,6 +1,7 @@
 import type { GameDerivation } from '../../engine/catalog'
 import { gameLabel } from '../../engine/label'
 import type { RoundContext } from '../../engine/core/context'
+import { teedOffAway } from '../../engine/core/holes'
 import {
   collectorsFrom,
   combineSettlements,
@@ -401,14 +402,22 @@ export function buildSummaryCard(
     }
   }
 
-  const cards = [
-    half(ctx.holesPlayed.filter((h) => h <= 9)),
-    half(ctx.holesPlayed.filter((h) => h > 9)),
-  ].filter((c): c is ScorecardHalf => c !== null)
+  // Split by play order, the same rule ScorecardScreen uses — the halves are
+  // the nines that were walked, so the top table is the nine the front bet was
+  // settled over however the card numbers them.
+  const cards = [half(ctx.holesPlayed.slice(0, 9)), half(ctx.holesPlayed.slice(9))].filter(
+    (c): c is ScorecardHalf => c !== null,
+  )
+
+  // Say where it teed off when that isn't where the range says. Without it the
+  // image shows an 18 whose first column is hole 10 and offers no reason why.
+  // One shared rule with the first-tee screen and the scorecard (`teedOffAway`).
+  const teedOff = teedOffAway(round)
+  const from = teedOff === undefined ? '' : ` from ${teedOff}`
 
   return {
     course: round.courseSnapshot.name,
-    subtitle: `${ctx.holesPlayed.length} holes · ${formatDate(round.startedAt)}`,
+    subtitle: `${ctx.holesPlayed.length} holes${from} · ${formatDate(round.startedAt)}`,
     standings,
     settle,
     games,

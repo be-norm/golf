@@ -589,4 +589,42 @@ describe('buildSummaryCard', () => {
     expect(c.standings.every((s) => s.cents === 0)).toBe(true)
     expect(c.cards[0]!.rows.every((r) => r.strokes.every((s) => s === false))).toBe(true)
   })
+
+  /**
+   * A round that teed off on 10 (MAI-41).
+   *
+   * The halves are the nines WALKED, so the top table is 10–18 — the same
+   * order the money ledger reads in and the nassau bets settled in. And the
+   * subtitle has to say where it started, or the image shows an eighteen whose
+   * first column is hole 10 with nothing explaining it.
+   */
+  it('lays a wrapped round out in walk order and says where it teed off', () => {
+    const round = makeRound({
+      players: makePlayers([{ name: 'Ben' }, { name: 'Al' }]),
+      startHole: 10,
+      games: [],
+    })
+    const log = new EventLog(round.id)
+    log.scoreByHole(round, { Ben: Array(18).fill(4), Al: Array(18).fill(5) })
+
+    const c = card(round, log)
+    expect(c.subtitle).toBe('18 holes from 10 · 18 Jul 2026')
+    expect(c.cards[0]!.holes).toEqual([10, 11, 12, 13, 14, 15, 16, 17, 18])
+    expect(c.cards[1]!.holes).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9])
+    // pars follow their holes, not their position
+    expect(c.cards[1]!.pars).toEqual([4, 4, 5, 3, 4, 4, 3, 5, 4])
+  })
+
+  /** …and an ordinary round says nothing extra, so the image is unchanged. */
+  it('leaves the subtitle alone for a round that started where its range says', () => {
+    const round = makeRound({
+      players: makePlayers([{ name: 'Ben' }, { name: 'Al' }]),
+      holes: 'back9',
+      games: [],
+    })
+    const log = new EventLog(round.id)
+    log.scoreByHole(round, { Ben: [4], Al: [5] }, [10])
+
+    expect(card(round, log).subtitle).toBe('9 holes · 18 Jul 2026')
+  })
 })

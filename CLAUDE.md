@@ -97,6 +97,34 @@ way it was.
    Exception: courses imported from OpenGolfAPI keep the provider's UUID as their id —
    deliberate, so the same course dedupes across devices and the shared library
    (provenance lives in `source`/`source_id`). Tee-set ids are course-scoped slugs.
+9. **`ctx.holesPlayed` is the hole set, and its ORDER is the only thing that sequences it.**
+   A round can tee off on any hole and WRAP (`Round.startHole`, MAI-41): 18 from 10 plays
+   `[10…18, 1…9]` and finishes on 9. `holesForRound` (`core/holes.ts`) is the one producer,
+   the only reader of `round.holes`/`round.startHole`, and the one place a start hole the card
+   lacks falls back — imports validate neither field. **Everything downstream compares
+   POSITION in that list, never hole number.** `3 < 12` says nothing about which was played
+   first, so "is this hole later", "how many are left", "which nine is this" and "what is in
+   this prefix" are all index questions: `spanFrom`, `segmentSpans`' slice halves, Nassau's
+   `Bet.startIdx`, the ledger's `positionOf`. **Getting one wrong is invisible to every
+   order-blind property** — zero-sum, determinism and retraction equivalence all hold while
+   nassau settles its front bet with the last nine holes walked. So the enforcement is
+   `arbitraryRotationPair` (`test/arbitraries.ts`): the same golf dealt twice, once wrapped
+   and once on a card renumbered so the identical walk reads 1–18, asserting every engine
+   settles both the same AND lands each payment on the same hole of the walk. It is checked
+   by reintroducing the bugs — it catches the nassau-halves and ledger-prefix ones. It does
+   NOT catch the match kit's old `filter(h >= startHole)`, because that costs no money:
+   `holesRemaining` drives the to-play count, the dormie test and the close note, while
+   settlement is gated on `closedAt` off the always-positional `toPlayAfterIn`. Narration
+   bugs of that shape need goldens (`matchPlay.test.ts` MP12), not properties.
+   **A round rotates within its RANGE's block, never across the card**: a back nine started on
+   13 walks 13–18 then 10–12 and cannot reach the front, which is why "Back 9" stays a true
+   name and why no surface derives a different label for a rotated nine. `holesForRound`
+   enforces that (a start hole from the other nine falls back to the block's head), so it
+   holds for imports too, which validate neither field. That bound plus storing `startHole`
+   only when it differs from the block head is what keeps every round revertible: reverting
+   MAI-41 restores the same hole SET in a different order, with every score still on a hole
+   the round plays. The one shape still refused a start hole is a nine played twice around —
+   `doubleNine` stamps which loop each number is, and an offset would mislabel them.
 
 ## Layout
 

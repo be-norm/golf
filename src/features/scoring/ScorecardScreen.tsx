@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
 import { buildHoleLedger } from '../../engine/ledger'
 import { gameLabel } from '../../engine/label'
+import { teedOffAway } from '../../engine/core/holes'
 import { formatCentsSigned } from '../../engine/core/money'
 import { primaryGame } from '../../lib/gameRoles'
 import { GameSummary } from '../../components/GameSummary'
@@ -121,8 +122,13 @@ export function ScorecardScreen() {
     )
   }
 
-  const front = ctx.holesPlayed.filter((h) => h <= 9)
-  const back = ctx.holesPlayed.filter((h) => h > 9)
+  // The two nines as WALKED, not as numbered. A round teeing off on 10 gets
+  // 10–18 on top, which is the order the money ledger below already reads in
+  // and the order the front/back bets settled in — a card whose first table is
+  // the nine you finished on would disagree with both. Identical for a round
+  // starting on 1, and a nine still renders as a single table.
+  const front = ctx.holesPlayed.slice(0, 9)
+  const back = ctx.holesPlayed.slice(9)
   const activeLedger = activeGame ? (ledger?.get(activeGame.gameId) ?? []) : []
   const activeDerivation = activeGame ? derivations.get(activeGame.gameId) : undefined
 
@@ -138,6 +144,18 @@ export function ScorecardScreen() {
 
       {front.length > 0 && half(front)}
       {back.length > 0 && half(back)}
+      {/* The tables are in WALK order, so a round that teed off elsewhere puts
+          hole 10 at the top left — or, for a rotated NINE, runs 13…18,10,11,12
+          across one table. Either way this is the surface that would otherwise
+          reorder silently; `loopOf` only titles a doubled nine. Gated on the
+          WRAP, not on there being two tables, and the tail only applies when
+          there are (`teedOffAway`, shared with the first tee and share card). */}
+      {teedOffAway(round) !== undefined && (
+        <p className="text-center text-sm text-felt-300">
+          Teed off on {teedOffAway(round)}
+          {back.length > 0 && ' — top nine first'}
+        </p>
+      )}
       <p className="text-center text-sm text-stone-500">
         Tap a cell to correct that hole
         {activeGame?.handicap?.mode === 'net'

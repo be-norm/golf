@@ -232,4 +232,69 @@ describe('RoundStartScreen', () => {
     expect(screen.queryByText(/CH \d+ ·/)).not.toBeInTheDocument()
     expect(screen.getByText('Ann · Bo')).toBeInTheDocument()
   })
+
+  /**
+   * Where the round teed off, when that isn't where its range already says
+   * (MAI-41). The first tee is the last screen before anyone hits a ball, so
+   * it is where a group would catch a mistapped start hole.
+   */
+  describe('the hole range line', () => {
+    const seed = async (
+      id: string,
+      opts: { holes?: 'front9' | 'back9' | 'full18'; startHole?: number },
+    ) => {
+      const round = makeRound({
+        players: makePlayers([{ name: 'Ann' }, { name: 'Bo' }]),
+        ...(opts.holes && { holes: opts.holes }),
+        ...(opts.startHole !== undefined && { startHole: opts.startHole }),
+        games: [{ type: 'skins', config: { stakeCents: 100, carryover: false } }],
+      })
+      round.id = id
+      await db.rounds.put(round)
+      renderStart(round.id)
+    }
+
+    it('names the hole an eighteen teed off on', async () => {
+      await seed('start-from-10', { startHole: 10 })
+      expect(await screen.findByText(/18 holes from 10/)).toBeInTheDocument()
+    })
+
+    it('says nothing extra when the round starts where its range says', async () => {
+      await seed('start-plain', {})
+      expect(await screen.findByText(/18 holes/)).toBeInTheDocument()
+      // anchored to the range line's own shape. A bare /from/ matches any copy
+      // on the screen — Skins' own rules say "collects the skin value from
+      // every other player" — so the day the explainer renders, an unanchored
+      // query goes ambiguous and fails for a reason unrelated to start holes.
+      expect(screen.queryByText(/\d+ holes from/)).not.toBeInTheDocument()
+    })
+
+    /** a Back 9 already says it begins on 10 — announcing it again is noise */
+    it('does not tell a Back 9 that it begins on 10', async () => {
+      await seed('start-back9', { holes: 'back9', startHole: 10 })
+      expect(await screen.findByText(/Back 9/)).toBeInTheDocument()
+      expect(screen.queryByText(/\d+ holes from|Back 9 from/)).not.toBeInTheDocument()
+    })
+
+    /**
+     * …but a Back 9 teed off on 13 does need saying, and it is STILL a Back 9:
+     * it walks 13–18 then 10–12 and never leaves the nine, so the range keeps
+     * its name and only gains a starting hole (MAI-41).
+     */
+    it('names a rotated nine as its own nine, plus where it started', async () => {
+      await seed('start-back9-13', { holes: 'back9', startHole: 13 })
+      expect(await screen.findByText(/Back 9 from 13/)).toBeInTheDocument()
+    })
+
+    /**
+     * The DERIVED hole, never the stored one. `holesForRound` falls back for a
+     * start hole the card hasn't got, so a round imported with hole 40 plays
+     * 1–18 — and must not claim to have started on a hole nobody walked.
+     */
+    it('says nothing for a start hole the card has not got', async () => {
+      await seed('start-bogus', { startHole: 40 })
+      expect(await screen.findByText(/18 holes/)).toBeInTheDocument()
+      expect(screen.queryByText(/\d+ holes from/)).not.toBeInTheDocument()
+    })
+  })
 })

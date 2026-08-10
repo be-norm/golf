@@ -39,8 +39,12 @@ Each hole worth one skin; outright lowest (gross or net) wins it, any tie = no s
 ### 2. Nassau `[shipped]`
 **Format:** 2 individuals or 2v2 best-ball. **Tier 1.** Extra inputs: press declarations (offered
 on the tee about to be played, independent of the auto-press setting).
-Three equal match-play bets: Front 9, Back 9, Overall 18. Hole won by lower net (best ball in teams);
-+1/0/−1 per hole per relevant bet. Tied segment = push.
+Three equal match-play bets: the first nine played, the second nine played, and the whole
+eighteen. Those are the card's front and back on an ordinary round, and are labelled F9/B9
+there; a round teeing off elsewhere (`Round.startHole`) walks its nines in a different order,
+so they are labelled 1st9/2nd9 and split by position in `ctx.holesPlayed` — the group's opening
+bet is always the first nine holes they actually play. Hole won by lower net (best ball in
+teams); +1/0/−1 per hole per relevant bet. Tied segment = push.
 - **Presses:** new bet at same stake from declaration hole to end of parent bet's segment.
   Only the down side presses; presses can be pressed. **Available at ANY deficit, not gated at
   2-down** — 2-down is the traditional moment and the UI badges it, but a player pressing on

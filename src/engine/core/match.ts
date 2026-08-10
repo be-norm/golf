@@ -1,5 +1,5 @@
 import type { RoundContext } from './context'
-import type { RoundHoles, Uuid } from './types'
+import type { Uuid } from './types'
 
 /**
  * The match-play kit — hole-by-hole matches, close-outs, and golf's own
@@ -78,16 +78,44 @@ export function matchHoleResults(
   return results
 }
 
-/** The holes each segment scores. A 9-hole round collapses to one 'overall' bet. */
+/**
+ * The holes each segment scores. A 9-hole round collapses to one 'overall' bet.
+ *
+ * The halves are the nines PLAYED, in the order they were played — not the
+ * card's own 1–9 and 10–18. A round teeing off on 10 walks 10–18 first, and
+ * that nine is the one the group is playing their front bet over; calling the
+ * holes they finish on "the front nine" would settle the first bet with the
+ * last nine holes. Identical to the old number split for every round that
+ * starts on 1, which is every round played before MAI-41.
+ */
 export function segmentSpans(holesPlayed: readonly number[]): Record<MatchSegment, number[]> {
   if (holesPlayed.length <= 9) {
     return { front: [], back: [], overall: [...holesPlayed] }
   }
   return {
-    front: holesPlayed.filter((h) => h <= 9),
-    back: holesPlayed.filter((h) => h > 9),
+    front: holesPlayed.slice(0, 9),
+    back: holesPlayed.slice(9),
     overall: [...holesPlayed],
   }
+}
+
+/**
+ * The tail of a span from `startHole` on, in PLAY order — what a bet starting
+ * there actually scores.
+ *
+ * NOT `filter(h => h >= startHole)`, which is what every caller used to say. A
+ * hole's NUMBER stopped meaning "how far through the round" when a round could
+ * start anywhere and wrap (MAI-41): on an 18 from 10, `filter` hands a bet
+ * opened on the first tee nine holes instead of eighteen, and the match closes
+ * out around the halfway point with the group still walking.
+ *
+ * A `startHole` that isn't in the span yields the whole span — the same
+ * fail-towards-NOT-closing direction `toPlayAfterIn` documents, since a longer
+ * stretch is the answer a lead cannot beat early.
+ */
+export function spanFrom(span: readonly number[], startHole: number): readonly number[] {
+  const i = span.indexOf(startHole)
+  return i === -1 ? span : span.slice(i)
 }
 
 /**
@@ -102,9 +130,32 @@ export function segmentSpans(holesPlayed: readonly number[]): Record<MatchSegmen
  *
  * Not to be confused with BET naming (Nassau's `betLabel`, "Press @5"), which
  * is a game's own vocabulary and stays in the game.
+ *
+ * Reads the hole list and nothing else. It used to take `round.holes` as well,
+ * which was the last place an engine consulted the round to answer a question
+ * about holes — and with a start hole in play, `'back9'` and "starts on 10"
+ * stopped being the same statement. The list already knows.
+ *
+ * A nine is named by its BLOCK, not by the hole it teed off on. One can start
+ * anywhere inside its own nine (MAI-41) — 13, 14, 18 — and it is still the back
+ * nine, so reading `holesPlayed[0]` would call a Back 9 started on 13 neither
+ * nine. The lowest hole identifies the block, because a rotation cannot leave
+ * it and `holesForRound` never builds one that straddles the turn.
+ *
+ * `>= 10` rather than `=== 10`, so a back nine whose card is missing hole 10
+ * (a loosely-validated import) is still the back nine rather than being called
+ * the front. The bare `'9'` therefore means exactly one thing now: a round with
+ * no playable holes at all. It is not dead code, and it is NOT the "started
+ * somewhere odd" case — the block bound makes that unreachable.
+ *
+ * The empty guard is load-bearing and must come first: `Math.min()` of nothing
+ * is `Infinity`, not a miss, so without it an unplayable round would fall
+ * through and be named the back nine.
  */
-export function stretchLabel(holesPlayed: readonly number[], holes: RoundHoles): string {
-  return holesPlayed.length <= 9 ? (holes === 'back9' ? 'B9' : 'F9') : '18'
+export function stretchLabel(holesPlayed: readonly number[]): string {
+  if (holesPlayed.length > 9) return '18'
+  if (holesPlayed.length === 0) return '9'
+  return Math.min(...holesPlayed) >= 10 ? 'B9' : 'F9'
 }
 
 /**
@@ -169,7 +220,7 @@ export function newMatch(span: readonly number[], startHole: number): MatchState
   return {
     diff: 0,
     history: new Map(),
-    holesRemaining: span.filter((h) => h >= startHole).length,
+    holesRemaining: spanFrom(span, startHole).length,
   }
 }
 
@@ -223,7 +274,7 @@ export function holesRemainingIn(
   startHole: number,
   results: ReadonlyMap<number, MatchHoleResult>,
 ): number {
-  return span.filter((h) => h >= startHole && (results.get(h) ?? null) === null).length
+  return spanFrom(span, startHole).filter((h) => (results.get(h) ?? null) === null).length
 }
 
 /**

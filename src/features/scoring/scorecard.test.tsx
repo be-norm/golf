@@ -85,3 +85,104 @@ describe('ScorecardScreen — where the money moved', () => {
     expect(within(card).getByText('Bob -$2')).toBeInTheDocument()
   })
 })
+
+/**
+ * The grids, for a round that teed off somewhere other than the first tee
+ * (MAI-41). The tables run in WALK order, which is the order the ledger below
+ * them already reads in and the order the front/back bets settled in.
+ */
+describe('ScorecardScreen — a round that teed off elsewhere', () => {
+  async function renderCard(
+    id: string,
+    startHole?: number,
+    holes?: 'front9' | 'back9' | 'full18',
+  ) {
+    const round = makeRound({
+      players: makePlayers([{ name: 'Ann' }, { name: 'Bob' }]),
+      ...(holes && { holes }),
+      ...(startHole !== undefined && { startHole }),
+      games: [{ type: 'skins', config: { stakeCents: 100, carryover: false } }],
+    })
+    round.id = id
+    await db.rounds.put(round)
+    await eventStore.append(round.id, [
+      { type: 'score/set', playerId: 'p-ann', hole: startHole ?? 1, gross: 4 },
+      { type: 'score/set', playerId: 'p-bob', hole: startHole ?? 1, gross: 5 },
+    ])
+    render(
+      <RouterProvider
+        router={createMemoryRouter(routes, { initialEntries: [`/round/${id}/card`] })}
+      />,
+    )
+    return round
+  }
+
+  /** the hole-number header cells of the nth table, in render order */
+  const holeRow = (n: number) =>
+    within(screen.getAllByRole('table')[n]!)
+      .getAllByRole('columnheader')
+      .map((th) => th.textContent)
+
+  /**
+   * A player's cells in the nth table: `[name, …one per hole…, total]`, so
+   * index i+1 is the cell sitting under `holeRow(n)[i+1]`.
+   *
+   * Asserting the header alone proves nothing about placement — the columns
+   * could be labelled 10…18 while the scores under them came from 1…9, which
+   * is precisely the silent reorder the "Teed off on" note exists to warn
+   * about. This is the scorecard's version of summaryCard's "pars follow their
+   * holes, not their position".
+   */
+  const cellsFor = (n: number, name: string) =>
+    Array.from(
+      within(screen.getAllByRole('table')[n]!)
+        .getByText(name)
+        .closest('tr')!
+        .querySelectorAll('td'),
+    ).map((td) => td.textContent)
+
+  it('puts the nine it walked first on top, and says so', async () => {
+    await renderCard('card-from-10', 10)
+    expect(await screen.findByText('Teed off on 10 — top nine first')).toBeInTheDocument()
+    expect(holeRow(0)).toEqual(['Hole', '10', '11', '12', '13', '14', '15', '16', '17', '18', '—'])
+    expect(holeRow(1)).toEqual(['Hole', '1', '2', '3', '4', '5', '6', '7', '8', '9', '—'])
+
+    // …and the only score posted — Ann's 4 on hole 10 — sits under hole 10,
+    // which is the FIRST column of the top table and nowhere else on the card
+    expect(cellsFor(0, 'Ann')).toEqual(['Ann', '4', '·', '·', '·', '·', '·', '·', '·', '·', '4'])
+    expect(cellsFor(1, 'Ann')).toEqual(['Ann', '·', '·', '·', '·', '·', '·', '·', '·', '·', ''])
+  })
+
+  /**
+   * An ordinary round is untouched — no note, and the card in the order every
+   * golfer reads one. This is the regression half: the split changed from a
+   * hole-number filter to a positional slice, and for every round played
+   * before MAI-41 the two are the same thing.
+   */
+  it('leaves an ordinary round exactly as it was', async () => {
+    await renderCard('card-from-1')
+    expect(await screen.findByText(/Tap a cell/)).toBeInTheDocument()
+    expect(screen.queryByText(/Teed off on/)).not.toBeInTheDocument()
+    expect(holeRow(0)).toEqual(['Hole', '1', '2', '3', '4', '5', '6', '7', '8', '9', '—'])
+    expect(holeRow(1)).toEqual(['Hole', '10', '11', '12', '13', '14', '15', '16', '17', '18', '—'])
+    // hole 1's score under hole 1 — the same placement check, on the shape
+    // where the positional slice has to agree with the old number filter
+    expect(cellsFor(0, 'Ann')).toEqual(['Ann', '4', '·', '·', '·', '·', '·', '·', '·', '·', '4'])
+  })
+
+  /**
+   * A rotated NINE — one table, and the branch that had no way to be reached
+   * from the UI until start holes were bounded to the range (MAI-41). It runs
+   * 13…18,10,11,12 across a single table, so the "top nine first" tail must NOT
+   * appear (there is no second nine to be above) while the note itself must,
+   * because this is the shape most likely to be read as a mistake.
+   */
+  it('runs a rotated nine across one table, and says where it began', async () => {
+    await renderCard('card-back9-13', 13, 'back9')
+    expect(await screen.findByText('Teed off on 13')).toBeInTheDocument()
+    expect(screen.queryByText(/top nine first/)).not.toBeInTheDocument()
+    expect(screen.getAllByRole('table')).toHaveLength(1)
+    expect(holeRow(0)).toEqual(['Hole', '13', '14', '15', '16', '17', '18', '10', '11', '12', '—'])
+    expect(cellsFor(0, 'Ann')).toEqual(['Ann', '4', '·', '·', '·', '·', '·', '·', '·', '·', '4'])
+  })
+})

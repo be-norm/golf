@@ -4,8 +4,8 @@ import { z } from 'zod'
 import '../games/index'
 import { deriveRound, registerEngine, type GameEngine } from '../catalog'
 import { addLine, assertZeroSum, emptySettlement } from './money'
-import { arbitraryRoundAndEvents, type GameFuzz } from '../test/arbitraries'
-import { GUARD_ENGINE_TYPE } from '../test/harness'
+import { arbitraryRotationPair, arbitraryRoundAndEvents, type GameFuzz } from '../test/arbitraries'
+import { GUARD_ENGINE_TYPE, ROTATION_GUARD_ENGINE_TYPE } from '../test/harness'
 
 /**
  * Is the alarm wired to anything?
@@ -69,6 +69,126 @@ const brokenFuzz: GameFuzz = {
   eligible: () => true,
   arbitrary: () => fc.constant(() => ({ config: { stakeCents: 100 } })),
 }
+
+/**
+ * The same question for the ROTATION property (MAI-41).
+ *
+ * `arbitraryRotationPair` is the only thing enforcing "compare position in
+ * `ctx.holesPlayed`, never hole number" — CLAUDE.md invariant 9 names it as
+ * such. It has passed since the day it was written, which is the exact shape
+ * this file exists to distrust, and it needs its own broken engine rather than
+ * inheriting confidence from the zero-sum one: an engine can be scrupulously
+ * zero-sum while settling entirely the wrong holes.
+ *
+ * So: a game that pays out over "the front nine" read as `h <= 9` — a hole
+ * NUMBER test standing in for a position. Perfectly balanced, perfectly
+ * deterministic, perfectly wrong on a round that teed off anywhere but the
+ * first tee, where holes 1–9 are the last nine walked. This is a miniature of
+ * the real `segmentSpans` bug.
+ */
+const numberlyEngine: GameEngine<{ stakeCents: number }> = {
+  type: ROTATION_GUARD_ENGINE_TYPE,
+  meta: {
+    name: 'Numberly',
+    blurb: 'Test-only engine that mistakes a hole number for a position.',
+    minPlayers: 2,
+    maxPlayers: 4,
+    category: 'main',
+    family: 'match',
+    shapes: ['solo'],
+    rules: {
+      tagline: 'Deliberately reads hole numbers as positions, so the rotation property can catch it.',
+      howToPlay: ['Exists only inside replay.guard.test.ts.'],
+      scoring: ['Pays the first player over holes numbered 1–9, whenever they were played.'],
+      terms: [{ term: 'Numberly', def: 'Not a real game.' }],
+    },
+  },
+  configSchema: z.object({ stakeCents: z.number().int().positive() }),
+  configFields: [],
+  defaultConfig: () => ({ stakeCents: 100 }),
+  defaultHandicap: () => ({ mode: 'gross', allowancePct: 100, reference: 'absolute' }),
+  validateSetup: () => [],
+  eventKinds: {},
+  derive: (game, _events, ctx) => {
+    const playerIds = ctx.round.players.map((p) => p.playerId)
+    const settlement = emptySettlement(playerIds)
+    const [a, b] = playerIds
+    // THE BUG, and the only line that matters: the first nine WALKED would be
+    // `ctx.holesPlayed.slice(0, 9)`. This asks the card instead.
+    let cents = 0
+    for (const hole of ctx.holesPlayed.filter((h) => h <= 9)) {
+      const ga = ctx.gross.get(a!)?.get(hole)
+      const gb = ctx.gross.get(b!)?.get(hole)
+      if (ga === undefined || gb === undefined || ga === gb) continue
+      cents += ga < gb ? game.config.stakeCents : -game.config.stakeCents
+    }
+    if (cents !== 0) {
+      addLine(settlement, { label: 'front nine', perPlayerCents: { [a!]: cents, [b!]: -cents } })
+    }
+    return {
+      standings: [],
+      summary: '',
+      holeSummary: () => [],
+      requiredInputs: () => [],
+      settlement,
+    }
+  },
+}
+
+const numberlyFuzz: GameFuzz = {
+  type: ROTATION_GUARD_ENGINE_TYPE,
+  eligible: (n) => n >= 2,
+  arbitrary: () => fc.constant(() => ({ config: { stakeCents: 100 } })),
+}
+
+describe('the rotation property catches an engine that reads hole numbers', () => {
+  it('fails on a game whose "front nine" is a number test, not a position', () => {
+    registerEngine(numberlyEngine)
+
+    // exactly the property replay.test.ts runs, over pairs that now include an
+    // engine confusing a hole's number with its place in the round
+    expect(() =>
+      fc.assert(
+        fc.property(arbitraryRotationPair([numberlyFuzz]), ({ wrapped, straight }) => {
+          const a = deriveRound(wrapped.round, wrapped.log.events).derivations
+          const b = deriveRound(straight.round, straight.log.events).derivations
+          for (const [gameId, da] of a) {
+            expect(da.settlement.perPlayerCents).toEqual(b.get(gameId)!.settlement.perPlayerCents)
+          }
+        }),
+      ),
+    ).toThrow(/Property failed/)
+  })
+
+  /**
+   * …and the alarm is specific. Every SHIPPED engine must still agree across
+   * the pair on the very same draws — otherwise the test above would pass on a
+   * generator that simply deals two unrelated rounds, proving nothing about
+   * anybody's positional discipline.
+   */
+  it('and the disagreement is that engine alone, not the generator', () => {
+    registerEngine(numberlyEngine)
+    const pairs = fc.sample(arbitraryRotationPair([numberlyFuzz]), { numRuns: 30, seed: 4 })
+    const rotated = pairs.filter((p) => p.startHole !== 1)
+    // a pair that never rotates would make the whole guard vacuous
+    expect(rotated.length).toBeGreaterThan(0)
+
+    let sawTheBug = false
+    for (const { wrapped, straight } of rotated) {
+      const a = deriveRound(wrapped.round, wrapped.log.events).derivations
+      const b = deriveRound(straight.round, straight.log.events).derivations
+      for (const [gameId, da] of a) {
+        const type = wrapped.round.games.find((g) => g.gameId === gameId)!.type
+        const same =
+          JSON.stringify(da.settlement.perPlayerCents) ===
+          JSON.stringify(b.get(gameId)!.settlement.perPlayerCents)
+        if (type === ROTATION_GUARD_ENGINE_TYPE) sawTheBug ||= !same
+        else expect(same, `${type} disagreed across the pair`).toBe(true)
+      }
+    }
+    expect(sawTheBug, 'the numberly engine never actually disagreed').toBe(true)
+  })
+})
 
 describe('the property suite catches a broken engine', () => {
   it('deals the broken engine into rounds and fails the zero-sum property', () => {

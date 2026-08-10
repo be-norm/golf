@@ -232,6 +232,78 @@ describe('buildHoleLedger', () => {
     ])
   })
 
+  /**
+   * A prefix is a POSITION in the walk, not "every hole with a smaller number".
+   *
+   * The round tees off on 10 and wraps, so holes 1–9 are played LAST. A carry
+   * built on 10 and 11 banks on 12 — and the prefix for 12 must contain 10 and
+   * 11 and nothing else. Under the old numeric filter (`eventHole(e) <= hole`)
+   * the prefix for hole 12 swallowed holes 1–9, which the group had not yet
+   * played: the carry would have been resolved by scores from the future, and
+   * every row's delta would have been computed against the wrong history.
+   *
+   * The rows also have to come out in play order — hole 10 first, hole 9 last —
+   * because this list IS the money ledger the scorecard screen renders.
+   */
+  it('builds prefixes by position, so a wrapped round banks on the hole walked', () => {
+    const round = makeRound({
+      players: makePlayers([{ name: 'A' }, { name: 'B' }]),
+      holes: 'full18',
+      startHole: 10,
+      games: [{ type: 'skins', config: { stakeCents: 100, carryover: true } }],
+    })
+    const log = new EventLog()
+    // h10 tie (carry 1), h11 tie (carry 2), h12 A wins 3 skins — the first
+    // three holes WALKED. Nothing on 1–9, which come nine holes later.
+    log.scoreByHole(round, { A: [4, 4, 3], B: [4, 4, 4] }, [10, 11, 12])
+    const { ctx, derivations } = deriveRound(round, log.events)
+    const rows = buildHoleLedger(round, log.events, ctx, derivations).get('game-1')!
+
+    expect(ctx.holesPlayed[0]).toBe(10)
+    expect(rows.map((r) => r.hole)).toEqual([10, 11, 12])
+    expect(rows[2]!.deltas).toEqual([
+      { playerId: 'p-a', cents: 300 },
+      { playerId: 'p-b', cents: -300 },
+    ])
+  })
+
+  /**
+   * The award channel meets the positional prefix.
+   *
+   * An award is the one thing designed to be recorded long after the hole it
+   * names (MAI-46) — here a CTP on hole 4, entered at the very end of a round
+   * that teed off on 10, i.e. thirteen holes after it happened. `Award.data`
+   * carries its hole precisely so `buildHoleLedger` can place it, and with a
+   * wrapped round "place it" can only mean by position: hole 4 is the thirteenth
+   * hole walked, so its money belongs on row 4 and on no earlier row. Numerically
+   * it precedes every hole of the opening nine, which is how it used to land on
+   * row 10.
+   */
+  it('places a late-entered award on the hole it names, not on every row', () => {
+    const round = makeRound({
+      players: makePlayers([{ name: 'A' }, { name: 'B' }]),
+      holes: 'full18',
+      startHole: 10,
+      games: [{ type: 'ctp', config: { stakeCents: 200 } }],
+    })
+    const log = new EventLog()
+    log.scoreByHole(round, { A: Array(18).fill(4), B: Array(18).fill(4) })
+    // hole 4 is a par 3 on the harness card, so CTP is live there; this lands
+    // after every score, as a late-entered award does
+    log.append({
+      type: 'game/event',
+      gameId: 'game-1',
+      kind: 'ctp/award',
+      data: { hole: 4, playerId: 'p-a' },
+    })
+    const { ctx, derivations } = deriveRound(round, log.events)
+    const rows = buildHoleLedger(round, log.events, ctx, derivations).get('game-1')!
+    const paid = rows.filter((r) => r.deltas.length > 0)
+
+    expect(paid).toHaveLength(1)
+    expect(paid[0]!.hole).toBe(4)
+  })
+
   it('respects retractions in prefixes (corrected hole re-attributes cleanly)', () => {
     const round = makeRound({
       players: makePlayers([{ name: 'A' }, { name: 'B' }]),

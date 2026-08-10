@@ -149,6 +149,10 @@ export interface GameConfig<C = unknown> {
   config: C
 }
 
+/**
+ * HOW MANY holes, plus where the range starts by default. Which holes are
+ * actually played is `holesForRound` (core/holes.ts) — this plus `startHole`.
+ */
 export type RoundHoles = 'front9' | 'back9' | 'full18'
 
 export type RoundStatus = 'setup' | 'live' | 'completed'
@@ -188,6 +192,22 @@ export interface Round {
    * validation to see the round. Don't let it stay implicit.
    */
   trackPutts?: boolean
+  /**
+   * The card hole this round teed off on, when it isn't the range's own first
+   * (MAI-41). Absolute snapshot numbering, and the round WRAPS from there: 18
+   * holes from 10 plays 10–18 and then 1–9, finishing on 9.
+   *
+   * OPTIONAL and stored only when it DIFFERS from the range default (1, or 10
+   * for 'back9'), the `trackPutts` rule above: rounds written before this
+   * shipped simply lack it, and a round that starts where its range already
+   * says stays byte-identical. That is also what makes the change revertible —
+   * see the note in `holesForRound`.
+   *
+   * Never read it to decide anything about ORDER. `ctx.holesPlayed` is the one
+   * expression of which holes are played and in what sequence, and every engine
+   * reads that instead.
+   */
+  startHole?: number
   /** Owner partition — see the note on Player.userId. */
   userId?: string
 }

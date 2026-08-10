@@ -1,4 +1,5 @@
 import type { EventDraft, RoundEvent } from '../core/events'
+import { holesForRound } from '../core/holes'
 import type {
   Course,
   GameConfig,
@@ -18,6 +19,9 @@ import type {
  * modules per file — which is a config default, not a guarantee.
  */
 export const GUARD_ENGINE_TYPE = 'broken'
+/** the engine replay.guard.test.ts registers to prove the ROTATION property is
+ *  wired — it reads hole numbers where it means positions (MAI-41) */
+export const ROTATION_GUARD_ENGINE_TYPE = 'numberly'
 /** the engine label.test.ts registers to prove an unpaintable label is refused */
 export const LABEL_PROBE_ENGINE_TYPE = 'fancy'
 /** the stand-in for Snake that roundFacts.test.ts registers, so the round-fact
@@ -25,6 +29,7 @@ export const LABEL_PROBE_ENGINE_TYPE = 'fancy'
 export const PUTTS_PROBE_ENGINE_TYPE = 'putty'
 export const TEST_ONLY_ENGINE_TYPES: readonly string[] = [
   GUARD_ENGINE_TYPE,
+  ROTATION_GUARD_ENGINE_TYPE,
   LABEL_PROBE_ENGINE_TYPE,
   PUTTS_PROBE_ENGINE_TYPE,
 ]
@@ -57,6 +62,8 @@ export interface MakeRoundOpts {
   course?: Course
   players: RoundPlayer[]
   holes?: RoundHoles
+  /** tee off here and wrap — see `holesForRound` */
+  startHole?: number
   trackPutts?: boolean
   games: Array<
     Pick<GameConfig, 'type' | 'config'> & {
@@ -81,6 +88,7 @@ export function makeRound(opts: MakeRoundOpts): Round {
     courseSnapshot: course,
     teeSetId: course.teeSets[0]!.id,
     holes: opts.holes ?? 'full18',
+    ...(opts.startHole !== undefined && { startHole: opts.startHole }),
     players: opts.players,
     games: opts.games.map((g, i) => ({
       // spread FIRST so a field added to GameConfig (role, and whatever comes
@@ -123,12 +131,10 @@ export class EventLog {
   /** Interleave hole-by-hole score entry the way a scorekeeper would. */
   scoreByHole(round: Round, scores: Record<string, (number | null)[]>, holes?: number[]): void {
     const nameToId = new Map(round.players.map((p) => [p.name, p.playerId]))
-    const holeNumbers =
-      holes ??
-      Array.from(
-        { length: Object.values(scores)[0]?.length ?? 0 },
-        (_, i) => (round.holes === 'back9' ? 10 : 1) + i,
-      )
+    // The round's own hole list, not a second copy of the range rule — a
+    // private copy is how a start-on-10 round would get scored 1,2,3… while
+    // the engine derived 10,11,12… and every assertion quietly moved.
+    const holeNumbers = holes ?? holesForRound(round).slice(0, Object.values(scores)[0]?.length ?? 0)
     holeNumbers.forEach((hole, holeIdx) => {
       for (const [name, byHole] of Object.entries(scores)) {
         const gross = byHole[holeIdx]
