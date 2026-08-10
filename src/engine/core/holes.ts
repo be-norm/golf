@@ -61,8 +61,16 @@ export function holesForRound(round: HoleRange): number[] {
   const to = round.holes === 'full18' ? 18 : from + 8
   // The holes this range NAMES, intersected with the card — not "the lowest N
   // at or above the floor". On a card numbered 2–19 the two disagree: a count
-  // would put hole 10 inside the front nine, and a back nine on a card missing
-  // hole 10 would reach hole 19. The window is what the range has always meant.
+  // would put hole 10 inside the front nine, and a back nine on a card numbered
+  // 1–9, 11–19 would reach hole 19.
+  //
+  // This is `holesForRange(range) ∩ card` exactly as it was before MAI-41,
+  // verified shape by shape, and it inherits that rule's assumption that a card
+  // is numbered within 1–18. So a card numbered 2–19 plays SEVENTEEN holes as a
+  // 'full18' and a nine numbered 10–18 plays NOTHING as a 'front9' — odd, and
+  // deliberately left alone: no course-building path mints such numbering
+  // (`normalizeHoles` renumbers 1..N), and changing it would silently re-derive
+  // archived rounds for no golfer's benefit.
   const block = card.filter((h) => h >= from && h <= to)
   // `?? -1` rather than the block's head: an absent start hole and one that
   // isn't in this block are the same answer, and both are "start at the head".

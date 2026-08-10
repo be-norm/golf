@@ -535,8 +535,17 @@ export function SetupScreen() {
                       // The reset can't just be dropped either — `playedStart`
                       // only corrects a hole the new block LACKS, so a 14 held
                       // from an eighteen would survive a tap on Back 9.
+                      //
+                      // Compared against the RAW `holes`, not `playedHoles`.
+                      // The chip highlighted may be a correction rather than a
+                      // choice — the course is a live query, so an 18-hole card
+                      // edited down to a nine leaves `holes: 'back9'` showing
+                      // as "9 holes". Guarding on the derived value would make
+                      // tapping that chip a no-op, so a revert of the card
+                      // would spring the round back to Back 9 from 13 after
+                      // the user had explicitly picked the nine.
                       onClick={() => {
-                        if (value === playedHoles) return
+                        if (value === holes) return
                         setHoles(value)
                         setStartHole(value === 'back9' ? 10 : 1)
                       }}

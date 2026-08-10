@@ -120,22 +120,26 @@ describe('holesForRound', () => {
    * `stretchLabel` off a block that straddles the turn.
    */
   it('takes the holes the range names, not a count from the floor', () => {
-    const shifted = makeCourse(
-      Array.from({ length: 18 }, () => 4),
-      Array.from({ length: 18 }, (_, i) => i + 1),
-    )
-    // renumber 2..19 — the shape `normalizeHoles` would never produce
-    shifted.holes = shifted.holes.map((h, i) => ({ ...h, number: i + 2 }))
-    expect(holesForRound(range('front9', undefined, shifted))).toEqual(seq(2, 8))
-    expect(holesForRound(range('back9', undefined, shifted))).toEqual(seq(10, 9))
+    const renumbered = (numbers: number[]) => {
+      const c = makeCourse(
+        numbers.map(() => 4),
+        numbers.map((_, i) => i + 1),
+      )
+      c.holes = c.holes.map((h, i) => ({ ...h, number: numbers[i]! }))
+      return c
+    }
 
-    const gapped = makeCourse(
-      Array.from({ length: 18 }, () => 4),
-      Array.from({ length: 18 }, (_, i) => i + 1),
-    )
-    // an 18-hole card with no hole 10 at all
-    gapped.holes = gapped.holes.filter((h) => h.number !== 10)
-    expect(holesForRound(range('back9', undefined, gapped))).toEqual(seq(11, 8))
+    // Both assertions DISCRIMINATE — checked by restoring the count version.
+    // A card numbered 2–19: counting nine from the floor reaches hole 10 and
+    // puts it inside the front nine.
+    const shifted = renumbered(Array.from({ length: 18 }, (_, i) => i + 2))
+    expect(holesForRound(range('front9', undefined, shifted))).toEqual(seq(2, 8))
+
+    // A card numbered 1–9, 11–19: counting nine from 10 reaches hole 19, which
+    // no back nine names. (A card that is merely MISSING hole 10 does not show
+    // this — there is no 19 to overrun onto, and both versions agree.)
+    const overrun = renumbered([...seq(1, 9), ...seq(11, 9)])
+    expect(holesForRound(range('back9', undefined, overrun))).toEqual(seq(11, 8))
   })
 
   /**
