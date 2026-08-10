@@ -328,9 +328,12 @@ change, use a 6-digit code (`{{ .Token }}` + `verifyOtp`) rather than a link.
   `summaryParts` raw, and `settlement.lines`/`detailLines`/`notes` are painted
   onto a CANVAS for the share card, where a token becomes literal `:wolf:` inside
   a PNG people send each other. `glyphs.test.ts` walks every engine and fails on
-  a token anywhere else. **The word always ships with the picture** — a 16px
-  graphic can't teach what "blind" costs — which is also why the art is
-  `aria-hidden` (labelling it would say "Lone Wolf" twice in one button).
+  a token anywhere else. **Ship the word with the picture wherever the picture
+  can't teach itself** — a 16px graphic can't say what "blind" costs, so the
+  mode word rides along. Where the picture IS the fact and no word can carry it
+  — the wolf mark on one name in "Ann 🐺 & Bob" — the glyph is `role="img"` with
+  a label, and the small redundancy that creates on a button already reading
+  "Lone Wolf" is the cheaper of the two errors.
 - **Awards pull too — and they never expire.** `awards?(hole)`/`Award` is the
   THIRD channel (MAI-46), for "give THIS player THIS thing on THIS hole":
   closest to the pin, greenies, sandies, the snake. It renders as group rows ×

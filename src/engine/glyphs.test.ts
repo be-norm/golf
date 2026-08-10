@@ -188,16 +188,22 @@ describe('glyph tokens stay in channels that decode them', () => {
    * must not — so a token added to, say, `pickTag` (which feeds `summaryParts`,
    * rendered raw by the pinned bar) has somewhere to be caught.
    */
-  it('is checking something — the last-answer sweep really derives a glyph', () => {
+  it('is checking something — both sweeps really derive a glyph', () => {
     const wolf = engines.find((e) => e.type === 'wolf')!
-    const d = settle(wolf, 'last')
-    // the token exists on this card...
-    expect(HOLES.some((h) => d.holeSummary(h).some(hasGlyphToken))).toBe(true)
-    // ...and the channels the loop checks are non-empty, so their silence means
-    // something. A first-answer sweep produced neither.
-    expect(undecodedOf(d).filter((s) => s.length > 0).length).toBeGreaterThan(5)
-    // for contrast: answering first, Wolf never goes solo and emits nothing
-    expect(HOLES.some((h) => settle(wolf, 'first').holeSummary(h).some(hasGlyphToken))).toBe(false)
+    for (const answer of ['first', 'last'] as const) {
+      const d = settle(wolf, answer)
+      // the token exists on this card...
+      expect(HOLES.some((h) => d.holeSummary(h).some(hasGlyphToken)), answer).toBe(true)
+      // ...and the channels the loop checks are non-empty, so their silence
+      // means something rather than nothing being there to find
+      expect(undecodedOf(d).filter((s) => s.length > 0).length, answer).toBeGreaterThan(5)
+    }
+    // Both sweeps now, because the wolf mark rides every pick — it used to
+    // appear only on solo ones, which is what made a first-answer-only guard
+    // vacuous. The LAST sweep is still what covers `wolf-shades`.
+    expect(
+      HOLES.some((h) => settle(wolf, 'last').holeSummary(h).some((s) => s.includes('wolf-shades'))),
+    ).toBe(true)
   })
 
   it('every name has a token that parses back to it', () => {

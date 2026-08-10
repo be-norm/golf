@@ -77,33 +77,33 @@ describe('wolf — golden fixture (hand-verified)', () => {
     // Gross round, so the scores are bare numbers rather than "net 4".
     //
     // Hand-derived from the card above, one per outcome shape:
-    expect(d.holeSummary(1)).toEqual(['A (W) & B win with A\'s 4']) // wolf side, partnered
+    expect(d.holeSummary(1)).toEqual(['A :wolf: & B win with A\'s 4']) // wolf side, partnered
     // PACK WIN: the wolf is still named. Winners lead, but a pack win has no
     // wolf in it, so without the losing side here the two names in the money
     // row (C -$1 · D -$1) can't say which of them called the hole.
-    expect(d.holeSummary(3)).toEqual(['A & B beat C (W) & D — A\'s 4'])
-    expect(d.holeSummary(7)).toEqual(['C (W) & A win with C\'s 3'])
+    expect(d.holeSummary(3)).toEqual(['A & B beat C :wolf: & D — A\'s 4'])
+    expect(d.holeSummary(7)).toEqual(['C :wolf: & A win with C\'s 3'])
     // both partners posted the winning 4, so naming either would be a half-truth
-    expect(d.holeSummary(8)).toEqual(['D (W) & A win with 4'])
+    expect(d.holeSummary(8)).toEqual(['D :wolf: & A win with 4'])
     // lone win: one player on the side, so no possessive — "B wins with B's 3"
     // would just say B twice. The cause line carries only the multiplier, since
     // the headline's label already says who and which mode.
     expect(d.holeSummary(2)).toEqual([
-      ':wolf: B (lone) wins with 3',
+      'B :wolf: (lone) wins with 3',
       '↳ lone wolf — the hole doubles',
     ])
     // blind LOSS — the headline names the wolf on the losing side; all three of
     // A, B and C posted the 4, so no possessive
     expect(d.holeSummary(4)).toEqual([
-      'A & B & C beat :wolf-shades: D (blind) — 4',
+      'A & B & C beat D :wolf-shades: (blind) — 4',
       '↳ blind wolf — the hole triples',
     ])
     // halved: still names the wolf's side (a bare "Halved" would be a
     // regression), and no cause line — nothing moved for the multiplier to
     // explain, and "(lone)" is already in the label
-    expect(d.holeSummary(5)).toEqual([':wolf: A (lone) — halved at 4'])
+    expect(d.holeSummary(5)).toEqual(['A :wolf: (lone) — halved at 4'])
     // the trailing player takes the last wolf — D, not C, under these totals
-    expect(d.holeSummary(9)).toEqual(['D (W) & B — halved at 4'])
+    expect(d.holeSummary(9)).toEqual(['D :wolf: & B — halved at 4'])
     // bar recaps the latest decided hole (h9: D rides with B, 4 v 4 → halved)
     expect(d.summaryParts![0]!.label).toBe('H9')
   })
@@ -142,7 +142,7 @@ describe('wolf — golden fixture (hand-verified)', () => {
     expect(then[0]!.answered).toEqual({
       value: 'lone',
       // the word rides with the picture: a 16px glyph can't teach "lone"
-      lines: [':wolf: A (lone)', 'vs.', 'B & C & D'],
+      lines: ['A :wolf: (lone)', 'vs.', 'B & C & D'],
     })
     // lone win: the wolf plays the doubled hole against each of three → 6 stakes
     expect(after.settlement.perPlayerCents['p-a']).toBe(600)
@@ -184,8 +184,9 @@ describe('wolf — golden fixture (hand-verified)', () => {
   })
 
   /**
-   * A PARTNERED pick states both sides plainly — `(W)` marks the wolf, and
-   * there is no glyph because there is no mode to explain.
+   * A PARTNERED pick states both sides plainly, with the wolf mark on the
+   * PLAYER who holds the tee — no mode word, because there is no mode to
+   * explain.
    */
   it('states the teams for a partnered pick, and re-picking replaces them', () => {
     const players = makePlayers([{ name: 'A' }, { name: 'B' }, { name: 'C' }, { name: 'D' }])
@@ -203,7 +204,7 @@ describe('wolf — golden fixture (hand-verified)', () => {
     const d = deriveRound(round, log.events).derivations.get('game-1')!
     expect(d.requiredInputs()[0]!.answered).toEqual({
       value: 'p-b',
-      lines: ['A (W) & B', 'vs.', 'C & D'],
+      lines: ['A :wolf: & B', 'vs.', 'C & D'],
     })
 
     // Changing the pick is one more event of the same kind — no retraction,
@@ -212,7 +213,7 @@ describe('wolf — golden fixture (hand-verified)', () => {
     const after = deriveRound(round, log.events).derivations.get('game-1')!
     expect(after.requiredInputs()[0]!.answered).toEqual({
       value: 'p-c',
-      lines: ['A (W) & C', 'vs.', 'B & D'],
+      lines: ['A :wolf: & C', 'vs.', 'B & D'],
     })
     // and the money follows the correction: A+C (4) beat B,D (5)
     expect(after.settlement.perPlayerCents).toEqual({
@@ -246,7 +247,7 @@ describe('wolf — golden fixture (hand-verified)', () => {
     log.append({ type: 'round/completed' })
 
     const d = deriveRound(round, log.events).derivations.get('game-1')!
-    expect(d.holeSummary(1)).toEqual(['A (W) & B win with A\'s 4'])
+    expect(d.holeSummary(1)).toEqual(['A :wolf: & B win with A\'s 4'])
     // NOTHING AT ALL about the holes they never played — not a verdict, not the
     // teams someone pre-picked off the 2nd tee before the group walked in, not
     // even whose tee it was. Mid-round "Wolf: C" is useful (it is where you are
@@ -296,7 +297,7 @@ describe('wolf — golden fixture (hand-verified)', () => {
 
     const d = deriveRound(round, log.events).derivations.get('game-1')!
     // A is the wolf, and the lone call computes against A's 3
-    expect(d.holeSummary(1)).toEqual([':wolf: A (lone) wins with 3', '↳ lone wolf — the hole doubles'])
+    expect(d.holeSummary(1)).toEqual(['A :wolf: (lone) wins with 3', '↳ lone wolf — the hole doubles'])
     expect(d.settlement.perPlayerCents['p-a']).toBe(600)
   })
 
@@ -373,7 +374,7 @@ describe('wolf — golden fixture (hand-verified)', () => {
     expect(after.settlement.perPlayerCents['p-d']).toBe(-600)
     // but the 9th was A's tee when they played it, and it stays A's — the
     // declaration survives instead of the panel reverting to a prompt mid-hole
-    expect(after.holeSummary(9)).toEqual([':wolf: A (lone) vs. B & C & D'])
+    expect(after.holeSummary(9)).toEqual(['A :wolf: (lone) vs. B & C & D'])
     expect(after.requiredInputs().find((i) => i.hole === 9)?.answered?.value).toBe('lone')
   })
 

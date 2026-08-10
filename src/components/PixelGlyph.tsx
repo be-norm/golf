@@ -11,10 +11,14 @@ import type { GlyphName } from '../engine/core/glyphs'
  * still snap to device pixels, but they snap to DIFFERENT widths, and a wolf
  * with one fat ear is worse than a slightly small one.
  *
- * DECORATIVE BY CONTRACT — `aria-hidden`, because every engine string carrying
- * a glyph also says the word (see `engine/core/glyphs.ts`). Labelling it would
- * make the accessible name of the Lone Wolf button "Lone Wolf Lone Wolf".
- * `data-glyph` is the handle tests use, since there is no accessible name.
+ * LABELLED, NOT DECORATIVE — and that reversed once the mark moved onto the
+ * wolf's name. While a glyph only ever led a solo line ("Ben (lone)"), the words
+ * beside it said everything and `aria-hidden` kept the Lone Wolf button from
+ * announcing "Lone Wolf Lone Wolf". But "Ann 🐺 & Bob" has no word for which of
+ * the two holds the tee — the picture IS the fact — so a hidden glyph would
+ * simply drop it. The button's small redundancy is the cheaper of the two.
+ *
+ * `data-glyph` is the handle tests use.
  */
 
 const FUR = '#a8a29e'
@@ -54,6 +58,11 @@ function head(eyes: ReactElement) {
   )
 }
 
+const LABEL: Record<GlyphName, string> = {
+  wolf: 'the wolf',
+  'wolf-shades': 'blind wolf',
+}
+
 const ART: Record<GlyphName, ReactElement> = {
   wolf: head(
     <>
@@ -87,7 +96,8 @@ export function PixelGlyph({ name }: { name: GlyphName }) {
     <svg
       viewBox="0 0 16 16"
       shapeRendering="crispEdges"
-      aria-hidden="true"
+      role="img"
+      aria-label={LABEL[name]}
       focusable="false"
       data-glyph={name}
       style={{ width: 16, height: 16, verticalAlign: -1, display: 'inline-block' }}

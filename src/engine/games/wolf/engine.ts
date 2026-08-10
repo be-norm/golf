@@ -317,21 +317,27 @@ function derive(
   // THE WOLF SIDE, marked. `(W)` for an ordinary partnered hole; the pixel wolf
   // for lone and the same wolf in shades for blind — each followed by the word,
   // because a 16px picture cannot teach what "blind" costs (core/glyphs.ts).
+  /**
+   * THE WOLF WEARS THE WOLF. One mark, always on the player who holds the tee —
+   * the pixel wolf, or the same wolf in shades once they call blind. It used to
+   * be `(W)` for a partnered hole and a glyph only for solo ones, which meant
+   * the same fact was written two ways and the picture only showed up on the
+   * quarter of holes somebody went alone.
+   *
+   * ATTACHED TO THE NAME, never leading the line: on a partnered hole the side
+   * is two players, and a mark in front of the pair leaves "which of these two
+   * called it?" answerable only by knowing `sides.wolf` puts the wolf first.
+   * The mode word still rides along for solo picks — a 16px graphic cannot
+   * teach what blind costs (core/glyphs.ts).
+   */
   const wolfSideLabel = (r: WolfHoleResult): string => {
     const kind = r.pick!.kind
-    // SOLO: the side is one player, so nothing is ambiguous and the glyph leads
-    // the line as the mode's mark.
-    if (kind !== 'partner') {
-      const mark = kind === 'lone' ? glyph('wolf') : glyph('wolf-shades')
-      return `${mark} ${joinNames(r.sides!.wolf, nameOf)} (${kind})`
-    }
-    // PARTNERED: `(W)` marks the PLAYER, not the pair. Leading the pair with it
-    // left "which of these two called it?" answerable only by knowing that
-    // `sides.wolf` happens to put the wolf first — so on the commonest hole
-    // shape the ledger still didn't say whose hole it was.
     const [w, ...rest] = r.sides!.wolf
-    const partner = rest.length > 0 ? ` & ${joinNames(rest, nameOf)}` : ''
-    return `${nameOf.get(w!)} (W)${partner}`
+    const mark = kind === 'blind' ? glyph('wolf-shades') : glyph('wolf')
+    const wolf = `${nameOf.get(w!)} ${mark}`
+    return kind === 'partner'
+      ? `${wolf}${rest.length > 0 ? ` & ${joinNames(rest, nameOf)}` : ''}`
+      : `${wolf} (${kind})`
   }
   const packLabel = (r: WolfHoleResult): string => joinNames(r.sides!.pack, nameOf)
   /** The teams, as the scoring screen stacks them above the score rows. */

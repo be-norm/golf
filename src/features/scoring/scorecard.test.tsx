@@ -54,7 +54,7 @@ describe('ScorecardScreen — where the money moved', () => {
 
     const card = (await screen.findByText(/win with/)).closest('li')!
     // Ann is the wolf on hole 1 and rides with Bob; Ann's 4 is the low ball
-    expect(within(card).getByText("Ann (W) & Bob win with Ann's 4")).toBeInTheDocument()
+    expect(within(card).getByText("Ann & Bob win with Ann's 4")).toBeInTheDocument()
     // …and it says it ONCE: no second enumeration of the per-player swing
     expect(card.textContent).not.toContain('Ann +1')
 
