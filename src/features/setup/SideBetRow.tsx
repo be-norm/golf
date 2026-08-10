@@ -5,6 +5,7 @@ import {
   isPlayable,
   playerCountNote,
   stakeSummary,
+  statesPlayerCount,
   type FieldPlayer,
 } from './ConfigField'
 import { DisclosureArrow } from './DisclosureArrow'
@@ -63,9 +64,13 @@ export function SideBetRow({
     onChange({ ...draft, config: { ...config, [key]: value } })
   const stake = stakeSummary(engine, config)
   const stranded = !isPlayable(engine, players.length)
-  // everything, and the roster last — see the main card, where the two rules
-  // this replaced are written out with what each of them omitted
-  const wrong = stranded ? [...problems, playerCountNote(engine)] : problems
+  // every problem, plus the roster unless one of them already states it — see
+  // the main card, where the rules this replaced are written out with what
+  // each of them omitted
+  const wrong =
+    stranded && !statesPlayerCount(engine, problems)
+      ? [...problems, playerCountNote(engine)]
+      : problems
   // scoped per instance — see GameConfigCard's `panelId`
   const panelId = useId()
 

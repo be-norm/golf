@@ -6,6 +6,7 @@ import {
   isPlayable,
   playerCountNote,
   stakeSummary,
+  statesPlayerCount,
   type FieldPlayer,
 } from './ConfigField'
 import { DisclosureArrow } from './DisclosureArrow'
@@ -104,8 +105,9 @@ export function GameConfigCard({
    * must be on exactly one Nassau side" points at a Team A/B toggle the reader
    * cannot see and has no reason to look for.
    *
-   * EVERYTHING, AND THE ROSTER LAST. Three rules were tried; the other two each
-   * omitted something, and omission is the only failure that matters here:
+   * EVERY PROBLEM, PLUS THE ROSTER UNLESS ONE OF THEM ALREADY STATES IT. Three
+   * rules were tried; each of the others omitted something, and omission is the
+   * failure that matters here:
    *
    * - Roster note INSTEAD of the problems hid a duplicate-settings complaint
    *   behind a missing player. A duplicate is independent of the roster, so
@@ -117,15 +119,13 @@ export function GameConfigCard({
    *   assign them, the message cleared, and "Needs 2–4 players" appeared only
    *   then. Worse than redundant: no assignment makes a five-player Nassau
    *   playable, so the intermediate instruction was false.
+   * - Both, always, said one fact in two sentences: "Wolf needs exactly 4
+   *   players" over "Needs 4 players". Correct and unreadable.
    *
-   * What that costs is a restatement whenever an engine names the count in its
-   * own words (`wolf`, `vegas`, `sixPoint` always; `nassau` and `matchPlay` on
-   * their teams-less path; `skins` and `ctp` below their minimum): "Wolf needs
-   * exactly 4 players" with "Needs 4 players" beneath it. Cheap, and the note
-   * goes LAST so the two land together and read as one fact rather than two
-   * complaints. Removing it properly needs `validateSetup` to return something
-   * a caller can TELL APART — a tagged problem rather than a bare string — and
-   * that is an engine-contract change, not a card's decision.
+   * So the note is dropped only against a problem that PRINTS THE SAME NUMBER
+   * (`statesPlayerCount`) — the engine's sentence is the better of the two,
+   * because it names the game. A complaint about teams prints no count and
+   * suppresses nothing, which is what keeps the Nassau case honest.
    *
    * The note is not decoration in the silent case either: `isPlayable` reads
    * `meta.minPlayers/maxPlayers` while Skins and CTP declare 2–8 and validate
@@ -136,7 +136,10 @@ export function GameConfigCard({
    * tee-off. The list beside the button speaks for the button.
    */
   const stranded = !isPlayable(engine, players.length)
-  const wrong = stranded ? [...problems, playerCountNote(engine)] : problems
+  const wrong =
+    stranded && !statesPlayerCount(engine, problems)
+      ? [...problems, playerCountNote(engine)]
+      : problems
   const stake = stakeSummary(engine, config)
   // scoped per instance: the screen renders several of these, and two panels
   // sharing an id would point every aria-controls at the same element

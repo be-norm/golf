@@ -561,25 +561,20 @@ describe('SetupScreen — choosing games', () => {
       // the duplicate too, which no number of players fixes
       expect(within(card).getByText(/identical settings/)).toBeInTheDocument()
 
-      // Wolf names the count in its own words, so the catalogue note restates
-      // it. That is the accepted price of never omitting the roster — and it
-      // goes LAST, landing beside the engine's sentence so the two read as one
-      // fact rather than two complaints.
-      const text = card.textContent ?? ''
-      expect(text).toContain('Needs 4 players')
-      expect(text.indexOf('Wolf needs exactly 4 players')).toBeLessThan(
-        text.indexOf('Needs 4 players'),
-      )
+      // …but the roster is stated ONCE. Wolf's own sentence already prints the
+      // 4, and it is the better of the two because it names the game, so the
+      // catalogue note stands down rather than saying it again underneath.
+      expect(within(card).queryByText('Needs 4 players')).toBeNull()
     }
   })
 
   /**
-   * The roster line is stated even when the engine is complaining about
-   * something else, and this is the case that forced it: Nassau at five players
-   * reports one unassigned player and nothing more. Told only that, the reader
-   * assigns them, the message clears, and "Needs 2–4 players" turns up only
-   * then — an instruction that was false when it was given, because no team
-   * assignment makes a five-player Nassau playable.
+   * …but it stands down only against a problem that PRINTS THE COUNT. Nassau at
+   * five players reports one unassigned player and nothing more — a complaint
+   * about the teams, with no number in it. Suppressed behind that, the reader
+   * assigns the fifth player, the message clears, and "Needs 2–4 players" turns
+   * up only then: an instruction that was false when it was given, because no
+   * team assignment makes a five-player Nassau playable.
    */
   it('states the roster on a card whose engine is complaining about something else', async () => {
     await pickPenmar()

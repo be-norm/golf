@@ -212,6 +212,31 @@ export function playerCountNote(engine: GameEngine): string {
   return `Needs ${minPlayers}${maxPlayers > minPlayers ? `–${maxPlayers}` : ''} players`
 }
 
+/**
+ * Whether one of the engine's own problems already prints a number this note
+ * would print — i.e. whether saying it would be saying it twice.
+ *
+ * "Wolf needs exactly 4 players" above "Needs 4 players" is the case: same
+ * fact, two sentences, and the engine's is the better one because it names the
+ * game. But "every player must be on exactly one nassau side" is NOT that — it
+ * is about the teams, mentions no count, and suppressing the roster line behind
+ * it sent the reader off to assign a fifth player into a game that cannot hold
+ * one. So the test is the NUMBER, not the word "player".
+ *
+ * Deliberately a check on the engine's rendered prose, because that is all
+ * `validateSetup` returns. Reword a message to spell the count out ("exactly
+ * four players") and this stops matching — which shows the note again beside a
+ * sentence that means the same thing. That is the failure this was written to
+ * remove, not a new one, and it is visible on the screen the moment it happens
+ * rather than hiding anything. A `validateSetup` that returned TAGGED problems
+ * would settle it properly; that is an engine-contract change.
+ */
+export function statesPlayerCount(engine: GameEngine, problems: readonly string[]): boolean {
+  const { minPlayers, maxPlayers } = engine.meta
+  const bounds = maxPlayers > minPlayers ? [minPlayers, maxPlayers] : [minPlayers]
+  return problems.some((p) => bounds.some((n) => new RegExp(`\\b${n}\\b`).test(p)))
+}
+
 /** Whether this roster size can play this game at all. */
 export function isPlayable(engine: GameEngine, playerCount: number): boolean {
   return playerCount >= engine.meta.minPlayers && playerCount <= engine.meta.maxPlayers
