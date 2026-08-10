@@ -131,6 +131,18 @@ describe('glyph tokens stay in channels that decode them', () => {
         log.append({ type: 'game/event', gameId: 'game-1', kind: cell.eventKind, data: cell.data })
       }
     }
+    // …and the round-level facts, then completion — without them a putt-driven
+    // game derives nothing and its channels sweep as empty strings, which pass
+    // the leak guard by having nothing in them to leak (MAI-58).
+    for (const hole of HOLES) {
+      log.append({
+        type: 'score/putts',
+        playerId: players[hole % players.length]!.playerId,
+        hole,
+        putts: 3,
+      })
+    }
+    log.append({ type: 'round/completed' })
     return deriveRound(round, log.events).derivations.get('game-1')!
   }
 

@@ -231,6 +231,22 @@ const longDriveFuzz: GameFuzz = {
 }
 
 /**
+ * THE FIRST ENTRY WITH NO EVENTS OF ITS OWN (MAI-58), which is the whole reason
+ * it belongs here. Snake's entire state comes from facts the ROUND deals —
+ * `puttSeeds` above and the `completed` flag — so zero-sum, replay determinism,
+ * retraction equivalence and the rotation pair all get exercised over a game
+ * that reads `RoundContext` and nothing else. It is also the only game in the
+ * fuzz whose money exists solely on a completed round, so it is what makes that
+ * dimension load-bearing rather than merely covered.
+ */
+const snakeFuzz: GameFuzz = {
+  type: 'snake',
+  eligible: (n) => n >= 2,
+  arbitrary: () =>
+    fc.boolean().map((doubling) => () => ({ config: { potCents: 100, doubling } })),
+}
+
+/**
  * Order matters: it decides the order games sit in `round.games`, and so which
  * `gameId` each one gets. Keep new entries appended.
  */
@@ -243,6 +259,7 @@ export const GAME_FUZZ: readonly GameFuzz[] = [
   ctpFuzz,
   matchPlayFuzz,
   longDriveFuzz,
+  snakeFuzz,
 ]
 
 const PLAYER_NAMES = ['A', 'B', 'C', 'D'] as const
