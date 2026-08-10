@@ -273,7 +273,13 @@ change, use a 6-digit code (`{{ .Token }}` + `verifyOtp`) rather than a link.
   N games into one line — the per-hole detail is one tap away in the sheet.
   Collapsing happens only when it saves a row (`shouldGroupSideBets`): a lone
   side bet keeps its own row and its recap, and a round of only side bets shows
-  them expanded.
+  them expanded. **That aggregate is MONEY, so a bet that is not money yet
+  cannot be in it** — the snake is worth $4 to somebody and settles at the end,
+  and a collapsed round read "no money yet" while saying nothing about who was
+  carrying it. `GameDerivation.openBet` is what survives the fold: a live
+  position the screen renders as its own row under the aggregate, dropped the
+  moment the money moves and the aggregate can say it instead. Skins' carry and
+  Rabbit are the same shape.
   **The sheet accounts, but it leads with what just happened** (MAI-84): each
   game's block is recap → player cards → notes, because opening it to a column
   of running money buries the hole you are standing on. Universal, since

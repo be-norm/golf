@@ -501,6 +501,60 @@ describe('ScoringScreen', () => {
  * never turn a fumbled tap into a WRONG count — 0 means chip-in, and a junk
  * game pays for one.
  */
+/**
+ * MAI-50 folds side bets into one row when there are two or more, and that row
+ * is an aggregate of MONEY. A bet that settles only at the end contributes zero
+ * to it, so a group playing Snake got "no money yet" and no way to see who was
+ * carrying it — the one thing they wanted off the bar.
+ */
+describe('ScoringScreen — a live bet the money aggregate cannot show', () => {
+  async function collapsedRound(id: string) {
+    const round = makeRound({
+      players: makePlayers([{ name: 'Ann' }, { name: 'Bob' }]),
+      holes: 'front9',
+      games: [
+        { type: 'skins', config: { stakeCents: 100, carryover: true } },
+        { type: 'snake', config: { potCents: 500, doubling: false } },
+        { type: 'ctp', config: { stakeCents: 200 } },
+      ],
+    })
+    round.id = id
+    await db.rounds.put(round)
+    // hole 1 scored, and Bob three-putted it — nothing is owed until the end
+    await eventStore.append(id, [
+      { type: 'score/set', playerId: 'p-ann', hole: 1, gross: 4 },
+      { type: 'score/set', playerId: 'p-bob', hole: 1, gross: 5 },
+      { type: 'game/event', gameId: round.games[1]!.gameId, kind: 'snake/bite', data: { hole: 1, playerId: 'p-bob' } },
+    ])
+    render(
+      <RouterProvider router={createMemoryRouter(routes, { initialEntries: [`/round/${id}`] })} />,
+    )
+    return round
+  }
+
+  it('gives the snake its own bar row while the aggregate says no money yet', async () => {
+    await collapsedRound('round-open-bet')
+
+    // one main game + two side bets, so the bar collapses (MAI-50)
+    expect(await screen.findByText('Side bets')).toBeInTheDocument()
+    expect(screen.getByText('no money yet')).toBeInTheDocument()
+    // …and the snake still says who has it and what it is worth
+    expect(screen.getByText('Snake')).toBeInTheDocument()
+    expect(screen.getByText('Bob · $5')).toBeInTheDocument()
+  })
+
+  it('drops that row once the money actually moves', async () => {
+    const round = await collapsedRound('round-open-bet-done')
+    await screen.findByText('Bob · $5')
+
+    await eventStore.append(round.id, [{ type: 'round/completed' }])
+
+    // the aggregate now carries it, so a second row would say it twice
+    await waitFor(() => expect(screen.queryByText('Bob · $5')).not.toBeInTheDocument())
+    expect(screen.getByText(/Ann \+\$5/)).toBeInTheDocument()
+  })
+})
+
 describe('ScoringScreen — putts', () => {
   async function puttsRound(id: string, trackPutts: boolean) {
     const round = makeRound({
