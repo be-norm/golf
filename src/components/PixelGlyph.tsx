@@ -61,14 +61,23 @@ const ART: Record<GlyphName, ReactElement> = {
       <rect x="10" y="6" width="2" height="2" fill={EYE} />
     </>,
   ),
+  /**
+   * Two lenses JOINED BY A BRIDGE, with the temple arms reaching for the ears.
+   * The connection is what makes it read as one object worn on the face rather
+   * than as dark eyes — and the lenses stay INSET, with fur on all four sides.
+   * A band spanning the full head width was the first attempt, and since the
+   * lens colour is near the page's, it cut the head in half: ears floating
+   * above a muzzle.
+   */
   'wolf-shades': head(
     <>
-      {/* one band across the whole head, notched at the bridge so it reads as
-          two lenses rather than a blindfold */}
-      <rect x="1" y="6" width="14" height="2" fill={LENS} />
-      <rect x="7" y="6" width="2" height="1" fill={FUR} />
+      <rect x="3" y="6" width="4" height="2" fill={LENS} />
+      <rect x="9" y="6" width="4" height="2" fill={LENS} />
+      <rect x="7" y="6" width="2" height="1" fill={LENS} />
+      <rect x="2" y="6" width="1" height="1" fill={LENS} />
+      <rect x="13" y="6" width="1" height="1" fill={LENS} />
       <rect x="3" y="6" width="1" height="1" fill={GLINT} />
-      <rect x="11" y="6" width="1" height="1" fill={GLINT} />
+      <rect x="9" y="6" width="1" height="1" fill={GLINT} />
     </>,
   ),
 }

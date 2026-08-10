@@ -358,6 +358,13 @@ function derive(
     if (r.outcome === 'pending' || !ctx.anyScored(hole)) {
       return r.sides ? [`${wolfSideLabel(r)} vs ${packLabel(r)}`] : [`Wolf: ${nameOf.get(r.wolfId)}`]
     }
+    // No cause line: nothing moved, so the multiplier did nothing to explain —
+    // and the label already carries the word "(lone)" / "(blind)". `best` is
+    // null only on the nobody-posted halve, which the guard above already took.
+    if (r.outcome === 'halved') {
+      const at = r.best ? ` at ${scoreTag(r.best.wolf)}` : ''
+      return [`${wolfSideLabel(r)} — halved${at}`]
+    }
     const kind = r.pick!.kind
     // The multiplier is why these numbers look unlike a partnered hole's, and
     // on a hole the wolf LOST it is the only thing left naming them.
@@ -367,12 +374,6 @@ function derive(
         : kind === 'blind'
           ? [`↳ ${nameOf.get(r.wolfId)} went blind — the hole triples`]
           : []
-    // No cause line: nothing moved, so the multiplier did nothing to explain —
-    // and the label already carries the word "(lone)" / "(blind)".
-    if (r.outcome === 'halved') {
-      const at = r.best ? ` at ${scoreTag(r.best.wolf)}` : ''
-      return [`${wolfSideLabel(r)} — halved${at}`]
-    }
     const wolfWon = r.outcome === 'wolfWin'
     const side = wolfWon ? r.sides!.wolf : r.sides!.pack
     const best = wolfWon ? r.best!.wolf : r.best!.pack
