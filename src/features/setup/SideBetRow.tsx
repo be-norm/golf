@@ -122,12 +122,11 @@ export function SideBetRow({
               onChange={(v) => setConfigValue(field.key, v)}
             />
           ))}
-          {/* Hidden, not disabled, when strokes cannot decide the game — a
-              control that changes nothing is worse than no control. See
-              `meta.grossOnly`. */}
-          {engine.meta.grossOnly ? (
-            <p className="text-sm text-stone-400">Handicaps don’t apply — it isn’t decided by strokes.</p>
-          ) : (
+          {/* Nothing at all when strokes cannot decide the game — not the
+              control, and not a line explaining its absence either. Nobody
+              misses a setting they were never shown, and the rules sheet says
+              handicaps do not apply. See `meta.grossOnly`. */}
+          {!engine.meta.grossOnly && (
             <HandicapControls
               handicap={draft.handicap}
               gameName={label}

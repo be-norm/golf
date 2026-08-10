@@ -210,12 +210,10 @@ export function GameConfigCard({
                 onChange={(v) => setConfigValue(field.key, v)}
               />
             ))}
-            {/* Hidden, not disabled, when strokes cannot decide the game — a
-                control that changes nothing is worse than no control. See
+            {/* Nothing at all when strokes cannot decide the game — not the
+                control, and not a line explaining its absence either. See
                 `meta.grossOnly`. */}
-            {engine.meta.grossOnly ? (
-              <p className="text-sm text-stone-400">Handicaps don’t apply — it isn’t decided by strokes.</p>
-            ) : (
+            {!engine.meta.grossOnly && (
               <HandicapControls
                 handicap={draft.handicap}
                 gameName={label}
