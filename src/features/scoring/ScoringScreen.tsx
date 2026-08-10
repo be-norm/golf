@@ -56,12 +56,11 @@ export function ScoringScreen() {
   // which answered input has its picker open — `${gameId}:${input.id}`
   const [adjustingId, setAdjustingId] = useState<string>()
   // What was last SENT per input, so "this answer is already in effect" steps
-  // from intent rather than from a derivation that lags the write — the same
-  // rule as `sentPutts`. Without it, answering, then reverting before the
-  // re-derive lands, compares against the OLD answer and silently drops the
-  // revert. Released when the derivation catches up, or at once if the append
-  // failed and nothing is coming to release it.
-  const sentAnswerRef = useRef<Map<string, string>>(new Map())
+  // from intent rather than from a derivation that lags the write by an append,
+  // a live query and a re-derive. Without it, answering and then reverting
+  // inside that window compares against the OLD answer and drops the revert
+  // silently. Owned by identity and released by event id — see `answerInput`.
+  const sentAnswerRef = useRef<Map<string, { value: string; id: string | undefined }>>(new Map())
   // event ids already sent for retraction — see `giveBack`
   const undoneRef = useRef<Set<string>>(new Set())
   // event key → the id it was written as, or undefined while still in flight.
@@ -103,6 +102,15 @@ export function ScoringScreen() {
         sentPuttsRef.current.delete(key)
       }
     }
+    // Same rule, same reason — and here the alternative was actively wrong:
+    // an answer can land and never come back as `answered` (a pick the engine
+    // then reads as stale), so waiting for the derivation to report it would
+    // strand the entry and make re-declaring that option a silent no-op.
+    for (const [key, sent] of sentAnswerRef.current) {
+      if (sent.id !== undefined && view.events.some((e) => e.id === sent.id)) {
+        sentAnswerRef.current.delete(key)
+      }
+    }
   }, [view])
 
   // Initial hole, captured ONCE when the view first loads: ?hole= deep link
@@ -133,20 +141,6 @@ export function ScoringScreen() {
     for (const d of view.derivations.values()) all.push(...d.requiredInputs())
     return all
   }, [view])
-
-  // Ownership of a sent answer ends when the derivation actually shows it —
-  // after the commit is the honest moment, and a ref must not be touched during
-  // render. Matching on the VALUE is right here (unlike `sentPutts`, which owns
-  // by event identity because it STEPS from the count): an answer is not
-  // arithmetic, so an answer that agrees with the log is simply landed.
-  useEffect(() => {
-    for (const i of inputs) {
-      const key = `${i.gameId}:${i.id}`
-      if (i.answered && sentAnswerRef.current.get(key) === i.answered.value) {
-        sentAnswerRef.current.delete(key)
-      }
-    }
-  }, [inputs])
 
   // Optional actions (Nassau presses). Surfaced only while the scorekeeper is
   // ON the hole the action starts from — see `onFrontier` below.
@@ -406,7 +400,7 @@ export function ScoringScreen() {
    * coming to do it.
    */
   type GameEventDraft = Extract<EventDraft, { type: 'game/event' }>
-  const emitOnce = (draft: GameEventDraft, onNothingWritten?: () => void) => {
+  const emitOnce = (draft: GameEventDraft) => {
     const key = `${draft.gameId}:${draft.kind}:${JSON.stringify(draft.data)}`
     if (takingRef.current.has(key)) return
     takingRef.current.set(key, undefined)
@@ -415,42 +409,74 @@ export function ScoringScreen() {
       .then(([event]) => {
         // nothing written means nothing to wait for
         if (event) takingRef.current.set(key, event.id)
-        else {
-          takingRef.current.delete(key)
-          onNothingWritten?.()
-        }
+        else takingRef.current.delete(key)
       })
-      .catch(() => {
-        takingRef.current.delete(key)
-        onNothingWritten?.()
-      })
+      .catch(() => takingRef.current.delete(key))
   }
 
-  // An option's own `data` rides UNDER `{ hole, choice }`, never over it: those
-  // two are the channel's contract, and an option disagreeing with the prompt
-  // it was rendered beneath is a bug rather than a feature (MAI-46).
+  /**
+   * ONE ANSWER PER INPUT, and the guard is the ANSWER IN EFFECT rather than the
+   * payload — which is why this channel does its own append instead of going
+   * through `emitOnce`.
+   *
+   * `emitOnce` asks "is this exact event already in flight?". That is the right
+   * question for a cell you can only toggle, and the weaker version of the
+   * question here: an input has ONE answer at a time, so a tap on the option
+   * already in effect must write nothing whether or not anything is in flight.
+   * Asking it this way subsumes the duplicate guard — two taps on Lone Wolf in
+   * one frame are the same answer twice — and drops `emitOnce`'s third silent
+   * no-write path, the synchronous already-in-flight `return`, which had no
+   * rollback and stranded the intent behind it: Bob → Cal → Bob before any
+   * re-derive left the log at Cal while this map said Bob, after which tapping
+   * Bob was a permanent no-op.
+   *
+   * OWNERSHIP IS THE ENTRY OBJECT, released when its event turns up in the log
+   * (`sentPutts`'s rule, same effect). Releasing on "the derivation reports this
+   * answer" instead looks equivalent and is not: an answer can land and never be
+   * reported back. Wolf's own staleness rule does exactly that — a score
+   * correction that reassigns the wolf nulls the pick — and an entry waiting on
+   * a value that will never arrive makes re-declaring that option impossible
+   * while the prompt sits there looking live.
+   *
+   * `value` is the answer's identity because the channel says so:
+   * `InputRequest.answered.value` is "the option in effect", so two options
+   * sharing a value could not be told apart by the engine either.
+   *
+   * An option's own `data` rides UNDER `{ hole, choice }`, never over it: those
+   * two are the channel's contract, and an option disagreeing with the prompt
+   * it was rendered beneath is a bug rather than a feature (MAI-46).
+   */
   const answerInput = (input: InputRequest, option: InputRequest['options'][number]) => {
     const key = `${input.gameId}:${input.id}`
-    sentAnswerRef.current.set(key, option.value)
-    emitOnce(
-      {
-        type: 'game/event',
-        gameId: input.gameId,
-        kind: input.eventKind,
-        data: { ...option.data, hole: input.hole, choice: option.value },
-      },
-      // Nothing landed, so no derivation is coming to release this — and
-      // leaving it would make the retry look like a no-op change. Only this
-      // entry: a later tap's intent must not be dropped by an earlier failure.
-      () => {
-        if (sentAnswerRef.current.get(key) === option.value) sentAnswerRef.current.delete(key)
-      },
-    )
+    const entry: { value: string; id: string | undefined } = {
+      value: option.value,
+      id: undefined,
+    }
+    const owns = () => sentAnswerRef.current.get(key) === entry
+    sentAnswerRef.current.set(key, entry)
+    void eventStore
+      .append(round.id, [
+        {
+          type: 'game/event',
+          gameId: input.gameId,
+          kind: input.eventKind,
+          data: { ...option.data, hole: input.hole, choice: option.value },
+        },
+      ])
+      .then(([event]) => {
+        if (!owns()) return
+        // nothing written means nothing is coming to release this
+        if (event) entry.id = event.id
+        else sentAnswerRef.current.delete(key)
+      })
+      .catch(() => {
+        if (owns()) sentAnswerRef.current.delete(key)
+      })
   }
 
   /** The answer in effect for this input — what was SENT, else what derived. */
   const answerFor = (input: InputRequest): string | undefined =>
-    sentAnswerRef.current.get(`${input.gameId}:${input.id}`) ?? input.answered?.value
+    sentAnswerRef.current.get(`${input.gameId}:${input.id}`)?.value ?? input.answered?.value
 
   // The write half both optional channels share (GameEventOffer): take it and
   // one game event lands; give it back and its events are retracted. An award

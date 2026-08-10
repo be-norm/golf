@@ -302,9 +302,25 @@ change, use a 6-digit code (`{{ .Token }}` + `verifyOtp`) rather than a link.
   one score entry later a mistapped partner was permanent. Re-answering is one
   more event — every input reducer is last-write-wins per hole — which is why
   `answered` carries no `undoEventIds`, and why the screen must NOT emit when the
-  option already in effect is tapped (`emitOnce` releases its key once the event
-  lands, so that tap would append a real duplicate). Anything asking "is this
-  hole still blocked?" filters on `!answered`, as `openActions` does on `!taken`.
+  option already in effect is tapped — an input has ONE answer at a time, so
+  that is the guard, and it subsumes the duplicate one. "In effect" means what
+  was SENT, not what derived: the derivation lags a write by an append, a live
+  query and a re-derive, so comparing against it drops a revert made inside that
+  window. The intent is owned by event IDENTITY and released when the event
+  turns up in the log (`sentPutts`'s rule). Releasing it when the derivation
+  REPORTS the answer looks equivalent and is not — an answer can land and never
+  be reported back (a pick the engine then reads as stale), which strands the
+  entry and makes that option permanently untappable. Same reason this channel
+  does its own append instead of `emitOnce`, whose payload guard asks the weaker
+  question and returns silently without writing, with no rollback behind it.
+  Anything asking "is this hole still blocked?" filters on `!answered`, as
+  `openActions` does on `!taken`.
+  **A decision the screen STATES must be one its owner actually made.** Wolf's
+  wolf can be reassigned by a score correction on a trailing-player hole, and a
+  partner pick betrays that by naming the wrong player while a lone/blind
+  declaration doesn't — so the pick records the wolf it was made under
+  (`options[].data`) and a mismatch reads as stale. Latent while nothing showed
+  the pick; a lie the moment something did.
 - **A game that needs a PICTURE puts a token in the string, never a glyph**
   (`:wolf-shades:`, `engine/core/glyphs.ts`) — engines are pure TS and can't emit
   React. `GlyphText` swaps in 16×16 pixel art drawn in `public/icon.svg`'s idiom.

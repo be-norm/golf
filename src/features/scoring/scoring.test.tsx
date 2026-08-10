@@ -1107,7 +1107,41 @@ describe('ScoringScreen — input chips', () => {
   })
 
   /**
-   * …but the guard must step from what was SENT, not from the derivation,
+   * BACK TO AN ANSWER ALREADY IN THE LOG, all inside one re-derive.
+   *
+   * The option row stays open until `answered` arrives, so Bob → Cal → Bob at
+   * the tee is ordinary indecision, not a fumble. The third tap's payload is
+   * byte-identical to the first, and while these went through `emitOnce` its
+   * key was still held — so it returned having written nothing, by a path with
+   * no rollback. The log stopped at Cal while the intent map said Bob, and
+   * because that map only released on the derivation REPORTING Bob, tapping Bob
+   * was a permanent silent no-op from then on: the panel kept saying Ann & Cal
+   * and the partner the group meant could not be restored.
+   */
+  it('takes a third tap back to the first answer, all before any re-derive', async () => {
+    const round = await wolfRound('round-input-there-and-back')
+
+    const bob = await screen.findByRole('button', { name: 'Bob' })
+    const cal = screen.getByRole('button', { name: 'Cal' })
+    fireEvent.click(bob)
+    fireEvent.click(cal)
+    fireEvent.click(bob)
+
+    await waitFor(async () => {
+      expect(await eventStore.list(round.id)).toHaveLength(3)
+    })
+    const events = await eventStore.list(round.id)
+    expect(events.map((e) => (e as { data: { choice: string } }).data.choice)).toEqual([
+      'p-bob',
+      'p-cal',
+      'p-bob',
+    ])
+    // last write wins, so the teams are the ones the third tap meant
+    await screen.findByText('(W) Ann & Bob')
+  })
+
+  /**
+   * …and the guard must step from what was SENT, not from the derivation,
    * which lags the write by an append, a live query and a re-derive. Comparing
    * against `input.answered` meant that answering and then reverting inside
    * that window read the OLD answer as "already in effect" and silently
