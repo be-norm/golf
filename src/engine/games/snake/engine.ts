@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import type { GameEngine, GameDerivation } from '../../catalog'
+import type { Award, GameEngine, GameDerivation } from '../../catalog'
 import type { RoundContext } from '../../core/context'
 import type { GameScopedEvent } from '../../core/events'
 import { addLine, emptySettlement, formatCents, type Settlement } from '../../core/money'
@@ -23,23 +23,32 @@ export interface SnakeBite {
   holderId: Uuid
   /** who was holding it before — undefined on the first bite of the round */
   from?: Uuid
-  /** how many putts took it */
-  putts: number
   /** what the pot is worth from this bite onwards */
   potCents: number
 }
 
 export interface SnakeDerivation extends GameDerivation {
   bites: SnakeBite[]
-  /** who is holding it now, or undefined if nobody ever three-putted */
+  /** who is holding it now, or undefined if nobody has taken it */
   holderId?: Uuid
   /** what it is currently worth */
   potCents: number
 }
 
+/**
+ * The award grid's row, and the whole instruction.
+ *
+ * It has to carry the rule by itself: with Snake as the only award game running
+ * the grid shows no game heading (`AwardGrid` adds one only to disambiguate
+ * two), so "Snake" alone would leave a scorekeeper guessing whether tapping a
+ * name means they three-putted, they hold it, or they are off the hook. The
+ * answer is all three at once, and "last 3-putt" is the shortest true form.
+ */
+const GROUP = 'Snake — last 3-putt'
+
 function derive(
   game: GameConfig<SnakeConfig>,
-  _events: readonly GameScopedEvent[],
+  events: readonly GameScopedEvent[],
   ctx: RoundContext,
 ): SnakeDerivation {
   const { potCents, doubling } = game.config
@@ -48,34 +57,21 @@ function derive(
   const nameOf = new Map(players.map((p) => [p.playerId, p.name]))
 
   /**
-   * WHO THE SNAKE BITES ON THIS HOLE, or nobody.
+   * WHO TOOK IT ON EACH HOLE — last write wins, the same rule a corrected score
+   * follows. Re-tapping a different name is a correction, not a second bite.
    *
-   * Traditionally it goes to the LAST player to three-putt in playing order,
-   * and playing order is not modelled — so this uses the worst count, and roster
-   * order only to break a true tie. A four-putt beating a three-putt is golf
-   * anyone at the table would accept; two identical three-putts is a coin toss
-   * either way, and the roster is the only stable stand-in for who putted out
-   * last. Stable matters: the alternative is a holder that reshuffles between
-   * re-derives (`meta.rules` says all of this out loud).
-   *
-   * ITERATES THE ROSTER, never the putts map. A `score/putts` naming somebody
-   * outside the round — a corrupt import — must not become the holder: `addLine`
-   * would then refuse the whole settlement line and Snake would quietly pay
-   * nobody while looking perfectly settled.
-   *
-   * `undefined` is NOT RECORDED and `0` is a chip-in. Neither is a three-putt,
-   * and folding them together is the one mistake `ctx.puttsFor` exists to
-   * prevent.
+   * Every event on the hole is kept so undo can CLEAR the hole rather than
+   * reveal whoever was tapped before it: "tap the lit name to take it back" has
+   * to mean nobody took it on this hole, or a mistap corrected twice leaves an
+   * earlier player holding a snake nobody re-confirmed.
    */
-  const bitten = (hole: number): { playerId: Uuid; putts: number } | undefined => {
-    let worst: { playerId: Uuid; putts: number } | undefined
-    for (const p of players) {
-      const putts = ctx.puttsFor(p.playerId, hole)
-      if (putts === undefined || putts < 3) continue
-      // `>=`, so the LAST player in roster order wins a tie
-      if (worst === undefined || putts >= worst.putts) worst = { playerId: p.playerId, putts }
-    }
-    return worst
+  const takenByHole = new Map<number, Uuid>()
+  const eventIdsByHole = new Map<number, Uuid[]>()
+  for (const e of events) {
+    if (e.kind !== 'snake/bite') continue
+    const { hole, playerId } = e.data as { hole: number; playerId: Uuid }
+    takenByHole.set(hole, playerId)
+    eventIdsByHole.set(hole, [...(eventIdsByHole.get(hole) ?? []), e.id])
   }
 
   // IN PLAY ORDER, which on a round teeing off at 10 is not 1, 2, 3 — the snake
@@ -83,20 +79,23 @@ function derive(
   // (invariant #9).
   const bites: SnakeBite[] = []
   for (const hole of ctx.holesPlayed) {
-    // A hole nobody played cannot have been three-putted on. Putts CAN land on
-    // one — the log takes them from any hole the round holds — and counting
-    // them would move the snake, and its money, onto a hole that never
-    // happened: `buildHoleLedger` gives any hole whose deltas move a row,
-    // played or not.
+    // A hole nobody played cannot have been three-putted on. The cell is
+    // tappable there — the grid has no such gate, by design — and counting it
+    // would move the snake, and its money, onto a hole that never happened:
+    // `buildHoleLedger` gives a row to any hole whose deltas move, played or
+    // not. Costs a moment's lag when the snake is tapped before the scores are
+    // in, which is exactly what CTP does on a par 3 recorded from the tee.
     if (!ctx.anyScored(hole)) continue
-    const bite = bitten(hole)
-    if (!bite) continue
+    const raw = takenByHole.get(hole)
+    // A name that isn't in this round can only come from a corrupt or edited
+    // log; it must not become the holder, or `addLine` would refuse the whole
+    // settlement line and Snake would pay nobody while looking settled.
+    if (raw === undefined || !playerIds.includes(raw)) continue
     const previous = bites[bites.length - 1]
     bites.push({
       hole,
-      holderId: bite.playerId,
+      holderId: raw,
       ...(previous && { from: previous.holderId }),
-      putts: bite.putts,
       // The snake comes OUT at the stake and doubles on every bite after that
       // — `bites.length` is the count before this one, so the first is 1×. A
       // bite that does not change hands still doubles it: the same player
@@ -135,11 +134,9 @@ function derive(
    * AND THERE HAS TO BE SOMEBODY TO PAY. `validateSetup` refuses a one-player
    * round, but `importRound` validates a roster with `.min(1)`, so one can
    * arrive from an export, and every entry of the line would be zero. `addLine`
-   * now refuses such a line itself — that belongs at the choke point, since a
+   * refuses such a line itself — that belongs at the choke point, since a
    * one-player round zeroes every engine at once — so what this guard is FOR is
-   * the other half: the sentence. Guarding only the settlement was the first
-   * attempt and left the mirror of the bug, with the panel saying "No money
-   * moved." over a ledger row reading "pays $1 to each of 0 other players — $0".
+   * the other half: the sentence.
    */
   const others = playerIds.length - 1
   const owes = ctx.completed && held !== undefined && others > 0
@@ -157,20 +154,19 @@ function derive(
     })
   }
 
-  // A round nobody three-putted is a round where the snake never came out. That
+  // A round nobody took it on is a round where the snake never came out. That
   // is something to SAY, not a $0 settlement line — which would make
   // `lines.length === 0`, the settle panel's "No money moved." signal, false on
   // exactly the round it was written for (MAI-40).
   const notes =
     ctx.completed && !held
-      ? ['Nobody three-putted — the snake never came out, so nothing was paid']
+      ? ['Nobody took the snake — nothing was paid']
       : undefined
 
   const standings = standingsFromSettlement(players, settlement, (p) =>
     held?.holderId === p.playerId ? 'holds the snake' : undefined,
   )
 
-  const worth = held?.potCents ?? potCents
   const detailLines = [
     {
       label: 'Snake',
@@ -207,7 +203,7 @@ function derive(
             : `${nameOf.get(bite.from)} is off the hook`
       lines.push(
         kept ? `${name} three-putts again` : `${name} takes the snake`,
-        `↳ ${bite.putts} putts — ${cause}` +
+        `↳ last to three-putt — ${cause}` +
           (doubling ? `; the pot is now ${formatCents(bite.potCents)}` : ''),
       )
     }
@@ -223,6 +219,39 @@ function derive(
     return lines
   }
 
+  /**
+   * OFFERED ON EVERY HOLE, because any green can be three-putted — there is no
+   * eligibility rule to learn, unlike CTP's par 3s or Long Drive's designated
+   * holes.
+   *
+   * And no frontier gate, which is the award channel's whole point: you
+   * remember on 12 that Rob three-putted 7, or you fix a mistap on the 18th
+   * green. The grid stops accepting taps when the round is completed, and not
+   * before (MAI-46).
+   */
+  const awards = (hole: number): Award[] => {
+    const holder = takenByHole.get(hole)
+    return players.map((p) => {
+      const taken = holder === p.playerId
+      return {
+        id: `snake-${hole}-${p.playerId}`,
+        gameId: game.gameId,
+        hole,
+        playerId: p.playerId,
+        group: GROUP,
+        label: p.name,
+        taken,
+        eventKind: 'snake/bite',
+        data: { hole, playerId: p.playerId },
+        // Only the lit cell carries an undo, so a screen cannot retract off a
+        // name that was never tapped. Every event on the hole, so taking it
+        // back CLEARS the hole and the snake reverts to whoever held it before
+        // — see the last-write-wins note above.
+        ...(taken && { undoEventIds: eventIdsByHole.get(hole) ?? [] }),
+      }
+    })
+  }
+
   return {
     standings,
     summary: summaryString(summaryParts),
@@ -230,11 +259,12 @@ function derive(
     detailLines,
     holeSummary,
     requiredInputs: () => [],
+    awards,
     settlement,
     notes,
     bites,
     ...(held && { holderId: held.holderId }),
-    potCents: worth,
+    potCents: held?.potCents ?? potCents,
   }
 }
 
@@ -246,41 +276,45 @@ export const snakeEngine: GameEngine<SnakeConfig> = {
   type: 'snake',
   meta: {
     name: SNAKE_NAME,
-    blurb: 'Three-putt and you are holding the snake. Still holding it at the end? You pay.',
+    blurb: 'Last player to three-putt holds the snake. Still holding it at the end? You pay.',
     minPlayers: 2,
     maxPlayers: 8,
     category: 'side',
     family: 'pot',
     shapes: ['solo'],
     /**
-     * THE FIRST ENGINE THAT READS A ROUND FACT (MAI-90).
+     * NO `reads`. Snake was built on round-level putt counts first (MAI-54,
+     * MAI-90) and moved to the award channel, because the two are not the same
+     * question. Counting putts asks every player for a number on all eighteen
+     * greens — seventy-odd entries to capture the four or five that matter —
+     * and then still cannot answer the rule, which is "who three-putted LAST on
+     * this hole". Playing order is not in the log, so the engine had to guess
+     * it (worst count, then roster order); a tap is that answer, given by the
+     * person who was standing there.
      *
-     * Snake is a pure function of its config and `RoundContext` — it has no
-     * events of its own at all. Putts are entered once, on the scoring screen,
-     * because they are a SCORECARD fact rather than a bet fact; declaring them
-     * here is what makes the round collect them and what tells the group which
-     * game asked. It is also the only way a game CAN require one: `validateSetup`
-     * sees config, players and siblings, never the round.
+     * Putts stay in the vocabulary for Dots and Trouble, which want the COUNT
+     * (poley, and a 3-putt that dings everyone who made one rather than the
+     * last one). Different fact, different channel.
      */
-    reads: ['putts'],
     rules: {
       tagline: 'The last three-putt of the day costs somebody.',
       howToPlay: [
         'Three-putt a green and you are holding the snake.',
+        'Under the scores, tap the name of the last player to three-putt that hole. Tap a different name to correct it, or the lit name to clear the hole.',
         'It passes every time somebody else three-putts. Whoever is holding it when the round ends pays.',
-        'Putts are counted beside the score, so nothing extra to tap — the snake moves on its own.',
+        'Record it whenever you like — on the green, at the turn, or on the 18th. Nothing expires until the round is finished.',
         'Nobody three-putts all day? The snake never comes out and nothing is paid.',
       ],
       scoring: [
         'The holder pays the pot to every other player. At $1 in a foursome that is $3 from them and $1 to each of the others.',
         'With a doubling pot the snake comes out worth the stake, then doubles on every three-putt after that — $1, $2, $4, $8. A player who already has it and three-putts again doubles it just the same.',
         'Handicaps do not apply. A three-putt is a three-putt.',
-        'More than one three-putt on the same hole? The worst count takes it — a four-putt beats a three-putt. If those tie, it goes to whoever is later in the player list, since the app does not track who putted out last.',
+        'One name per hole, because the rule is who three-putted LAST. If two of you three-putt the same green, tap whoever putted out last — the app does not guess.',
         'Money moves only when the round is finished, because until then the snake can still be passed.',
       ],
       terms: [
         { term: 'The snake', def: 'The debt that follows the most recent three-putt around the course.' },
-        { term: 'Three-putt', def: 'Three or more putts on one green. A chip-in takes none, and none is not a three-putt.' },
+        { term: 'Three-putt', def: 'Three or more putts on one green.' },
         { term: 'Doubling pot', def: 'A house rule where the snake comes out worth the stake and doubles on every bite after that.' },
       ],
     },
@@ -327,9 +361,11 @@ export const snakeEngine: GameEngine<SnakeConfig> = {
     problems.push(...duplicateInstanceProblems(config, siblings, SNAKE_NAME))
     return problems
   },
-  // NONE. Everything Snake needs is a round-level fact read through
-  // `RoundContext`, so there is nothing for it to append and nothing to
-  // validate — the seam invariant #7 reserves, with its first real consumer.
-  eventKinds: {},
+  eventKinds: {
+    'snake/bite': z.object({
+      hole: z.number().int().min(1).max(18),
+      playerId: z.string(),
+    }),
+  },
   derive,
 }

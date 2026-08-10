@@ -4,8 +4,8 @@ Research-verified catalog of golf side games, precise enough to implement as eng
 Each engine lives in `src/engine/games/<type>/` and implements the `GameEngine` contract
 in `src/engine/catalog.ts`.
 
-**Built today (7):** Skins · Nassau · Match Play · Wolf · Vegas · Six Point · Closest to the
-Pin. Everything else is roadmap.
+**Built today (9):** Skins · Nassau · Match Play · Wolf · Vegas · Six Point · Closest to the
+Pin · Long Drive · Snake. Everything else is roadmap.
 The source of truth is `src/engine/games/index.ts` — if it's registered there it ships, and
 the `[shipped]` tags below should agree. They drifted once; check the registry, not the tags.
 
@@ -191,29 +191,28 @@ First on green / closest once all on / first holed. 54 pts per 18. Order of play
 ### 20. Rabbit — Tier 2, strokes-only.
 Outright hole win captures (or frees, traditional convention) the rabbit; holder at 9/18 wins pot.
 
-### 21. Snake `[shipped]` — Tier 2. Inputs: putts per hole (MAI-58).
+### 21. Snake `[shipped]` — Tier 2. Inputs: one award per hole (MAI-58).
 Three-putt and you hold the snake; whoever holds it at the end pays the pot to everyone else.
 Fixed or doubling — with doubling the snake comes out worth the stake and doubles on every
 bite *after* that ($1, $2, $4, $8), including a bite by the player already holding it.
-**The first engine that reads a `RoundFact`**, and it has no event kinds at all: a pure
-function of its config and `RoundContext`. `meta.reads: ['putts']` is the entire wiring —
-setup sees the declaration, switches putt counting on for the round and names the game that
-asked. That declaration is the only way a game *can* require a round-level fact, since
-`validateSetup` never sees the round; the scoring screen ORs the frozen `Round.trackPutts`
-with the derived answer so an imported round holding Snake still gets its entry control.
-**Tie rule.** Tradition gives it to the last player to three-putt in playing order, which is
-not modelled — so the worst count takes it (a four-putt beats a three-putt) and the round's
-player order breaks a true tie. Order matters because it must be STABLE: a holder that
-reshuffled between re-derives would move money at random.
+**Decided by a TAP, not by putt counts** — the row reads "Snake — last 3-putt" and offers
+every player on every hole, since any green can be three-putted. It was built on
+round-level putts first (MAI-54, MAI-90) and moved: counting putts asks every player for a
+number on all eighteen greens, seventy-odd entries to capture the four that matter, and
+still cannot answer the rule, which is who three-putted *last*. Playing order is not in the
+log, so the engine had to guess it (worst count, then roster order) — a tap is that answer,
+from the person who was standing there. One name per hole, last write wins, and clearing a
+hole reverts the snake to the previous holder.
+The lesson: a shared **fact** (a putt count) and a per-hole **judgement** (who was last)
+are different, and only the first belongs on the `RoundContext` channel. Putts stay built
+for Dots and Trouble, which want the count itself.
 **Money moves only when the round is over**, because the holder at the final hole is the bet.
 Mid-round it is narrated — the bar recaps the hole it last changed hands on, the sheet says
-who has it and what it is worth — and settles nothing. That also lands the payment on the last
-hole anybody played rather than on hole 1, since `buildHoleLedger` keeps `round/completed`
-only in prefixes at or after that hole.
-**Dead money:** nobody three-putted means the snake never came out, which goes on `notes`.
-A bite also requires a hole somebody actually scored: putts can be recorded on any hole the
-round holds, and counting one on a hole nobody reached would move the money onto a hole that
-never happened.
+who has it and what it is worth — and settles nothing. That also lands the payment on the
+last hole anybody played rather than on hole 1 (`ctx.lastPlayedHole`, shared with the ledger).
+**Dead money:** nobody took it means the snake never came out, which goes on `notes`. A bite
+also requires a hole somebody actually scored, or the money lands on a hole that never
+happened.
 
 ### 22. Banker — Tier 2–3. Inputs: banker rotation, per-opponent wagers, presses.
 Rotating banker plays simultaneous 1v1 hole matches vs everyone at chosen stakes.
@@ -278,9 +277,13 @@ The second `family: 'award'` engine, which is what turned CTP's private logic in
   needs them for 3-putt/poley, so a `score/putts` event feeding `RoundContext` is entered once
   and read one-way by both — which also makes 3-putt/snake derivable rather than tapped.
   Built in MAI-90 (`score/putts` + `score/puttsClear` → `ctx.puttsFor`, `undefined` and `0`
-  kept apart everywhere) and first consumed by Snake in MAI-58. A round collects the fact
-  because a GAME declares it reads one (`meta.reads`), never because the user was offered a
-  switch. Awards stayed binary because of it.
+  kept apart everywhere). **Snake was to be its first reader and is not** (MAI-58): the snake
+  is a judgement about who three-putted LAST, which a count cannot express, so it moved to the
+  award channel. Dots and Trouble still want the COUNT (poley; a 3-putt that dings everyone
+  who made one), so this stays built, tested and dormant until one of them lands. A round
+  collects the fact because a GAME declares it reads one (`meta.reads`), never because the
+  user was offered a switch. Awards stayed binary because of it — which is what let Snake
+  move onto them.
 - **Three channels for those events, and picking the wrong one is a real bug.** Sort every
   non-derivable input by whether the hole can compute without it, and by whether it expires:
   - **Blocking → `requiredInputs` / `InputRequest`.** The hole is stuck until someone answers

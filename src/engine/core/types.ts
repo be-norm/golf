@@ -267,23 +267,22 @@ export interface Round {
    * it, sync carries the whole round as a blob, and `importRound` validates the
    * round with `z.looseObject`.
    *
-   * A GAME STILL CANNOT REQUIRE IT, and it does not need to (MAI-58, resolving
-   * the open question this comment used to carry). `validateSetup` sees config,
-   * players and siblings — never the round — so an engine reading putts can
-   * never refuse a round with tracking off. The answer was the other one: the
-   * engine DECLARES the need (`meta.reads`), setup reads that declaration and
-   * switches this on, and the group is told which game asked rather than being
-   * offered a question they have no way to answer.
+   * A GAME CANNOT REQUIRE IT, and does not have to. `validateSetup` sees
+   * config, players and siblings — never the round — so an engine reading putts
+   * can never refuse a round with tracking off. The answer is the other way
+   * round: the engine DECLARES the need (`meta.reads`), setup reads that
+   * declaration and switches this on, and the group is told which game asked
+   * rather than being offered a question they have no way to answer.
    *
-   * This field is the FROZEN answer, and it stays authoritative: a round that
-   * collected putts for a game this build no longer ships must keep showing
-   * them, which is why setup stamps it rather than every screen re-deriving it.
-   * But it is not the only way to reach the affordance — a round that arrives
-   * WITHOUT it while holding a game that reads putts (an import, a
-   * hand-edited log, a build that predates the game) would otherwise render no
-   * entry control at all, and the game would derive nothing while looking
-   * perfectly healthy. So the scoring screen offers putts on
-   * `trackPutts || roundReads('putts', games)` — an OR, never a replacement.
+   * NOTHING DECLARES IT TODAY. Snake was to be the first reader and moved to
+   * the award channel instead (MAI-58) — the snake is a judgement about who
+   * three-putted LAST, which a count cannot express — so this whole path is
+   * dormant until Dots or Trouble, which want the count itself. One thing is
+   * therefore still untested by any live game: a round that arrives holding a
+   * fact-reading game WITHOUT this flag (an import, or a build predating the
+   * game) renders no entry control, and that game derives nothing while looking
+   * healthy. Whoever ships the first reader should close it — the scoring
+   * screen ORing this with `roundReads` is the shape that works.
    */
   trackPutts?: boolean
   /**
