@@ -400,18 +400,26 @@ function derive(
   const isNet = game.handicap?.mode === 'net'
   const scoreTag = (n: number) => (isNet ? `net ${n}` : `${n}`)
   /**
-   * "Benjamin's net 4" — the possessive drops in the two cases where it says
-   * nothing. Two partners both round in 4 and naming either is a half-truth;
-   * and a lone wolf is the only player on their side, so "B wins with B's 3"
-   * just says B twice.
+   * THE BALL THAT WON IT, and who owned it.
+   *
+   * One player made the low score: "Benjamin's net 4" — the FULL name, like the
+   * rest of the sentence. `firstName` is for the bar's compact chips, and two
+   * Mikes in a foursome is an ordinary Saturday, where "Mike Ross & Mike Doyle
+   * win with Mike's 4" names nobody.
+   *
+   * SEVERAL MADE IT and the possessive is a half-truth, so the sentence says
+   * what is actually true instead — the side's low ball was shared. Dropping
+   * the possessive and leaving the bare score was the first attempt, and it
+   * left a sentence with a hole in it: "…beat John & Grant — net 3".
+   *
+   * A lone wolf is the only player on their side, so neither applies: "B wins
+   * with B's 3" would just say B twice.
    */
-  const madeIt = (side: readonly Uuid[], best: number, hole: number): string => {
-    if (side.length < 2) return ''
+  const lowBall = (side: readonly Uuid[], best: number, hole: number): string => {
+    const tag = scoreTag(best)
+    if (side.length < 2) return tag
     const at = side.filter((id) => ctx.netFor(game.gameId, id, hole) === best)
-    // FULL name, like the rest of the sentence. `firstName` is for the bar's
-    // compact chips, and two Mikes in a foursome is an ordinary Saturday —
-    // "Mike Ross & Mike Doyle win with Mike's 4" names nobody.
-    return at.length === 1 ? `${nameOf.get(at[0]!)}'s ` : ''
+    return at.length === 1 ? `${nameOf.get(at[0]!)}'s ${tag}` : `matching ${tag}s`
   }
 
   /**
@@ -463,15 +471,18 @@ function derive(
     // The WINNING side's ball is never null — a side that posted nothing
     // compares as Infinity and cannot have won.
     const best = (wolfWon ? r.best!.wolf : r.best!.pack)!
-    const won = `${madeIt(side, best, hole)}${scoreTag(best)}`
+    const won = lowBall(side, best, hole)
     // THE WOLF IS NAMED ON EVERY DECIDED HOLE. Winners lead either way, but a
     // pack win has no wolf in it, and dropping them there left roughly a
     // quarter of holes unable to say whose hole it was — the two losing names
     // are in the money row, with nothing marking which of them called it. The
     // wolf-win and halved lines never had this problem; only this one did.
+    // "with" in both shapes, not a dash in one of them: the pack-win line is
+    // the same sentence with the losing side named, and swapping the joiner
+    // made it read like an afterthought rather than the reason.
     return wolfWon
       ? [`${wolfSideLabel(r)} ${side.length === 1 ? 'wins' : 'win'} with ${won}`, ...cause]
-      : [`${packLabel(r)} beat ${wolfSideLabel(r)} — ${won}`, ...cause]
+      : [`${packLabel(r)} beat ${wolfSideLabel(r)} with ${won}`, ...cause]
   }
 
   /**

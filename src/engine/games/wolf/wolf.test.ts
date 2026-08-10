@@ -81,10 +81,12 @@ describe('wolf — golden fixture (hand-verified)', () => {
     // PACK WIN: the wolf is still named. Winners lead, but a pack win has no
     // wolf in it, so without the losing side here the two names in the money
     // row (C -$1 · D -$1) can't say which of them called the hole.
-    expect(d.holeSummary(3)).toEqual(['A & B beat C :wolf: & D — A\'s 4'])
+    expect(d.holeSummary(3)).toEqual(['A & B beat C :wolf: & D with A\'s 4'])
     expect(d.holeSummary(7)).toEqual(['C :wolf: & A win with C\'s 3'])
-    // both partners posted the winning 4, so naming either would be a half-truth
-    expect(d.holeSummary(8)).toEqual(['D :wolf: & A win with 4'])
+    // BOTH partners posted the winning 4, so naming either would be a
+    // half-truth — and dropping the possessive to leave a bare "with 4" left a
+    // sentence with a hole in it. The shared low ball is the true thing to say.
+    expect(d.holeSummary(8)).toEqual(['D :wolf: & A win with matching 4s'])
     // lone win: one player on the side, so no possessive — "B wins with B's 3"
     // would just say B twice. The cause line carries only the multiplier, since
     // the headline's label already says who and which mode.
@@ -92,10 +94,11 @@ describe('wolf — golden fixture (hand-verified)', () => {
       'B :wolf: (lone) wins with 3',
       '↳ lone wolf — the hole doubles',
     ])
-    // blind LOSS — the headline names the wolf on the losing side; all three of
-    // A, B and C posted the 4, so no possessive
+    // blind LOSS — the headline names the wolf on the losing side, and all
+    // three of the pack posted the 4, so "matching" carries a three-way tie
+    // with no counting
     expect(d.holeSummary(4)).toEqual([
-      'A & B & C beat D :wolf-shades: (blind) — 4',
+      'A & B & C beat D :wolf-shades: (blind) with matching 4s',
       '↳ blind wolf — the hole triples',
     ])
     // halved: still names the wolf's side (a bare "Halved" would be a
@@ -268,6 +271,34 @@ describe('wolf — golden fixture (hand-verified)', () => {
       'p-c': -100,
       'p-d': -100,
     })
+  })
+
+  /**
+   * The shared-low-ball wording under NET scoring, which is Wolf's default and
+   * what the golden fixture above (deliberately gross) doesn't cover. The tag
+   * pluralises as a unit — "matching net 3s", not "matching net 3 s".
+   */
+  it('says matching net Xs when the side shares its low ball', () => {
+    const players = makePlayers([{ name: 'A' }, { name: 'B' }, { name: 'C' }, { name: 'D' }])
+    const round = makeRound({
+      players,
+      holes: 'front9',
+      games: [
+        {
+          type: 'wolf',
+          config: { pointCents: 100, rotation: ['p-a', 'p-b', 'p-c', 'p-d'] },
+          handicap: { mode: 'net', allowancePct: 100, reference: 'offLow' },
+        },
+      ],
+    })
+    const log = new EventLog()
+    // A is the wolf and rides with B; both post 3 to C and D's 4
+    log.scoreByHole(round, { A: [3], B: [3], C: [4], D: [4] }, [1])
+    pick(log, 1, 'p-b')
+
+    expect(
+      deriveRound(round, log.events).derivations.get('game-1')!.holeSummary(1),
+    ).toEqual(['A :wolf: & B win with matching net 3s'])
   })
 
   /**
