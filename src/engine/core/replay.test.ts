@@ -42,6 +42,13 @@ describe('replay invariants (fast-check)', () => {
    * Skins broke this reaching for somewhere to say "3 skins died unwon"; the
    * fix was a `notes` channel on the derivation, and this is the guard that
    * keeps the next game from reaching for the same shortcut (MAI-40).
+   *
+   * `addLine` now REFUSES a line that moves nothing, which makes this
+   * structural for every engine that settles through it — so what this property
+   * still earns is the engines that DON'T. Wolf writes `perPlayerCents`
+   * directly (and is skipped below), and any future engine emitting
+   * aggregate-only rows would do the same. Keep both: the choke point cannot
+   * see a line it is never handed.
    */
   it('every settlement line moves money', () => {
     fc.assert(
