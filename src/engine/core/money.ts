@@ -96,6 +96,15 @@ export function assertZeroSum(settlement: Settlement): void {
  * import — money.ts is the bottom of the engine, not a consumer of it.
  * Players with no money movement stay in the map at 0, so the round's full
  * roster survives into standings.
+ *
+ * Skips a balance for anyone not in `playerIds`, for the same reason `addLine`
+ * refuses a line naming them — and it is a SEPARATE hole, because `addLine` is
+ * not the only way a settlement gets its keys (wolf assigns `perPlayerCents`
+ * directly). Left as `(combined[id] ?? 0) + cents` this had the identical
+ * prototype trap: an id of `toString` resolves to the inherited function,
+ * `??` does not rescue it, and the ROUND total silently becomes a string that
+ * `minimalTransfers` then drops from the settle screen. Unreachable with the
+ * engines shipped today; the point is that it stops being one line's problem.
  */
 export function combineSettlements(
   playerIds: readonly Uuid[],
@@ -104,7 +113,11 @@ export function combineSettlements(
   const combined: Record<Uuid, number> = Object.fromEntries(playerIds.map((id) => [id, 0]))
   for (const s of settlements) {
     for (const [id, cents] of Object.entries(s.perPlayerCents)) {
-      combined[id] = (combined[id] ?? 0) + cents
+      // `!` because `hasOwn` does not narrow an index signature under
+      // noUncheckedIndexedAccess — the guard above is what makes it true, and
+      // a `?? 0` here would read as the fallback doing the work it no longer does
+      if (!Object.hasOwn(combined, id)) continue
+      combined[id] = combined[id]! + cents
     }
   }
   return combined

@@ -192,6 +192,15 @@ describe('a malformed game never takes a screen down', () => {
         // merely slip through: `?? 0` won't fall back on a function either, so
         // the accrued value becomes a STRING.
         { a: ['toString'], b: ['p-b'] },
+        // KNOWN RESIDUAL on both of these: the money is stopped, but the game
+        // still DERIVES, so a round whose teams carry a stale id reports a
+        // decided match ("B wins 3 up") that pays nothing, and credits its
+        // standings detail to a player on neither side. Strictly better than
+        // the money it used to invent, and every other malformed shape is made
+        // inert by `teamsSchema` — but "config names somebody not in the round"
+        // needs a general answer (a roster check where `deriveRound` already
+        // rejects an unparseable config), not a third per-engine one. Ticketed,
+        // not silently accepted.
       ]
       let derived = 0
       for (const teams of SHAPES) {
@@ -209,14 +218,14 @@ describe('a malformed game never takes a screen down', () => {
           where,
         ).toBe(0)
       }
-      // An EXACT count, because "at least one" is unconditionally satisfied by
-      // the well-formed shape and so guards nothing. The two that matter are
-      // the ghost and the prototype id: they are the only ones reaching a live
-      // settlement, and therefore the only coverage the `addLine` roster check
-      // has anywhere in the repo. Refuse either earlier — a roster rule added
-      // to `teamsSchema`, say — and this drops to 1 while staying green, after
-      // which reverting that check goes undetected. Pinning the number forces
-      // the next person to re-reason it rather than absorb it.
+      // An EXACT count, because "at least one" was unconditionally satisfied by
+      // the well-formed shape and so guarded nothing. The two that matter are
+      // the ghost and the prototype id: they are the only shapes reaching a
+      // live settlement, and therefore the only coverage the `addLine` roster
+      // check has anywhere in the repo. Refusing either one earlier — a roster
+      // rule added to `teamsSchema`, say — would have quietly halved that
+      // coverage under the old assertion. Pinned, it fails instead, which is
+      // the point: the number has to be re-reasoned, not absorbed.
       expect(derived, 'expected the well-formed, ghost and prototype-id shapes to settle').toBe(3)
     })
   })
