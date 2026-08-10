@@ -1210,6 +1210,46 @@ describe('ScoringScreen — input chips', () => {
     expect(screen.getAllByRole('button', { name: 'Adjust' })).toHaveLength(1)
   })
 
+  /**
+   * A settled round STATES its teams but does not revise them — the money has
+   * been shared and pushed. Same gate as `AwardGrid`, and Reopen is the path.
+   * But only the Adjust button: a pick that was never made is the one thing
+   * still missing from the card, so an unanswered prompt stays live.
+   */
+  it('states the teams on a completed round without offering to change them', async () => {
+    const round = makeRound({
+      players: makePlayers([{ name: 'Ann' }, { name: 'Bob' }, { name: 'Cal' }, { name: 'Dee' }]),
+      holes: 'front9',
+      games: [
+        { type: 'wolf', config: { pointCents: 100, rotation: ['p-ann', 'p-bob', 'p-cal', 'p-dee'] } },
+      ],
+    })
+    round.id = 'round-completed-teams'
+    await db.rounds.put(round)
+    await eventStore.append(round.id, [
+      { type: 'game/event', gameId: round.games[0]!.gameId, kind: 'wolf/pick', data: { hole: 1, choice: 'p-bob', wolf: 'p-ann' } },
+      { type: 'score/set', playerId: 'p-ann', hole: 1, gross: 4 },
+      { type: 'score/set', playerId: 'p-bob', hole: 1, gross: 4 },
+      { type: 'score/set', playerId: 'p-cal', hole: 1, gross: 5 },
+      { type: 'score/set', playerId: 'p-dee', hole: 1, gross: 5 },
+      { type: 'round/completed' },
+    ])
+    render(
+      <RouterProvider
+        router={createMemoryRouter(routes, {
+          initialEntries: [`/round/${round.id}?hole=1`],
+        })}
+      />,
+    )
+
+    // the teams are readable — before this they vanished on tap and a settled
+    // round showed nothing at all
+    await screen.findByText('(W) Ann & Bob')
+    expect(screen.queryByRole('button', { name: 'Adjust' })).not.toBeInTheDocument()
+    // and the picker cannot be reached another way
+    expect(screen.queryByRole('button', { name: /Lone Wolf/ })).not.toBeInTheDocument()
+  })
+
   /** The picture never carries the meaning alone (engine/core/glyphs.ts). */
   it('draws the wolf in shades for a blind pick, beside the word', async () => {
     await wolfRound('round-input-blind')

@@ -646,12 +646,26 @@ export function ScoringScreen() {
                         </p>
                       ))}
                     </div>
-                    <button
-                      onClick={() => setAdjustingId(open ? undefined : key)}
-                      className="pixel-press font-display shrink-0 border-stone-600 bg-stone-800 px-3 py-2 text-[10px] uppercase text-stone-300"
-                    >
-                      Adjust
-                    </button>
+                    {/* A SETTLED ROUND STATES ITS TEAMS BUT DOES NOT REVISE
+                        THEM. The money has been shared and pushed to
+                        round_archives; changing a pick after that goes through
+                        Reopen on the settle screen, the same way `AwardGrid`
+                        below stops taking cells at `round/completed`.
+
+                        Only the Adjust button, not the panel: an UNANSWERED
+                        prompt stays live on a completed round, because a pick
+                        that was never made is the one thing still missing from
+                        the card, and that has never been gated. Stating the
+                        teams read-only is pure gain — before this they simply
+                        vanished. */}
+                    {!roundOver && (
+                      <button
+                        onClick={() => setAdjustingId(open ? undefined : key)}
+                        className="pixel-press font-display shrink-0 border-stone-600 bg-stone-800 px-3 py-2 text-[10px] uppercase text-stone-300"
+                      >
+                        Adjust
+                      </button>
+                    )}
                   </div>
                 ) : (
                   <p className="mb-2 text-lg text-coin-400">

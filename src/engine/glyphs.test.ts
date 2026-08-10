@@ -87,48 +87,56 @@ describe('glyph tokens stay in channels that decode them', () => {
     expect(engines.length).toBeGreaterThanOrEqual(5)
   })
 
-  for (const engine of engines) {
-    it(`${engine.type} keeps tokens out of the undecoded channels`, () => {
-      const names = ['A', 'B', 'C', 'D'].slice(0, engine.meta.minPlayers)
-      const players = makePlayers(names.map((name, i) => ({ name, ch: i * 4 })))
-      const round = makeRound({
-        players,
-        holes: 'front9',
-        games: [
-          {
-            type: engine.type,
-            config: engine.defaultConfig(players),
-            handicap: engine.defaultHandicap(),
-          },
-        ],
+  /**
+   * ANSWER FIRST *AND* LAST, which is the difference between a guard and a
+   * decoration. `options[0]` is Wolf's first non-wolf PARTNER — the one pick
+   * mode that emits no glyph — so a first-only sweep asserted "no tokens
+   * leaked" over a card where the only engine with tokens produced none at all.
+   * The last option is `blind`, and that is the state the undecoded channels
+   * have to survive. `glyphs.test.ts` is cited by CLAUDE.md and the games
+   * catalog as the thing that makes this rule real, so it has to be able to
+   * fail: the test below this loop proves it can.
+   */
+  const settle = (engine: (typeof engines)[number], answer: 'first' | 'last') => {
+    const names = ['A', 'B', 'C', 'D'].slice(0, engine.meta.minPlayers)
+    const players = makePlayers(names.map((name, i) => ({ name, ch: i * 4 })))
+    const round = makeRound({
+      players,
+      holes: 'front9',
+      games: [
+        {
+          type: engine.type,
+          config: engine.defaultConfig(players),
+          handicap: engine.defaultHandicap(),
+        },
+      ],
+    })
+    const log = new EventLog()
+    log.scoreByHole(round, Object.fromEntries(names.map((n) => [n, CARD[n]!])))
+    // answer whatever the game asks for, or it never settles and the channels
+    // below are empty strings that trivially pass
+    const first = deriveRound(round, log.events).derivations.get('game-1')!
+    for (const input of first.requiredInputs()) {
+      const o = answer === 'first' ? input.options[0]! : input.options[input.options.length - 1]!
+      log.append({
+        type: 'game/event',
+        gameId: 'game-1',
+        kind: input.eventKind,
+        data: { ...o.data, hole: input.hole, choice: o.value },
       })
-      const log = new EventLog()
-      log.scoreByHole(round, Object.fromEntries(names.map((n) => [n, CARD[n]!])))
-      // answer whatever the game asks for, or it never settles and the channels
-      // below are empty strings that trivially pass
-      const first = deriveRound(round, log.events).derivations.get('game-1')!
-      for (const input of first.requiredInputs()) {
-        log.append({
-          type: 'game/event',
-          gameId: 'game-1',
-          kind: input.eventKind,
-          data: { ...input.options[0]!.data, hole: input.hole, choice: input.options[0]!.value },
-        })
+    }
+    for (const hole of HOLES) {
+      const cell = first.awards?.(hole)[0]
+      if (cell) {
+        log.append({ type: 'game/event', gameId: 'game-1', kind: cell.eventKind, data: cell.data })
       }
-      for (const hole of HOLES) {
-        const cell = first.awards?.(hole)[0]
-        if (cell) {
-          log.append({
-            type: 'game/event',
-            gameId: 'game-1',
-            kind: cell.eventKind,
-            data: cell.data,
-          })
-        }
-      }
-      const d = deriveRound(round, log.events).derivations.get('game-1')!
+    }
+    return deriveRound(round, log.events).derivations.get('game-1')!
+  }
 
-      const undecoded = [
+  /** Every string a screen renders WITHOUT `GlyphText`. */
+  const undecodedOf = (d: ReturnType<typeof settle>) => {
+    const undecoded = [
         d.summary,
         ...(d.summaryParts ?? []).flatMap((p) => [p.label, p.value]),
         ...d.standings.flatMap((s) => [s.label, s.detail ?? '']),
@@ -142,34 +150,45 @@ describe('glyph tokens stay in channels that decode them', () => {
           // rendered raw beside the row, in a 9px column (ActionsSheet)
           a.recommendedReason ?? '',
         ]),
-        ...HOLES.flatMap((h) => (d.awards?.(h) ?? []).flatMap((a) => [a.group, a.label])),
-        // the affordance's own vocabulary (MAI-47) — button, sheet header,
-        // explainer and empty state, none of which go through GlyphText
-        ...Object.values(engine.meta.actions ?? {}),
-      ]
-      for (const s of undecoded) expect(hasGlyphToken(s), s).toBe(false)
-    })
+      ...HOLES.flatMap((h) => (d.awards?.(h) ?? []).flatMap((a) => [a.group, a.label])),
+    ]
+    return undecoded
+  }
+
+  for (const engine of engines) {
+    for (const answer of ['first', 'last'] as const) {
+      it(`${engine.type} keeps tokens out of the undecoded channels (${answer} answer)`, () => {
+        const d = settle(engine, answer)
+        const strings = [
+          ...undecodedOf(d),
+          // the affordance's own vocabulary (MAI-47) — button, sheet header,
+          // explainer and empty state, none of which go through GlyphText
+          ...Object.values(engine.meta.actions ?? {}),
+        ]
+        for (const s of strings) expect(hasGlyphToken(s), s).toBe(false)
+      })
+    }
   }
 
   /**
-   * …and the guard is not vacuous: Wolf really does put one in `holeSummary`,
-   * so the loop above is asserting an absence that could be present.
+   * THE GUARD CAN FAIL — which is the only thing that makes the loop above
+   * worth anything, and was not true when it answered `options[0]` alone.
+   *
+   * Answering LAST puts Wolf in blind, the state that actually emits a glyph.
+   * `holeSummary` must carry one (it is decoded) and every undecoded channel
+   * must not — so a token added to, say, `pickTag` (which feeds `summaryParts`,
+   * rendered raw by the pinned bar) has somewhere to be caught.
    */
-  it('is checking something — wolf does emit a token where it is decoded', () => {
-    const players = makePlayers([{ name: 'A' }, { name: 'B' }, { name: 'C' }, { name: 'D' }])
-    const round = makeRound({
-      players,
-      holes: 'front9',
-      games: [
-        { type: 'wolf', config: { pointCents: 100, rotation: ['p-a', 'p-b', 'p-c', 'p-d'] } },
-      ],
-    })
-    const log = new EventLog()
-    log.scoreByHole(round, { A: [4], B: [5], C: [5], D: [5] }, [1])
-    log.append({ type: 'game/event', gameId: 'game-1', kind: 'wolf/pick', data: { hole: 1, choice: 'lone' } })
-    const d = deriveRound(round, log.events).derivations.get('game-1')!
-    expect(d.holeSummary(1).some(hasGlyphToken)).toBe(true)
-    expect(d.requiredInputs().some((i) => (i.answered?.lines ?? []).some(hasGlyphToken))).toBe(true)
+  it('is checking something — the last-answer sweep really derives a glyph', () => {
+    const wolf = engines.find((e) => e.type === 'wolf')!
+    const d = settle(wolf, 'last')
+    // the token exists on this card...
+    expect(HOLES.some((h) => d.holeSummary(h).some(hasGlyphToken))).toBe(true)
+    // ...and the channels the loop checks are non-empty, so their silence means
+    // something. A first-answer sweep produced neither.
+    expect(undecodedOf(d).filter((s) => s.length > 0).length).toBeGreaterThan(5)
+    // for contrast: answering first, Wolf never goes solo and emits nothing
+    expect(HOLES.some((h) => settle(wolf, 'first').holeSummary(h).some(hasGlyphToken))).toBe(false)
   })
 
   it('every name has a token that parses back to it', () => {

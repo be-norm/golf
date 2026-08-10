@@ -76,8 +76,14 @@ export interface WolfHoleResult {
    * are still playing the hole — not only once it settles.
    */
   sides: { wolf: Uuid[]; pack: Uuid[] } | null
-  /** each side's best net ball, once the hole is decided on posted scores */
-  best: { wolf: number; pack: number } | null
+  /**
+   * Each side's best net ball once the hole is decided — NULL for a side that
+   * posted nothing, never `Infinity`. The comparison upstairs coerces to
+   * Infinity so a side with no scores loses; storing that would hand the first
+   * consumer to trust this doc a `"net Infinity"` to print. The WINNING side is
+   * always non-null (it posted, or it could not have won).
+   */
+  best: { wolf: number | null; pack: number | null } | null
   /** the signed SWING this hole, by player — sums to zero (see HOLE_UNITS) */
   points: Map<Uuid, number> | null
   outcome: 'wolfWin' | 'packWin' | 'halved' | 'pending'
@@ -167,9 +173,15 @@ function derive(
       return
     }
 
-    // shared posted-only best ball: a side with no scores can't win
-    const wolfBest = ctx.bestNetAmongPosted(game.gameId, wolfSide, hole) ?? Infinity
-    const packBest = ctx.bestNetAmongPosted(game.gameId, packSide, hole) ?? Infinity
+    // shared posted-only best ball: a side with no scores can't win. The
+    // Infinity is a COMPARISON device and stays local to it — `best` keeps the
+    // honest null (see WolfHoleResult).
+    const posted = {
+      wolf: ctx.bestNetAmongPosted(game.gameId, wolfSide, hole),
+      pack: ctx.bestNetAmongPosted(game.gameId, packSide, hole),
+    }
+    const wolfBest = posted.wolf ?? Infinity
+    const packBest = posted.pack ?? Infinity
     // NOBODY POSTED — which is the same statement as `!ctx.anyScored(hole)`,
     // since the two sides between them are every player. This is NOT a halved
     // hole, and calling it one was a claim about golf that never happened:
@@ -220,7 +232,7 @@ function derive(
       wolfId,
       pick,
       sides,
-      best: { wolf: wolfBest, pack: packBest },
+      best: posted,
       points,
       outcome,
     })
@@ -381,10 +393,11 @@ function derive(
       return r.sides ? [`${wolfSideLabel(r)} vs ${packLabel(r)}`] : [`Wolf: ${nameOf.get(r.wolfId)}`]
     }
     // No cause line: nothing moved, so the multiplier did nothing to explain —
-    // and the label already carries the word "(lone)" / "(blind)". `best` is
-    // null only on the nobody-posted halve, which the guard above already took.
+    // and the label already carries the word "(lone)" / "(blind)". A halve is
+    // two EQUAL posted balls, so both sides posted; the nobody-posted case is
+    // filed as pending and the guard above already took it.
     if (r.outcome === 'halved') {
-      const at = r.best ? ` at ${scoreTag(r.best.wolf)}` : ''
+      const at = r.best?.wolf != null ? ` at ${scoreTag(r.best.wolf)}` : ''
       return [`${wolfSideLabel(r)} — halved${at}`]
     }
     const kind = r.pick!.kind
@@ -399,7 +412,9 @@ function derive(
           : []
     const wolfWon = r.outcome === 'wolfWin'
     const side = wolfWon ? r.sides!.wolf : r.sides!.pack
-    const best = wolfWon ? r.best!.wolf : r.best!.pack
+    // The WINNING side's ball is never null — a side that posted nothing
+    // compares as Infinity and cannot have won.
+    const best = (wolfWon ? r.best!.wolf : r.best!.pack)!
     const won = `${madeIt(side, best, hole)}${scoreTag(best)}`
     // THE WOLF IS NAMED ON EVERY DECIDED HOLE. Winners lead either way, but a
     // pack win has no wolf in it, and dropping them there left roughly a
