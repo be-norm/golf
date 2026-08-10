@@ -109,13 +109,14 @@ describe('snake — golden fixtures (hand-verified)', () => {
   })
 
   /**
-   * S3: the doubling pot. Every bite doubles it, INCLUDING one that does not
-   * change hands — the same player three-putting again is the snake biting
-   * again, which is the whole menace of the house rule.
+   * S3: the doubling pot. It comes OUT at the stake and doubles on every bite
+   * after that, including one that does not change hands — the same player
+   * three-putting again is the snake biting again, which is the whole menace of
+   * the house rule. The worked example below is what the rules sheet promises.
    *
    * $1 → $2 (hole 4, D again) → $4 (hole 7). A is left holding $4, paying $12.
    */
-  it('S3: a doubling pot doubles on every bite, including a repeat', () => {
+  it('S3: a doubling pot doubles after the first bite, including on a repeat', () => {
     const round = snakeRound(FOUR(), { doubling: true })
     const log = new EventLog()
     scoreHoles(round, log, [1, 2, 3, 4, 5, 6, 7, 8, 9])
@@ -316,6 +317,29 @@ describe('snake — golden fixtures (hand-verified)', () => {
     expect(snake.bites).toEqual([])
     expect(snake.notes).toHaveLength(1)
     assertZeroSum(snake.settlement)
+  })
+
+  /**
+   * S13: a ONE-player round, which `validateSetup` refuses but `importRound`
+   * accepts (`.min(1)` on the roster). There is nobody to collect from, so
+   * nothing is owed — and the money and the narration have to agree about that.
+   * Guarding only the settlement left the panel saying "No money moved." over a
+   * ledger row reading "pays $1 to each of 0 other players — $0".
+   */
+  it('S13: a one-player round owes nothing, and says nothing about paying', () => {
+    const round = snakeRound(makePlayers([{ name: 'A' }]))
+    const log = new EventLog()
+    scoreHoles(round, log, [1, 2, 3])
+    putt(log, 'p-a', 2, 3)
+    log.append({ type: 'round/completed' })
+    const snake = snakeOf(round, log)
+
+    expect(snake.settlement.lines).toHaveLength(0)
+    assertZeroSum(snake.settlement)
+    // the holder is still reported — it is true, and the bar says it
+    expect(snake.holderId).toBe('p-a')
+    // …but hole 3 — where a payment WOULD land — claims nothing was paid
+    expect(snake.holeSummary(3)).toEqual([])
   })
 
   /** Two players is the minimum roster, and the pot is one-for-one there. */

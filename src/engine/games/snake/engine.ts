@@ -11,7 +11,7 @@ import type { GameConfig, HandicapSettings, RoundPlayer, Uuid } from '../../core
 export const snakeConfigSchema = z.object({
   /** what the snake is worth; whoever is holding it at the end pays this to everyone else */
   potCents: z.number().int().positive(),
-  /** house rule: the pot doubles every time the snake bites */
+  /** house rule: the pot doubles on every bite after the first */
   doubling: z.boolean(),
 })
 
@@ -111,33 +111,41 @@ function derive(
   /**
    * WHERE THE MONEY LANDS: the last hole anybody actually played.
    *
-   * The same expression Skins uses to place its dead carry, and it has to be,
-   * because `buildHoleLedger` independently attributes a completed round's
-   * money to the last hole carrying a score. Any other choice puts the sentence
-   * on one ledger row and the payment on another.
+   * `ctx.lastPlayedHole` rather than a private copy, because `buildHoleLedger`
+   * places a completed round's money by the same definition — and the one time
+   * they differed, the payment sat on one ledger row and the sentence
+   * explaining it on another (MAI-58).
    *
    * It also cannot move: a bite requires `anyScored`, so no hole after this one
    * can bite, so the prefix replay that first sees `round/completed` already
    * knows the final holder.
    */
-  const payHole = [...ctx.holesPlayed].reverse().find((h) => ctx.anyScored(h))
+  const payHole = ctx.lastPlayedHole
 
   /**
+   * IS ANYTHING OWED? Asked ONCE, so the money and the sentence explaining it
+   * cannot disagree about the answer.
+   *
    * NOBODY OWES ANYTHING UNTIL THE ROUND IS OVER, because that is the bet: the
    * holder at the final hole pays. Mid-round the snake is narrated — who has
    * it, what it is worth — and settles nothing, which is the honest reading of
    * a bet that is still moving. Same shape as an award that is unclaimed
    * exactly when it can no longer be claimed.
+   *
+   * AND THERE HAS TO BE SOMEBODY TO PAY. `validateSetup` refuses a one-player
+   * round, but `importRound` validates a roster with `.min(1)`, so one can
+   * arrive from an export. With nobody to collect from, the settlement line
+   * would be every-entry-zero and still pushed — making `lines.length === 0`,
+   * the settle panel's "No money moved." signal, false on a round where nothing
+   * moved (MAI-40). Guarding only the settlement was the first attempt and left
+   * the mirror of that bug: the panel said "No money moved." while the ledger
+   * row underneath it read "pays $1 to each of 0 other players — $0".
    */
+  const others = playerIds.length - 1
+  const owes = ctx.completed && held !== undefined && others > 0
+
   const settlement: Settlement = emptySettlement(playerIds)
-  // `others > 0` is not paranoia: `validateSetup` refuses a one-player round,
-  // but `importRound` validates a roster with `.min(1)`, so one can arrive from
-  // an export. The line would then be every-entry-zero and still pushed, making
-  // `lines.length === 0` — the settle panel's "No money moved." signal — false
-  // on a round where nothing moved, which is the same MAI-40 rule the
-  // no-three-putt note above exists to respect.
-  if (ctx.completed && held && playerIds.length > 1) {
-    const others = playerIds.length - 1
+  if (owes && held) {
     addLine(settlement, {
       label: `${nameOf.get(held.holderId)} holds the snake`,
       perPlayerCents: Object.fromEntries(
@@ -203,8 +211,9 @@ function derive(
           (doubling ? `; the pot is now ${formatCents(bite.potCents)}` : ''),
       )
     }
-    if (ctx.completed && held && hole === payHole) {
-      const others = playerIds.length - 1
+    // `owes`, not `ctx.completed && held` — the same question the settlement
+    // asked, so the row cannot state a payment the panel says never happened.
+    if (owes && held && hole === payHole) {
       lines.push(
         `${nameOf.get(held.holderId)} is left holding the snake`,
         `↳ pays ${formatCents(held.potCents)} to each of ${others} other player` +
@@ -272,7 +281,7 @@ export const snakeEngine: GameEngine<SnakeConfig> = {
       terms: [
         { term: 'The snake', def: 'The debt that follows the most recent three-putt around the course.' },
         { term: 'Three-putt', def: 'Three or more putts on one green. A chip-in takes none, and none is not a three-putt.' },
-        { term: 'Doubling pot', def: 'A house rule where the snake is worth twice as much after every bite.' },
+        { term: 'Doubling pot', def: 'A house rule where the snake comes out worth the stake and doubles on every bite after that.' },
       ],
     },
   },
@@ -290,7 +299,7 @@ export const snakeEngine: GameEngine<SnakeConfig> = {
       key: 'doubling',
       kind: 'boolean',
       label: 'Doubling pot',
-      hint: 'The pot doubles on every three-putt',
+      hint: 'Out at the stake, then doubles on every three-putt after that',
     },
   ],
   // A dollar, and not doubling. The doubling pot is uncapped by design — that
