@@ -136,14 +136,24 @@ export function spanFrom(span: readonly number[], startHole: number): readonly n
  * about holes — and with a start hole in play, `'back9'` and "starts on 10"
  * stopped being the same statement. The list already knows.
  *
- * The bare `'9'` is for a nine that starts somewhere other than 1 or 10, which
- * setup cannot build (the start-hole picker is offered on 18-hole rounds only,
- * see `holesForRound`). It defends a loosely-validated imported round; it is
- * not dead code.
+ * A nine is named by its BLOCK, not by the hole it teed off on. One can start
+ * anywhere inside its own nine (MAI-41) — 13, 14, 18 — and it is still the back
+ * nine, so reading `holesPlayed[0]` would call a Back 9 started on 13 neither
+ * nine. The lowest hole is the block, because a rotation cannot leave it.
+ *
+ * The bare `'9'` therefore means exactly one thing now: a round with no
+ * playable holes at all (a back nine on a 9-hole card, reachable through a
+ * loosely-validated import). It is not dead code, and it is NOT the "started
+ * somewhere odd" case — the block bound makes that unreachable.
+ *
+ * The empty guard is load-bearing and must come first: `Math.min()` of nothing
+ * is `Infinity`, not a miss, so without it an unplayable round would fall
+ * through and be named the front nine.
  */
 export function stretchLabel(holesPlayed: readonly number[]): string {
   if (holesPlayed.length > 9) return '18'
-  return holesPlayed[0] === 1 ? 'F9' : holesPlayed[0] === 10 ? 'B9' : '9'
+  if (holesPlayed.length === 0) return '9'
+  return Math.min(...holesPlayed) === 10 ? 'B9' : 'F9'
 }
 
 /**

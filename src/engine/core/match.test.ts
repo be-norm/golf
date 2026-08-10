@@ -151,16 +151,16 @@ describe('stretchLabel', () => {
   })
 
   /**
-   * A nine that is neither of the card's own nines gets the bare count.
+   * A ROTATED nine is still the nine it rotated inside (MAI-41).
    *
-   * Unreachable from setup — the start-hole picker is offered on 18-hole rounds
-   * only (`holesForRound`) — so this exists for a loosely-validated import, and
-   * it is the honest answer: holes 15–5 are not the front nine and not the back
-   * nine, and naming them either would be a claim about the card that is false.
-   * DON'T "fix" this into F9 by reading `holesPlayed[0] <= 9`.
+   * A back nine teed off on 13 walks 13–18 and then 10–12, so its first hole is
+   * 13 and reading `holesPlayed[0]` would call it neither nine. The LOWEST hole
+   * is the block, and a rotation cannot leave the block — that bound is what
+   * makes the minimum a safe thing to read.
    */
-  it('names a nine that is neither of the card nines as just a nine', () => {
-    expect(stretchLabel([15, 16, 17, 18, 1, 2, 3, 4, 5])).toBe('9')
+  it('names a rotated nine by the nine it rotated inside', () => {
+    expect(stretchLabel([13, 14, 15, 16, 17, 18, 10, 11, 12])).toBe('B9')
+    expect(stretchLabel([4, 5, 6, 7, 8, 9, 1, 2, 3])).toBe('F9')
   })
 
   /**
@@ -169,11 +169,12 @@ describe('stretchLabel', () => {
    * (`holesForRound`), and `importRound` validates loosely enough to restore
    * one. It is still named as a NINE rather than an 18.
    *
-   * It used to answer B9/F9 off the declared range. It now answers '9',
-   * deliberately: a round with no holes has no nine to point at, and the label
-   * that named one was reading a field that no longer decides where a round
-   * starts. Such a round moves no money, so nothing rides on the string —
-   * pinning it keeps the next reader from restoring a rule this never had.
+   * THE EMPTY GUARD IS LOAD-BEARING, and this is what holds it: `Math.min()` of
+   * nothing is `Infinity`, not a miss, so without an explicit length check this
+   * round falls through the `=== 10` test and gets named the FRONT NINE — a
+   * confident claim about a card with no holes on it. Such a round moves no
+   * money, so nothing rides on the string; what rides on the test is that the
+   * guard is never dropped as redundant.
    */
   it('names an unplayable round as a nine, naming no particular nine', () => {
     expect(stretchLabel([])).toBe('9')

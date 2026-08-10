@@ -115,9 +115,16 @@ way it was.
    NOT catch the match kit's old `filter(h >= startHole)`, because that costs no money:
    `holesRemaining` drives the to-play count, the dormie test and the close note, while
    settlement is gated on `closedAt` off the always-positional `toPlayAfterIn`. Narration
-   bugs of that shape need goldens (`matchPlay.test.ts` MP12), not properties. Setup offers
-   the picker on 18-hole rounds only, and `startHole` is stored only when it differs from the
-   range default; those two together are what keep the change revertible (`holesForRound`).
+   bugs of that shape need goldens (`matchPlay.test.ts` MP12), not properties.
+   **A round rotates within its RANGE's block, never across the card**: a back nine started on
+   13 walks 13–18 then 10–12 and cannot reach the front, which is why "Back 9" stays a true
+   name and why no surface derives a different label for a rotated nine. `holesForRound`
+   enforces that (a start hole from the other nine falls back to the block's head), so it
+   holds for imports too, which validate neither field. That bound plus storing `startHole`
+   only when it differs from the block head is what keeps every round revertible: reverting
+   MAI-41 restores the same hole SET in a different order, with every score still on a hole
+   the round plays. The one shape still refused a start hole is a nine played twice around —
+   `doubleNine` stamps which loop each number is, and an offset would mislabel them.
 
 ## Layout
 

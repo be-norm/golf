@@ -277,6 +277,16 @@ describe('RoundStartScreen', () => {
     })
 
     /**
+     * …but a Back 9 teed off on 13 does need saying, and it is STILL a Back 9:
+     * it walks 13–18 then 10–12 and never leaves the nine, so the range keeps
+     * its name and only gains a starting hole (MAI-41).
+     */
+    it('names a rotated nine as its own nine, plus where it started', async () => {
+      await seed('start-back9-13', { holes: 'back9', startHole: 13 })
+      expect(await screen.findByText(/Back 9 from 13/)).toBeInTheDocument()
+    })
+
+    /**
      * The DERIVED hole, never the stored one. `holesForRound` falls back for a
      * start hole the card hasn't got, so a round imported with hole 40 plays
      * 1–18 — and must not claim to have started on a hole nobody walked.

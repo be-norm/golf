@@ -41,15 +41,31 @@ describe('holesForRound', () => {
     expect(holesForRound(range('full18', 1))).toEqual(seq(1, 18))
   })
 
+  /** A nine rotates inside its own nine — 13–18 then 10–12, never the front. */
+  it('wraps a nine within the nine it is playing', () => {
+    expect(holesForRound(range('back9', 13))).toEqual([13, 14, 15, 16, 17, 18, 10, 11, 12])
+    expect(holesForRound(range('front9', 4))).toEqual([4, 5, 6, 7, 8, 9, 1, 2, 3])
+  })
+
   /**
-   * The model handles a nine from anywhere even though setup won't offer it —
-   * `holesForRound` is what an imported round is read through, so the behaviour
-   * has to be defined rather than accidental. Note that a nine from 10 is
-   * exactly `back9`, which is why the picker can lock the two together.
+   * THE BOUND, and it lives here rather than in the picker.
+   *
+   * A start hole on the wrong nine is not merely un-offered — it is
+   * underivable, so the range falls back to its own head. `importRound`
+   * validates neither `holes` nor `startHole`, so "the UI doesn't offer it" was
+   * never going to be enough: an archive can say `back9` + hole 3, and the
+   * answer has to be holes 10–18 rather than a round that plays the front nine
+   * under a name that says otherwise.
+   *
+   * This is also what keeps every rotation revertible — a round can only ever
+   * be a permutation of the holes its range names, so reverting MAI-41 restores
+   * the same hole SET with every score still on a hole the round plays.
    */
-  it('wraps a nine too, and a nine from 10 is the back nine', () => {
-    expect(holesForRound(range('front9', 10))).toEqual(seq(10, 9))
-    expect(holesForRound(range('front9', 15))).toEqual([...seq(15, 4), ...seq(1, 5)])
+  it('refuses a start hole from the other nine, falling back to its own head', () => {
+    expect(holesForRound(range('back9', 3))).toEqual(seq(10, 9))
+    expect(holesForRound(range('front9', 14))).toEqual(seq(1, 9))
+    // …and a full 18 has no "other nine" to be sent back from
+    expect(holesForRound(range('full18', 14))).toEqual([...seq(14, 5), ...seq(1, 13)])
   })
 
   /**
@@ -75,15 +91,17 @@ describe('holesForRound', () => {
   })
 
   /**
-   * …and the limit of that. It is the EFFECTIVE start that has to be missing:
-   * a stored start hole the card DOES have is honoured, and the range's own
-   * default is never consulted. So a 'back9' import carrying `startHole: 3` on
-   * a nine plays a wrapped nine rather than nothing — reachable only by hand-
-   * editing an export, and pinned here because the empty-span reading Match
-   * Play leans on does not cover it.
+   * …and NO start hole can smuggle it back into playability.
+   *
+   * This used to be the exception: a stored hole the card happened to have was
+   * honoured before the range was consulted, so `back9` + `startHole: 3` on a
+   * nine played 3…9,1,2 — a back-nine round playing the front, out of an
+   * import. Rotating inside the block removes the case rather than documenting
+   * it: the block is empty, so there is nothing to rotate.
    */
-  it('honours an in-card start hole even where the range alone would play nothing', () => {
-    expect(holesForRound(range('back9', 3, NINE))).toEqual([3, 4, 5, 6, 7, 8, 9, 1, 2])
+  it('stays unplayable whatever start hole an import claims', () => {
+    expect(holesForRound(range('back9', 3, NINE))).toEqual([])
+    expect(holesForRound(range('back9', 10, NINE))).toEqual([])
   })
 
   it('caps a full 18 on a nine-hole card at the holes that exist', () => {
@@ -120,12 +138,20 @@ describe('teedOffAway', () => {
 
   it('names the hole when the round teed off somewhere else', () => {
     expect(teedOffAway(range('full18', 10))).toBe(10)
-    expect(teedOffAway(range('front9', 14))).toBe(14)
+    expect(teedOffAway(range('back9', 13))).toBe(13)
+    expect(teedOffAway(range('front9', 4))).toBe(4)
   })
 
-  /** the derived hole, never the stored one — else it announces a hole nobody played */
-  it('says nothing for a start hole the card has not got', () => {
+  /**
+   * The DERIVED hole, never the stored one — else it announces a hole nobody
+   * played. Includes a start hole from the other nine, which the range refuses
+   * (see `holesForRound`): the round begins at its own head, so there is
+   * nothing extra to say about it.
+   */
+  it('says nothing for a start hole this round would not honour', () => {
     expect(teedOffAway(range('full18', 40))).toBeUndefined()
+    expect(teedOffAway(range('front9', 14))).toBeUndefined()
+    expect(teedOffAway(range('back9', 3))).toBeUndefined()
     expect(teedOffAway(range('back9', undefined, NINE))).toBeUndefined()
   })
 })

@@ -599,39 +599,49 @@ describe('SetupScreen — choosing games', () => {
     })
 
     /**
-     * THE INVARIANT THAT MAKES THIS REVERTIBLE, pinned here because it is
-     * otherwise carried by two UI expressions and nothing else.
+     * A NINE STARTS INSIDE ITS OWN NINE, which is what keeps its name honest —
+     * and, because a rotation can never leave the range's block, keeps every
+     * round revertible: reverting MAI-41 restores the same hole SET, with every
+     * score still sitting on a hole the round plays.
      *
-     * `startHole` may only ever land on a `full18`. A `front9` round carrying
-     * `startHole: 10` would, if MAI-41 were reverted, re-derive as holes 1–9
-     * against scores posted on 10–18 — an empty card in a synced archive. A
-     * `full18` survives the same revert as the same eighteen holes.
-     *
-     * So: pick a start hole, THEN pick a nine. The stamp must not follow.
-     * `playedStart`'s self-correction is what prevents it; if a future edit
-     * lets the raw `startHole` state through, this is what fails.
+     * Unbounded, this is where it would break: a `front9` carrying
+     * `startHole: 10` would come back from a revert as holes 1–9 against scores
+     * posted on 10–18, an empty card in a synced archive.
      */
-    it('never stamps a start hole on a nine, however the picker got there', async () => {
+    it('starts a back nine anywhere in the back nine, and wraps within it', async () => {
       await toTeeStep()
-      await userEvent.click(screen.getByRole('button', { name: '14' }))
-      expect(screen.getByText(/You'll play 14–18, 1–13\./)).toBeInTheDocument()
-
-      // …and now cut it to a nine, which owns where it starts
       await userEvent.click(screen.getByRole('button', { name: 'Back 9' }))
-      expect(screen.getByText('Hole 10')).toBeInTheDocument()
-      expect(screen.queryByText(/You'll play/)).not.toBeInTheDocument()
+      await userEvent.click(screen.getByRole('button', { name: '13' }))
+      expect(screen.getByText("You'll play 13–18, 10–12.")).toBeInTheDocument()
 
       const round = await finish()
       expect(round.holes).toBe('back9')
-      expect(round.startHole).toBeUndefined()
+      expect(round.startHole).toBe(13)
     })
 
-    it('locks the start hole to 1 on the front nine, with no grid to argue with', async () => {
+    it('offers a nine only its own holes — never the other nine', async () => {
       await toTeeStep()
+      await userEvent.click(screen.getByRole('button', { name: 'Back 9' }))
+      expect(screen.getByRole('button', { name: '10' })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: '18' })).toBeInTheDocument()
+      // a front-nine hole is not on the board at all
+      expect(screen.queryByRole('button', { name: '4' })).not.toBeInTheDocument()
+
       await userEvent.click(screen.getByRole('button', { name: 'Front 9' }))
-      expect(screen.getByText('Hole 1')).toBeInTheDocument()
-      // the 18 tappable hole buttons are gone, not merely disabled
-      expect(screen.queryByRole('button', { name: '14' })).not.toBeInTheDocument()
+      expect(screen.getByRole('button', { name: '4' })).toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: '13' })).not.toBeInTheDocument()
+    })
+
+    /**
+     * Changing the range re-heads the start. `playedStart` would correct a
+     * stale 14 anyway, but leaving the raw state behind means tapping back to
+     * 18 holes silently restores a hole chosen two taps ago — and stamps it.
+     */
+    it('re-heads the start when the range changes, and stores nothing', async () => {
+      await toTeeStep()
+      await userEvent.click(screen.getByRole('button', { name: '14' }))
+      await userEvent.click(screen.getByRole('button', { name: 'Front 9' }))
+      expect(screen.queryByText(/You'll play/)).not.toBeInTheDocument()
 
       const round = await finish()
       expect(round.holes).toBe('front9')
@@ -641,11 +651,16 @@ describe('SetupScreen — choosing games', () => {
     /**
      * A nine played twice around already renumbers the card 1–18 and stamps
      * which loop each number is, so an offset on top would label the closing
-     * holes "1st time round" when they were the second. Penmar is the nine.
+     * holes "1st time round" when they were the second. Its own NINE has no
+     * loop stamps, so that one chooses freely. Penmar is the nine.
      */
-    it('offers no start hole on a nine-hole card, either way round', async () => {
+    it('offers a nine-hole card its own nine, but not two loops of it', async () => {
       await pickPenmar()
-      expect(screen.queryByText('Start on hole')).not.toBeInTheDocument()
+      expect(screen.getByText('Start on hole')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: '7' })).toBeInTheDocument()
+      // …and nothing beyond the nine that exists
+      expect(screen.queryByRole('button', { name: '13' })).not.toBeInTheDocument()
+
       await userEvent.click(screen.getByRole('button', { name: '18 (twice around)' }))
       expect(screen.queryByText('Start on hole')).not.toBeInTheDocument()
     })

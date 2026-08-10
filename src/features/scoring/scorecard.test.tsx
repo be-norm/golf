@@ -92,9 +92,14 @@ describe('ScorecardScreen — where the money moved', () => {
  * them already reads in and the order the front/back bets settled in.
  */
 describe('ScorecardScreen — a round that teed off elsewhere', () => {
-  async function renderCard(id: string, startHole?: number) {
+  async function renderCard(
+    id: string,
+    startHole?: number,
+    holes?: 'front9' | 'back9' | 'full18',
+  ) {
     const round = makeRound({
       players: makePlayers([{ name: 'Ann' }, { name: 'Bob' }]),
+      ...(holes && { holes }),
       ...(startHole !== undefined && { startHole }),
       games: [{ type: 'skins', config: { stakeCents: 100, carryover: false } }],
     })
@@ -162,6 +167,22 @@ describe('ScorecardScreen — a round that teed off elsewhere', () => {
     expect(holeRow(1)).toEqual(['Hole', '10', '11', '12', '13', '14', '15', '16', '17', '18', '—'])
     // hole 1's score under hole 1 — the same placement check, on the shape
     // where the positional slice has to agree with the old number filter
+    expect(cellsFor(0, 'Ann')).toEqual(['Ann', '4', '·', '·', '·', '·', '·', '·', '·', '·', '4'])
+  })
+
+  /**
+   * A rotated NINE — one table, and the branch that had no way to be reached
+   * from the UI until start holes were bounded to the range (MAI-41). It runs
+   * 13…18,10,11,12 across a single table, so the "top nine first" tail must NOT
+   * appear (there is no second nine to be above) while the note itself must,
+   * because this is the shape most likely to be read as a mistake.
+   */
+  it('runs a rotated nine across one table, and says where it began', async () => {
+    await renderCard('card-back9-13', 13, 'back9')
+    expect(await screen.findByText('Teed off on 13')).toBeInTheDocument()
+    expect(screen.queryByText(/top nine first/)).not.toBeInTheDocument()
+    expect(screen.getAllByRole('table')).toHaveLength(1)
+    expect(holeRow(0)).toEqual(['Hole', '13', '14', '15', '16', '17', '18', '10', '11', '12', '—'])
     expect(cellsFor(0, 'Ann')).toEqual(['Ann', '4', '·', '·', '·', '·', '·', '·', '·', '·', '4'])
   })
 })

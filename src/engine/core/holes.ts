@@ -13,51 +13,58 @@ import type { Round } from './types'
 type HoleRange = Pick<Round, 'holes' | 'startHole' | 'courseSnapshot'>
 
 /**
- * The holes this round plays, in PLAY order, wrapping the card from `startHole`.
+ * The holes this round plays, in PLAY order — the range's own block of the
+ * card, rotated to begin at `startHole`.
  *
- * Built FROM the snapshot's own hole numbers rather than from 1..n and filtered
- * afterwards, so it cannot name a hole the snapshot lacks — `ctx.par` throws on
- * one of those, deliberately.
+ * TWO STEPS, AND THE ORDER OF THEM IS THE RULE. First the BLOCK: the holes the
+ * range names, taken from the snapshot's own numbers so it cannot name a hole
+ * the card lacks (`ctx.par` throws on one of those, deliberately). Then the
+ * rotation, INSIDE that block.
  *
- * A `startHole` the card doesn't have falls back to the range's own default.
- * Guard it here, where the value first arrives: `importRound` casts the round
- * without validating either field, so an archive can carry anything, and a
- * round the user can still open must not white-screen over it.
+ * So a back nine started on 13 plays 13–18 and then 10, 11, 12. It never
+ * reaches the front, because the block it rotates within is holes 10–18 and
+ * nothing puts a front-nine hole in there. That is the whole design:
  *
- * A range whose start hole the card hasn't got returns EMPTY (a back nine on a
- * 9-hole card), preserved from before start holes existed — Match Play
- * documents and depends on that reading: an empty span is a match with no
- * holes, which settles nothing, rather than a crash. Two limits on how far that
- * preservation goes, both reachable only through a hand-edited export:
- *   - it is the EFFECTIVE start that must be missing. A stored `startHole` the
- *     card DOES have is honoured and the fallback never runs, so 'back9' plus
- *     `startHole: 3` on a 9-hole card plays 3…9,1,2 rather than nothing.
- *   - a card that holds the start but runs out before the count does now WRAPS
- *     where the old snapshot filter truncated ('back9' on a 14-hole card was 5
- *     holes and is now 9).
+ *   - "Back 9" stays a TRUE name for the round. A rotation cannot make it
+ *     describe holes it doesn't play, so no surface has to derive a different
+ *     label for a rotated nine.
+ *   - The bound is enforced HERE, not in the picker. `importRound` validates
+ *     neither `holes` nor `startHole`, so 'back9' + `startHole: 3` has to be
+ *     answerable — and the answer is the range's own head, 10, because 3 is not
+ *     one of this round's holes. Un-offered would only have been a UI promise;
+ *     un-derivable is a fact.
  *
- * REVERT SAFETY, and why setup only offers a start hole on an 18-hole round:
- * `startHole` is stored only when it differs from the default, so it can only
- * ever sit on a 'full18'. Revert MAI-41 and such a round re-derives as 1–18 —
- * the same eighteen holes, in a different order, AND FOR DIFFERENT MONEY: Wolf
- * assigns by position so every hole gets a new wolf (and the recorded picks
- * then read as stale, sending settled holes back to pending), nassau's front
- * bet moves to holes 1–9, and match close-outs land elsewhere. Recoverable,
- * because every score is still in the log against a hole the round plays.
- * A NINE would not be: 'front9' + startHole 10 re-derives as holes 1–9 against
- * scores posted on 10–18, i.e. an empty card in a synced archive.
+ * A `startHole` outside the block — off the card entirely, or on the wrong nine
+ * — falls back to the block's head for the same reason: an archive can carry
+ * anything, and a round the user can still open must not white-screen over it.
+ *
+ * A range whose block is EMPTY plays nothing (a back nine on a 9-hole card),
+ * preserved from before start holes existed — Match Play documents and depends
+ * on that reading: an empty span is a match with no holes, which settles
+ * nothing, rather than a crash. No start hole can smuggle such a round back
+ * into playability now that the rotation happens inside the block.
+ *
+ * REVERT SAFETY. `startHole` is stored only when it differs from the range
+ * default, and a rotation never leaves its block, so EVERY round re-derives on
+ * a revert of MAI-41 as the SAME HOLES in a different order — the eighteen for
+ * a `full18`, that nine for a nine. Different money (Wolf assigns by position,
+ * so every hole gets a new wolf and the recorded picks read as stale; nassau's
+ * halves move; match close-outs land elsewhere) but recoverable, because every
+ * score in the log still sits on a hole the round plays. It is the block bound
+ * that buys this for the nines: unbounded, a 'front9' teed off on 10 would come
+ * back as holes 1–9 against scores posted on 10–18 — an empty card in a synced
+ * archive, and nothing to recover from.
  */
 export function holesForRound(round: HoleRange): number[] {
   const card = round.courseSnapshot.holes.map((h) => h.number).sort((a, b) => a - b)
+  const from = round.holes === 'back9' ? 10 : 1
   const count = round.holes === 'full18' ? 18 : 9
-  const fallback = round.holes === 'back9' ? 10 : 1
-  const asked = card.indexOf(round.startHole ?? fallback)
-  const start = asked === -1 ? card.indexOf(fallback) : asked
-  if (start === -1) return []
-  return Array.from(
-    { length: Math.min(count, card.length) },
-    (_, i) => card[(start + i) % card.length]!,
-  )
+  const block = card.filter((h) => h >= from).slice(0, count)
+  // `?? -1` rather than the block's head: an absent start hole and one that
+  // isn't in this block are the same answer, and both are "start at the head".
+  const asked = block.indexOf(round.startHole ?? -1)
+  const start = asked === -1 ? 0 : asked
+  return block.map((_, i) => block[(start + i) % block.length]!)
 }
 
 /**
