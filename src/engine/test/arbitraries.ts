@@ -231,19 +231,32 @@ const longDriveFuzz: GameFuzz = {
 }
 
 /**
- * THE FIRST ENTRY WITH NO EVENTS OF ITS OWN (MAI-58), which is the whole reason
- * it belongs here. Snake's entire state comes from facts the ROUND deals —
- * `puttSeeds` above and the `completed` flag — so zero-sum, replay determinism,
- * retraction equivalence and the rotation pair all get exercised over a game
- * that reads `RoundContext` and nothing else. It is also the only game in the
- * fuzz whose money exists solely on a completed round, so it is what makes that
- * dimension load-bearing rather than merely covered.
+ * THE ONLY GAME IN THE FUZZ WHOSE MONEY EXISTS SOLELY ON A COMPLETED ROUND,
+ * which is what makes the `completed` dimension load-bearing rather than merely
+ * covered — every other engine settles hole by hole.
+ *
+ * One seed per hole, like `ctpFuzz`: 0–3 hand the snake to that player, 4 leave
+ * the hole alone, 5 name somebody who ISN'T in the round (which must move no
+ * money rather than pay a ghost). The pot carries along the WALK, so a wrapped
+ * round doubles it in the order the holes were actually played — which is the
+ * one thing `arbitraryRotationPair` can see and the order-blind properties
+ * cannot.
  */
 const snakeFuzz: GameFuzz = {
   type: 'snake',
   eligible: (n) => n >= 2,
   arbitrary: () =>
-    fc.boolean().map((doubling) => () => ({ config: { potCents: 100, doubling } })),
+    fc
+      .tuple(fc.boolean(), fc.array(fc.integer({ min: 0, max: 5 }), { minLength: 18, maxLength: 18 }))
+      .map(([doubling, seeds]) => (ids: readonly Uuid[]) => ({
+        config: { potCents: 100, doubling },
+        events: (hole: number, idx: number) => {
+          const seed = seeds[idx]!
+          if (seed === 4) return []
+          const playerId = seed === 5 ? 'p-nobody' : (ids[seed % ids.length] ?? ids[0]!)
+          return [{ kind: 'snake/bite', data: { hole, playerId } }]
+        },
+      })),
 }
 
 /**

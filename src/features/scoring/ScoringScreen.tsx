@@ -18,7 +18,6 @@ import type { EventDraft } from '../../engine/core/events'
 import type { GameConfig, Round } from '../../engine/core/types'
 import { gameLabel } from '../../engine/label'
 import { partitionByRole, shouldGroupSideBets, strokeGame } from '../../lib/gameRoles'
-import { roundReads } from '../../lib/roundFacts'
 import { ActionsSheet } from './ActionsSheet'
 import { AwardGrid } from './AwardGrid'
 import { Sheet } from '../../components/Sheet'
@@ -227,26 +226,6 @@ export function ScoringScreen() {
       )
     : []
   const holeInputs = inputs.filter((i) => i.hole === currentHole)
-
-  /**
-   * DOES THIS ROUND COUNT PUTTS? (MAI-90, MAI-58.)
-   *
-   * `trackPutts` is the frozen answer setup stamped, and it stays first: a
-   * round that collected putts for a game this build no longer ships must keep
-   * showing them, which is exactly what re-deriving from today's registry would
-   * lose.
-   *
-   * The OR is the other direction, and it is what stops Snake deriving nothing
-   * while looking healthy. A round can hold a putt-reading game with the flag
-   * absent — an import, a hand-edited log, a round written by a build that
-   * predates the game — and would then render no putts control at all, so the
-   * scorekeeper has no way to enter the one fact the bet is made of.
-   * `validateSetup` cannot catch it either: it sees config, players and
-   * siblings, never the round.
-   *
-   * Strictly additive, so it can only ever turn the affordance ON.
-   */
-  const countingPutts = round.trackPutts || roundReads('putts', round.games)
 
   // Deliberately NOT a useMemo: `currentHole` is derived below the early
   // returns, so keying a hook on it would mean moving one or the other. It is a
@@ -787,7 +766,7 @@ export function ScoringScreen() {
             strokes={dotsGame ? ctx.strokesFor(dotsGame.gameId, p.playerId, currentHole) : 0}
             onScore={(gross) => setScore(p.playerId, gross)}
             putts={ctx.puttsFor(p.playerId, currentHole)}
-            onPutts={countingPutts ? (step) => setPutts(p.playerId, step) : undefined}
+            onPutts={round.trackPutts ? (step) => setPutts(p.playerId, step) : undefined}
           />
         ))}
       </section>

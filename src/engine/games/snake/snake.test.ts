@@ -7,8 +7,13 @@ import { EventLog, makePlayers, makeRound } from '../../test/harness'
 import type { SnakeConfig, SnakeDerivation } from './engine'
 
 /**
- * Snake reads NOTHING but putts and the shape of the round — it has no events
- * of its own — so every fixture here is a card plus a putts log.
+ * Snake is decided by one tap per hole — the name of the last player to
+ * three-putt it — so every fixture here is a card plus `snake/bite` events.
+ *
+ * It was built on round-level putt COUNTS first (MAI-54, MAI-90) and moved,
+ * because counting putts asks for seventy-odd numbers to capture the four that
+ * matter and STILL cannot answer "who was last", which is the actual rule.
+ * Playing order is not in the log; the person tapping was standing there.
  *
  * The harness front 9 is pars 4 4 5 3 4 4 3 5 4; Snake never reads par, but
  * `anyScored` and `completed` gate the money and those need scores.
@@ -20,7 +25,6 @@ function snakeRound(players = FOUR(), config: Partial<SnakeConfig> = {}) {
   return makeRound({
     players,
     holes: 'front9',
-    trackPutts: true,
     games: [{ type: 'snake', config: { potCents: 100, doubling: false, ...config } }],
   })
 }
@@ -35,8 +39,9 @@ function scoreHoles(round: ReturnType<typeof makeRound>, log: EventLog, holes: n
   log.scoreByHole(round, card, holes)
 }
 
-const putt = (log: EventLog, playerId: string, hole: number, putts: number) =>
-  log.append({ type: 'score/putts', playerId, hole, putts })
+/** Tap a name under the scores: this player three-putted last on this hole. */
+const bite = (log: EventLog, hole: number, playerId: string) =>
+  log.append({ type: 'game/event', gameId: 'game-1', kind: 'snake/bite', data: { hole, playerId } })
 
 describe('snake — golden fixtures (hand-verified)', () => {
   /**
@@ -45,12 +50,10 @@ describe('snake — golden fixtures (hand-verified)', () => {
    * live. A $0 settlement line would make `lines.length === 0` — the settle
    * panel's "No money moved." signal — false (MAI-40).
    */
-  it('S1: a round with no three-putt pays nothing, and says why', () => {
+  it('S1: a round nobody took it on pays nothing, and says why', () => {
     const round = snakeRound()
     const log = new EventLog()
     scoreHoles(round, log, [1, 2, 3, 4, 5, 6, 7, 8, 9])
-    // plenty of putts, none of them three
-    for (const hole of [1, 2, 3]) for (const p of round.players) putt(log, p.playerId, hole, 2)
     log.append({ type: 'round/completed' })
     const snake = snakeOf(round, log)
 
@@ -58,16 +61,14 @@ describe('snake — golden fixtures (hand-verified)', () => {
     expect(snake.holderId).toBeUndefined()
     expect(snake.settlement.lines).toHaveLength(0)
     assertZeroSum(snake.settlement)
-    expect(snake.notes).toEqual([
-      'Nobody three-putted — the snake never came out, so nothing was paid',
-    ])
+    expect(snake.notes).toEqual(['Nobody took the snake — nothing was paid'])
     expect(snake.summaryParts).toEqual([{ label: '', value: 'no snake yet' }])
     expect(snake.detailLines).toEqual([{ label: 'Snake', value: 'nobody has it' }])
   })
 
   /**
-   * S2: it changes hands late. B three-putts on 2 and carries it for four
-   * holes; C three-putts on 6 and is still holding it at the end.
+   * S2: it changes hands late. B takes it on 2 and carries it for four holes;
+   * C takes it on 6 and is still holding it at the end.
    *
    * C pays $1 to each of the other three = −$3; A, B and D collect $1 each.
    */
@@ -75,14 +76,14 @@ describe('snake — golden fixtures (hand-verified)', () => {
     const round = snakeRound()
     const log = new EventLog()
     scoreHoles(round, log, [1, 2, 3, 4, 5, 6, 7, 8, 9])
-    putt(log, 'p-b', 2, 3)
-    putt(log, 'p-c', 6, 3)
+    bite(log, 2, 'p-b')
+    bite(log, 6, 'p-c')
     log.append({ type: 'round/completed' })
     const snake = snakeOf(round, log)
 
     expect(snake.bites).toEqual([
-      { hole: 2, holderId: 'p-b', putts: 3, potCents: 100 },
-      { hole: 6, holderId: 'p-c', from: 'p-b', putts: 3, potCents: 100 },
+      { hole: 2, holderId: 'p-b', potCents: 100 },
+      { hole: 6, holderId: 'p-c', from: 'p-b', potCents: 100 },
     ])
     expect(snake.holderId).toBe('p-c')
     expect(snake.settlement.perPlayerCents).toEqual({
@@ -96,10 +97,13 @@ describe('snake — golden fixtures (hand-verified)', () => {
     expect(snake.settlement.lines[0]!.label).toBe('C holds the snake')
     expect(snake.standings[3]).toMatchObject({ label: 'C', detail: 'holds the snake' })
 
-    expect(snake.holeSummary(2)).toEqual(['B takes the snake', '↳ 3 putts — the snake is out'])
+    expect(snake.holeSummary(2)).toEqual([
+      'B takes the snake',
+      '↳ last to three-putt — the snake is out',
+    ])
     expect(snake.holeSummary(6)).toEqual([
       'C takes the snake',
-      '↳ 3 putts — B is off the hook',
+      '↳ last to three-putt — B is off the hook',
     ])
     // the money lands on the last hole played, and says what it is for
     expect(snake.holeSummary(9)).toEqual([
@@ -120,9 +124,9 @@ describe('snake — golden fixtures (hand-verified)', () => {
     const round = snakeRound(FOUR(), { doubling: true })
     const log = new EventLog()
     scoreHoles(round, log, [1, 2, 3, 4, 5, 6, 7, 8, 9])
-    putt(log, 'p-d', 2, 3)
-    putt(log, 'p-d', 4, 3)
-    putt(log, 'p-a', 7, 4)
+    bite(log, 2, 'p-d')
+    bite(log, 4, 'p-d')
+    bite(log, 7, 'p-a')
     log.append({ type: 'round/completed' })
     const snake = snakeOf(round, log)
 
@@ -142,66 +146,74 @@ describe('snake — golden fixtures (hand-verified)', () => {
 
     expect(snake.holeSummary(4)).toEqual([
       'D three-putts again',
-      '↳ 3 putts — and it stays with them; the pot is now $2',
+      '↳ last to three-putt — and it stays with them; the pot is now $2',
     ])
     // the bar carries the running value, so nobody is surprised at the end
     expect(snake.summaryParts).toEqual([{ label: 'H7', value: 'A has it · $4' }])
   })
 
   /**
-   * S4: more than one three-putt on a hole. Playing order is not modelled, so
-   * the WORST count takes it — a four-putt beats a three-putt — and a true tie
-   * goes to whoever is later in the roster, the only stable stand-in for who
-   * putted out last. Stability is the point: a holder that reshuffles between
-   * re-derives would move money at random.
+   * S4: TWO PLAYERS THREE-PUTT THE SAME GREEN — the case that used to need a
+   * tie rule the app had to invent (worst count, then roster order), because
+   * putt counts cannot say who putted out last.
+   *
+   * One tap per hole, last write wins, so the group answers it: tap B, realise
+   * C was in fact last, tap C. One bite, one holder, no guessing — and the
+   * money is C's.
    */
-  it('S4: the worst putt count takes it, then roster order', () => {
+  it('S4: a second tap on a hole corrects the first, and pays once', () => {
     const round = snakeRound()
     const log = new EventLog()
     scoreHoles(round, log, [1, 2, 3, 4, 5, 6, 7, 8, 9])
-    // hole 3: B three-putts, C four-putts → C, the worse offence
-    putt(log, 'p-b', 3, 3)
-    putt(log, 'p-c', 3, 4)
-    // hole 5: A and D both three-putt → D, later in the roster
-    putt(log, 'p-a', 5, 3)
-    putt(log, 'p-d', 5, 3)
+    bite(log, 3, 'p-b')
+    bite(log, 3, 'p-c')
+    log.append({ type: 'round/completed' })
     const snake = snakeOf(round, log)
 
-    expect(snake.bites.map((b) => [b.hole, b.holderId, b.putts])).toEqual([
-      [3, 'p-c', 4],
-      [5, 'p-d', 3],
-    ])
+    expect(snake.bites).toEqual([{ hole: 3, holderId: 'p-c', potCents: 100 }])
+    expect(snake.settlement.lines).toHaveLength(1)
+    expect(snake.settlement.perPlayerCents['p-c']).toBe(-300)
   })
 
   /**
-   * S5: zero is a chip-in and undefined is "not recorded". Neither is a
-   * three-putt, and folding them together is the one mistake `ctx.puttsFor`
-   * exists to prevent.
+   * S5: taking a tap back CLEARS the hole rather than revealing whoever was
+   * tapped before it, so the snake reverts to whoever genuinely held it. A
+   * mistap corrected twice must not leave an earlier player holding money
+   * nobody re-confirmed.
    */
-  it('S5: a chip-in and an unrecorded hole are both not three-putts', () => {
+  it('S5: clearing a hole hands the snake back to the previous holder', () => {
     const round = snakeRound()
     const log = new EventLog()
     scoreHoles(round, log, [1, 2, 3, 4, 5, 6, 7, 8, 9])
-    putt(log, 'p-a', 1, 0)
-    putt(log, 'p-b', 2, 2)
-    // hole 3 has no putts recorded at all
+    bite(log, 2, 'p-a')
+    const first = bite(log, 6, 'p-b')
+    const correction = bite(log, 6, 'p-c')
     log.append({ type: 'round/completed' })
 
-    expect(snakeOf(round, log).bites).toEqual([])
-    expect(snakeOf(round, log).notes).toHaveLength(1)
+    const lit = snakeOf(round, log)
+      .awards!(6)
+      .find((a) => a.taken)!
+    expect(lit.playerId).toBe('p-c')
+    // every tap on the hole, so undo clears it rather than exposing B
+    expect(lit.undoEventIds).toEqual([first.id, correction.id])
+
+    for (const id of lit.undoEventIds!) log.append({ type: 'meta/retract', targetEventId: id })
+    const cleared = snakeOf(round, log)
+    expect(cleared.bites.map((b) => b.hole)).toEqual([2])
+    expect(cleared.holderId).toBe('p-a')
   })
 
   /**
-   * S6: undoing the deciding three-putt moves the snake BACK to whoever held
-   * it before — free, because the holder is derived from the log every time
-   * rather than accumulated. Invariant #2: undo is a compensation event.
+   * S6: undoing the deciding tap moves the snake BACK to whoever held it
+   * before — free, because the holder is derived from the log every time rather
+   * than accumulated. Invariant #2: undo is a compensation event.
    */
-  it('S6: retracting the deciding three-putt hands the snake back', () => {
+  it('S6: retracting the deciding tap hands the snake back', () => {
     const round = snakeRound()
     const log = new EventLog()
     scoreHoles(round, log, [1, 2, 3, 4, 5, 6, 7, 8, 9])
-    putt(log, 'p-b', 2, 3)
-    const mistake = putt(log, 'p-c', 6, 3)
+    bite(log, 2, 'p-b')
+    const mistake = bite(log, 6, 'p-c')
     log.append({ type: 'round/completed' })
     expect(snakeOf(round, log).holderId).toBe('p-c')
 
@@ -217,34 +229,15 @@ describe('snake — golden fixtures (hand-verified)', () => {
   })
 
   /**
-   * S7: clearing a count is different from correcting it to zero — zero is a
-   * chip-in, and a chip-in is not "I never saw this". The snake goes back the
-   * same way, and the cleared hole reports no bite at all.
-   */
-  it('S7: clearing a putt count hands the snake back, and does not read as 0', () => {
-    const round = snakeRound()
-    const log = new EventLog()
-    scoreHoles(round, log, [1, 2, 3, 4, 5, 6, 7, 8, 9])
-    putt(log, 'p-b', 2, 3)
-    putt(log, 'p-c', 6, 3)
-    log.append({ type: 'score/puttsClear', playerId: 'p-c', hole: 6 })
-    log.append({ type: 'round/completed' })
-
-    const snake = snakeOf(round, log)
-    expect(snake.bites.map((b) => b.hole)).toEqual([2])
-    expect(snake.holderId).toBe('p-b')
-  })
-
-  /**
-   * S8: mid-round the snake is HELD, not owed. It can still be passed, so
+   * S7: mid-round the snake is HELD, not owed. It can still be passed, so
    * nothing settles — the bar says who has it and the standings say $0, which
    * is the honest reading of a bet still moving.
    */
-  it('S8: a live round reports a holder and moves no money', () => {
+  it('S7: a live round reports a holder and moves no money', () => {
     const round = snakeRound()
     const log = new EventLog()
     scoreHoles(round, log, [1, 2, 3, 4, 5])
-    putt(log, 'p-b', 2, 3)
+    bite(log, 2, 'p-b')
     const snake = snakeOf(round, log)
 
     expect(snake.holderId).toBe('p-b')
@@ -256,16 +249,16 @@ describe('snake — golden fixtures (hand-verified)', () => {
   })
 
   /**
-   * S9: a round finished early pays on the last hole ANYBODY PLAYED — not hole
+   * S8: a round finished early pays on the last hole ANYBODY PLAYED — not hole
    * 9, which nobody reached, and not hole 1. `buildHoleLedger` attributes a
    * completed round's money to that hole independently, so the engine has to
    * agree with it or the sentence lands on one row and the payment on another.
    */
-  it('S9: finishing early lands the money on the last hole played', () => {
+  it('S8: finishing early lands the money on the last hole played', () => {
     const round = snakeRound()
     const log = new EventLog()
     scoreHoles(round, log, [1, 2, 3, 4])
-    putt(log, 'p-b', 2, 3)
+    bite(log, 2, 'p-b')
     log.append({ type: 'round/completed' })
 
     const { ctx, derivations } = deriveRound(round, log.events)
@@ -280,18 +273,18 @@ describe('snake — golden fixtures (hand-verified)', () => {
   })
 
   /**
-   * S10: putts on a hole nobody scored. The log will take them — the entry is
-   * per hole, not per scored hole — and counting them would move the snake,
-   * and its money, onto a hole that never happened: `buildHoleLedger` gives a
-   * row to any hole whose deltas move, played or not.
+   * S9: a tap on a hole nobody scored. The cell is offered there — the grid has
+   * no frontier gate, by design — and counting it would move the snake, and its
+   * money, onto a hole that never happened: `buildHoleLedger` gives a row to
+   * any hole whose deltas move, played or not.
    */
-  it('S10: putts on a hole nobody played do not move the snake', () => {
+  it('S9: a tap on a hole nobody played does not move the snake', () => {
     const round = snakeRound()
     const log = new EventLog()
     scoreHoles(round, log, [1, 2, 3])
-    putt(log, 'p-b', 2, 3)
-    // hole 7 was never played, but carries a stray count
-    putt(log, 'p-d', 7, 4)
+    bite(log, 2, 'p-b')
+    // hole 7 was never played, but carries a stray tap
+    bite(log, 7, 'p-d')
     log.append({ type: 'round/completed' })
 
     const snake = snakeOf(round, log)
@@ -303,14 +296,14 @@ describe('snake — golden fixtures (hand-verified)', () => {
     expect(rows.some((r) => r.hole === 7)).toBe(false)
   })
 
-  /** A count naming somebody outside the round can only come from a corrupt or
+  /** A tap naming somebody outside the round can only come from a corrupt or
    *  hand-edited log. It must not become the holder — `addLine` would refuse
    *  the whole line and Snake would pay nobody while looking settled. */
-  it('S11: a putt count naming a non-player is inert', () => {
+  it('S10: a tap naming a non-player is inert', () => {
     const round = snakeRound()
     const log = new EventLog()
     scoreHoles(round, log, [1, 2, 3, 4, 5, 6, 7, 8, 9])
-    putt(log, 'p-nobody', 4, 5)
+    bite(log, 4, 'p-nobody')
     log.append({ type: 'round/completed' })
 
     const snake = snakeOf(round, log)
@@ -320,25 +313,24 @@ describe('snake — golden fixtures (hand-verified)', () => {
   })
 
   /**
-   * S13: a ONE-player round, which `validateSetup` refuses but `importRound`
+   * S11: a ONE-player round, which `validateSetup` refuses but `importRound`
    * accepts (`.min(1)` on the roster). There is nobody to collect from, so
    * nothing is owed — and the money and the narration have to agree about that.
    * Guarding only the settlement left the panel saying "No money moved." over a
    * ledger row reading "pays $1 to each of 0 other players — $0".
    */
-  it('S13: a one-player round owes nothing, and says nothing about paying', () => {
+  it('S11: a one-player round owes nothing, and says nothing about paying', () => {
     const round = snakeRound(makePlayers([{ name: 'A' }]))
     const log = new EventLog()
     scoreHoles(round, log, [1, 2, 3])
-    putt(log, 'p-a', 2, 3)
+    bite(log, 2, 'p-a')
     log.append({ type: 'round/completed' })
     const snake = snakeOf(round, log)
 
     expect(snake.settlement.lines).toHaveLength(0)
     assertZeroSum(snake.settlement)
-    // the holder is still reported — it is true, and the bar says it
     expect(snake.holderId).toBe('p-a')
-    // …but hole 3 — where a payment WOULD land — claims nothing was paid
+    // hole 3 — where a payment WOULD land — claims nothing was paid
     expect(snake.holeSummary(3)).toEqual([])
   })
 
@@ -347,7 +339,7 @@ describe('snake — golden fixtures (hand-verified)', () => {
     const round = snakeRound(makePlayers([{ name: 'A' }, { name: 'B' }]), { potCents: 500 })
     const log = new EventLog()
     scoreHoles(round, log, [1, 2, 3, 4, 5, 6, 7, 8, 9])
-    putt(log, 'p-a', 3, 3)
+    bite(log, 3, 'p-a')
     log.append({ type: 'round/completed' })
     const snake = snakeOf(round, log)
 
@@ -356,5 +348,51 @@ describe('snake — golden fixtures (hand-verified)', () => {
       'A is left holding the snake',
       '↳ pays $5 to each of 1 other player — $5',
     ])
+  })
+})
+
+describe('snake — the award grid it offers', () => {
+  /**
+   * EVERY HOLE, because any green can be three-putted — there is no
+   * eligibility rule to learn, unlike CTP's par 3s or Long Drive's designated
+   * holes. And one row, whose label has to carry the whole instruction: with
+   * Snake the only award game running, `AwardGrid` shows no game heading.
+   */
+  it('offers one cell per player on every hole of the round', () => {
+    const round = snakeRound()
+    const snake = snakeOf(round, new EventLog())
+
+    for (const hole of [1, 2, 3, 4, 5, 6, 7, 8, 9]) {
+      const cells = snake.awards!(hole)
+      expect(cells.map((c) => c.label)).toEqual(['A', 'B', 'C', 'D'])
+      expect(cells.every((c) => c.group === 'Snake — last 3-putt')).toBe(true)
+      // every payload carries its hole — the ledger places a game event in its
+      // prefix replay by reading it
+      expect(cells.every((c) => (c.data as { hole: number }).hole === hole)).toBe(true)
+      expect(cells.some((c) => c.taken)).toBe(false)
+    }
+  })
+
+  /**
+   * THE LIFECYCLE RULE: no frontier gate and no all-scored gate. You remember
+   * on 12 that Rob three-putted 7, or you fix a mistap on the 18th green.
+   */
+  it('keeps offering cells behind the frontier and after every hole is scored', () => {
+    const round = snakeRound()
+    const log = new EventLog()
+    scoreHoles(round, log, [1, 2, 3, 4, 5, 6, 7, 8, 9])
+    expect(snakeOf(round, log).awards!(2)).toHaveLength(4)
+  })
+
+  it('lights exactly the tapped name, and only that cell carries an undo', () => {
+    const round = snakeRound()
+    const log = new EventLog()
+    scoreHoles(round, log, [1, 2, 3])
+    const evt = bite(log, 2, 'p-c')
+    const cells = snakeOf(round, log).awards!(2)
+
+    expect(cells.filter((c) => c.taken).map((c) => c.playerId)).toEqual(['p-c'])
+    expect(cells.find((c) => c.taken)!.undoEventIds).toEqual([evt.id])
+    expect(cells.filter((c) => !c.taken).every((c) => c.undoEventIds === undefined)).toBe(true)
   })
 })

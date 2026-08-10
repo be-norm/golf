@@ -322,12 +322,16 @@ describe('buildHoleLedger', () => {
     const round = makeRound({
       players: makePlayers([{ name: 'A' }, { name: 'B' }]),
       holes: 'front9',
-      trackPutts: true,
       games: [{ type: 'snake', config: { potCents: 100, doubling: false } }],
     })
     const log = new EventLog()
     log.scoreByHole(round, { A: [4, 4, 4], B: [4, 4, 4] }, [1, 2, 3])
-    log.append({ type: 'score/putts', playerId: 'p-a', hole: 2, putts: 3 })
+    log.append({
+      type: 'game/event',
+      gameId: 'game-1',
+      kind: 'snake/bite',
+      data: { hole: 2, playerId: 'p-a' },
+    })
     // hole 4 is entered and then undone — the group mis-tapped and backed out
     const slip = log.append({ type: 'score/set', playerId: 'p-a', hole: 4, gross: 5 })
     log.append({ type: 'meta/retract', targetEventId: slip.id })

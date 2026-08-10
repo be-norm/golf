@@ -82,23 +82,27 @@ way it was.
    strokes, and it is true regardless of which bets are running. So putts get a round-level
    `score/putts` event feeding `RoundContext`, entered once and read one-way by Snake, Dots
    and Trouble alike — which also makes 3-putt/snake DERIVABLE rather than another button.
-   Built as `score/putts` + `score/puttsClear` -> `ctx.puttsFor` (MAI-90); **Snake is the
-   first engine to read one** (MAI-58), and reads nothing else — it has no event kinds at
-   all, which is what the seam was for. **A round collects a shared fact because a GAME
-   declares it reads one**
+   Built as `score/putts` + `score/puttsClear` -> `ctx.puttsFor` (MAI-90). **Snake was to be
+   its first reader and is not** (MAI-58): counting putts asks every player for a number on
+   all eighteen greens — seventy-odd entries to capture the four that matter — and STILL
+   cannot answer the rule, which is who three-putted *last* on a hole. Playing order is not
+   in the log, so the engine had to guess it. A tap on the award grid IS that answer, given
+   by the person who was standing there, so the snake is a binary award and putts keep no
+   consumer today. **The seam is still right, for the fact it was chosen for**: Dots and
+   Trouble want the COUNT (poley; a 3-putt that dings everyone who made one, not just the
+   last), which no award can carry — so this stays built, tested and dormant until one of
+   them lands. The lesson worth keeping is that a shared FACT and a per-hole JUDGEMENT are
+   different things, and only the first belongs on this channel.
+   **A round collects a shared fact because a GAME declares it reads one**
    (`meta.reads`, a `RoundFact` set), never because the user was offered a switch:
    nothing here shows putts back to you, so a Skins round asked for a number that went
    into the log and was never seen again. That declaration is also the ONLY way a game can
    require one - `validateSetup` sees config, players and siblings, never the round - so
    an engine reading a fact nobody collects would derive nothing while looking healthy.
    The rule lives in `src/lib/roundFacts.ts`; setup freezes the answer onto
-   `Round.trackPutts`, and the scoring screen ORs that frozen flag with `roundReads` —
-   the flag stays authoritative (a round that collected putts for a game this build no
-   longer ships must keep showing them) while the OR keeps a round that arrives WITHOUT
-   it, holding a game that reads them, from silently offering no way to enter the one
-   fact its bet is made of. `undefined` and `0` are different everywhere (a chip-in takes no
+   `Round.trackPutts`. `undefined` and `0` are different everywhere (a chip-in takes no
    putts). What the decision buys is that the award channel stays a binary toggle and
-   never had to carry counts.
+   never had to carry counts — which is exactly what let Snake move onto it.
 8. **Sync-ready IDs.** Locally-minted entity IDs are UUIDv7; rows carry `updatedAt`.
    Exception: courses imported from OpenGolfAPI keep the provider's UUID as their id —
    deliberate, so the same course dedupes across devices and the shared library
