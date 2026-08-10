@@ -607,7 +607,18 @@ export function ScoringScreen() {
             // `wolf-pick-5` — one key would collapse them into one row and one
             // expanded picker.
             const key = `${input.gameId}:${input.id}`
-            const open = !input.answered || adjustingId === key
+            // A COMPLETED ROUND IS READ-ONLY HERE, answered or not — the same
+            // gate `AwardGrid` takes below, and for a sharper reason than
+            // consistency: `enqueuePushRound` runs in `finish()` and nowhere
+            // else, so an answer recorded after the round is settled changes
+            // the money on this device and can never reach `round_archives`.
+            // The synced copy keeps the old numbers and a reinstatement
+            // restores them. Reopen → record → Finish is the flow that pushes,
+            // which is exactly why the picker must not offer a shortcut past
+            // it. Gating only `Adjust` (the first attempt) left the asymmetry
+            // of a settled round refusing to REVISE a pick while happily
+            // accepting a new one.
+            const open = !roundOver && (!input.answered || adjustingId === key)
             // Two Wolfs at different stakes put two of these on one hole, and
             // "Ann rides with…" twice over says nothing about which. Named only
             // then — a label over the single panel of a one-game round is noise.
@@ -623,7 +634,7 @@ export function ScoringScreen() {
               <div
                 key={key}
                 className={`pixel p-3 ${
-                  input.answered
+                  input.answered || roundOver
                     ? 'border-stone-700 bg-stone-900/70'
                     : 'border-coin-500 bg-coin-500/10'
                 }`}
@@ -631,7 +642,7 @@ export function ScoringScreen() {
                 {label && (
                   <h3
                     className={`font-display mb-1.5 text-[10px] uppercase ${
-                      input.answered ? 'text-stone-400' : 'text-coin-500'
+                      input.answered || roundOver ? 'text-stone-400' : 'text-coin-500'
                     }`}
                   >
                     {label}
@@ -646,18 +657,10 @@ export function ScoringScreen() {
                         </p>
                       ))}
                     </div>
-                    {/* A SETTLED ROUND STATES ITS TEAMS BUT DOES NOT REVISE
-                        THEM. The money has been shared and pushed to
-                        round_archives; changing a pick after that goes through
-                        Reopen on the settle screen, the same way `AwardGrid`
-                        below stops taking cells at `round/completed`.
-
-                        Only the Adjust button, not the panel: an UNANSWERED
-                        prompt stays live on a completed round, because a pick
-                        that was never made is the one thing still missing from
-                        the card, and that has never been gated. Stating the
-                        teams read-only is pure gain — before this they simply
-                        vanished. */}
+                    {/* A settled round STATES its teams and does not revise
+                        them — read-only is still pure gain, since before this
+                        they vanished on tap and a finished round showed
+                        nothing at all. */}
                     {!roundOver && (
                       <button
                         onClick={() => setAdjustingId(open ? undefined : key)}
@@ -667,6 +670,17 @@ export function ScoringScreen() {
                       </button>
                     )}
                   </div>
+                ) : roundOver ? (
+                  // Still worth SAYING on a settled round — this hole never got
+                  // its pick, which is why its money reads the way it does. But
+                  // the answer has to arrive through Reopen, or it lands only
+                  // on this device (see `open` above).
+                  <>
+                    <p className="text-lg text-stone-300">
+                      <GlyphText text={input.prompt} />
+                    </p>
+                    <p className="mt-1 text-stone-500">Reopen the round to record it.</p>
+                  </>
                 ) : (
                   <p className="mb-2 text-lg text-coin-400">
                     <span className="animate-blink">▶ </span>

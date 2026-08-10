@@ -1250,6 +1250,47 @@ describe('ScoringScreen — input chips', () => {
     expect(screen.queryByRole('button', { name: /Lone Wolf/ })).not.toBeInTheDocument()
   })
 
+  /**
+   * An UNANSWERED pick on a settled round is worth saying — it is why that
+   * hole's money reads the way it does — but it must not be answerable here.
+   * `enqueuePushRound` runs in `finish()` and nowhere else, so a pick recorded
+   * now would move the money on this device only: the synced archive keeps the
+   * old numbers, and a reinstatement restores them. Reopen → record → Finish
+   * is the flow that pushes.
+   */
+  it('shows a missing pick on a completed round, but sends you to Reopen', async () => {
+    const round = makeRound({
+      players: makePlayers([{ name: 'Ann' }, { name: 'Bob' }, { name: 'Cal' }, { name: 'Dee' }]),
+      holes: 'front9',
+      games: [
+        { type: 'wolf', config: { pointCents: 100, rotation: ['p-ann', 'p-bob', 'p-cal', 'p-dee'] } },
+      ],
+    })
+    round.id = 'round-completed-unpicked'
+    await db.rounds.put(round)
+    // hole 1 scored, never picked, then the group walks in
+    await eventStore.append(round.id, [
+      { type: 'score/set', playerId: 'p-ann', hole: 1, gross: 4 },
+      { type: 'score/set', playerId: 'p-bob', hole: 1, gross: 4 },
+      { type: 'score/set', playerId: 'p-cal', hole: 1, gross: 5 },
+      { type: 'score/set', playerId: 'p-dee', hole: 1, gross: 5 },
+      { type: 'round/completed' },
+    ])
+    render(
+      <RouterProvider
+        router={createMemoryRouter(routes, { initialEntries: [`/round/${round.id}?hole=1`] })}
+      />,
+    )
+
+    expect(await screen.findByText(/Ann rides with/)).toBeInTheDocument()
+    expect(screen.getByText('Reopen the round to record it.')).toBeInTheDocument()
+    // no way to answer it from here — that would move money the archive can
+    // never learn about
+    expect(screen.queryByRole('button', { name: /Lone Wolf/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Bob' })).not.toBeInTheDocument()
+    expect(await eventStore.list(round.id)).toHaveLength(5)
+  })
+
   /** The picture never carries the meaning alone (engine/core/glyphs.ts). */
   it('draws the wolf in shades for a blind pick, beside the word', async () => {
     await wolfRound('round-input-blind')

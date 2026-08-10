@@ -164,6 +164,15 @@ describe('glyph tokens stay in channels that decode them', () => {
           // the affordance's own vocabulary (MAI-47) — button, sheet header,
           // explainer and empty state, none of which go through GlyphText
           ...Object.values(engine.meta.actions ?? {}),
+          // …and everything `RulesSheet` renders RAW, which is the most
+          // tempting place of all to reach for a picture: "Lone Wolf" has its
+          // own entry in `terms`. Nothing there is decoded.
+          engine.meta.name,
+          engine.meta.blurb,
+          engine.meta.rules.tagline,
+          ...engine.meta.rules.howToPlay,
+          ...engine.meta.rules.scoring,
+          ...engine.meta.rules.terms.flatMap((t) => [t.term, t.def]),
         ]
         for (const s of strings) expect(hasGlyphToken(s), s).toBe(false)
       })
