@@ -149,13 +149,15 @@ describe('longDrive — golden fixtures (hand-verified)', () => {
     expect(ldOf(round, log).notes).toEqual([
       '8 long drives went unclaimed — nobody was given them, so nothing was paid',
     ])
-    // …and four still name themselves, so the threshold is a threshold
+    // …and EXACTLY FOUR still name themselves, which is what makes the
+    // threshold a threshold rather than a number the test agrees with. Six
+    // holes played, two awarded, so 3–6 go unclaimed.
     const four = new EventLog()
-    scoreHoles(round, four, [1, 2, 3, 4])
+    scoreHoles(round, four, [1, 2, 3, 4, 5, 6])
     for (const h of [1, 2]) award(four, h, 'p-a')
     four.append({ type: 'round/completed' })
     expect(ldOf(round, four).notes).toEqual([
-      'Long drive went unclaimed on holes 3, 4 — nobody was given them, so nothing was paid',
+      'Long drive went unclaimed on holes 3, 4, 5, 6 — nobody was given them, so nothing was paid',
     ])
   })
 

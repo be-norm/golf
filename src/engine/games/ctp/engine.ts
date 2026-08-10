@@ -57,9 +57,12 @@ function derive(
     unclaimed.length > 0
       ? [
           `${GROUP} went unclaimed on ${unclaimed.length === 1 ? 'hole' : 'holes'} ` +
-            `${unclaimed.join(', ')} — nobody was given it, so nothing was paid`,
+            `${unclaimed.join(', ')} — nobody was given ` +
+            `${unclaimed.length === 1 ? 'it' : 'them'}, so nothing was paid`,
         ]
       : undefined
+  // No count-instead-of-list branch here, unlike Long Drive: a card holds about
+  // four par 3s, so the list is always short enough to read.
 
   const ctpLabel = (n: number) => `${n} CTP${n === 1 ? '' : 's'}`
   const standings = standingsFromSettlement(players, settlement, (p) =>

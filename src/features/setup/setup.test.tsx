@@ -904,7 +904,10 @@ describe('SetupScreen — choosing games', () => {
      */
     it('drops strays when a hole is turned off, not only when one is turned on', async () => {
       await toLongDrive()
-      for (const h of [4, 12, 15]) {
+      // TWO in-round holes, not one. Turning off the only survivor cannot tell
+      // "drop the strays" apart from "drop everything" — a toggle whose remove
+      // branch returned `[]` passed the single-hole version of this test.
+      for (const h of [4, 5, 12, 15]) {
         await userEvent.click(screen.getByRole('button', { name: new RegExp(`^hole ${h} —`) }))
       }
       const back = () => userEvent.click(screen.getByRole('button', { name: /Back/ }))
@@ -914,14 +917,18 @@ describe('SetupScreen — choosing games', () => {
       await cont()
       await cont()
 
-      // hole 4 survives the range change; 12 and 15 do not
+      // holes 4 and 5 survive the range change; 12 and 15 do not
       expect(screen.getByText(/Holes 12, 15 are not in this round/)).toBeInTheDocument()
       await userEvent.click(screen.getByRole('button', { name: /^hole 4 —/ }))
 
       expect(screen.queryByText(/not in this round/)).not.toBeInTheDocument()
-      // nothing is selected now, so it is refused out loud rather than teed off
-      expect(screen.getAllByText('Long Drive needs at least one hole')).toHaveLength(2)
-      expect(screen.getByRole('button', { name: /Tee off/ })).toBeDisabled()
+      // 5 IS STILL SELECTED — the deselect dropped the strays and hole 4, and
+      // nothing else. This is the assertion the single-hole version could not
+      // make, and the one a "return []" remove branch fails.
+      await teeOff()
+      await waitFor(async () => expect(await roundFor('eighteen')).toBeDefined())
+      const ld = (await roundFor('eighteen'))!.games.find((g) => g.type === 'longDrive')!
+      expect((ld.config as { holes: unknown }).holes).toEqual([5])
     })
 
     /**

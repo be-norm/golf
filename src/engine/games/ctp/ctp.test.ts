@@ -81,6 +81,19 @@ describe('ctp — golden fixtures (hand-verified)', () => {
     ])
   })
 
+  /** F1b: two unclaimed par 3s — the plural sentence. F1 covers the singular,
+   *  and the two differ by a pronoun that reaches the PAINTED share card. */
+  it('F1b: two unclaimed par 3s read as a plural sentence', () => {
+    const round = ctpRound()
+    const log = new EventLog()
+    scoreHoles(round, log, [1, 2, 3, 4, 5, 6, 7, 8, 9])
+    log.append({ type: 'round/completed' })
+
+    expect(ctpOf(round, log).notes).toEqual([
+      'Closest to the pin went unclaimed on holes 4, 7 — nobody was given them, so nothing was paid',
+    ])
+  })
+
   /**
    * F2 — THE REGRESSION THAT DEFINES THE CHANNEL (MAI-46).
    *

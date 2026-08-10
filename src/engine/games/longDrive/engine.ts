@@ -44,6 +44,9 @@ export interface LongDriveDerivation extends GameDerivation {
 /** The one group label — the award grid's row, and every sentence about it. */
 const GROUP = 'Long drive'
 
+/** "3 long drives" — the counted form of `GROUP`, so a rename reaches both. */
+const driveLabel = (n: number) => `${n} ${GROUP.toLowerCase()}${n === 1 ? '' : 's'}`
+
 function derive(
   game: GameConfig<LongDriveConfig>,
   events: readonly GameScopedEvent[],
@@ -100,9 +103,6 @@ function derive(
    * the settle panel's "No money moved." signal, and a zero-cent row makes it
    * false on precisely the round it was written for (MAI-40).
    */
-  /** "3 long drives" — the counted form of `GROUP`, so a rename reaches both. */
-  const driveLabel = (n: number) => `${n} ${GROUP.toLowerCase()}${n === 1 ? '' : 's'}`
-
   const notes: string[] = []
   if (designated.length === 0) {
     notes.push(
