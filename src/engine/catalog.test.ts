@@ -341,6 +341,24 @@ describe('taxonomy never reaches the money', () => {
           })
         }
       }
+      // …and the ROUND-LEVEL FACTS an engine may read out of `RoundContext`
+      // (MAI-90), for the third time and the same two reasons. Snake's money
+      // does not exist without a three-putt, so the "moved money" assertion
+      // below is unsatisfiable for it otherwise — and a game handing the snake
+      // to a different player under one role would move different money while
+      // every other field stayed identical.
+      for (const hole of HOLES) {
+        log.append({
+          type: 'score/putts',
+          playerId: players[hole % players.length]!.playerId,
+          hole,
+          putts: 3,
+        })
+      }
+      // LAST: a game may settle only once the round is OVER — Snake pays
+      // whoever is holding it at the final hole, and until then nothing is
+      // owed. Nothing above depends on it, and every variant gets it.
+      log.append({ type: 'round/completed' })
       return deriveRound({ ...round, games }, log.events).derivations.get('game-1')!
     }
 

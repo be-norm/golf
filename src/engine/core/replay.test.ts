@@ -160,6 +160,24 @@ describe('replay invariants (fast-check)', () => {
         `${name} always finish`,
       ).toBe(true)
     }
+
+    /**
+     * …and the dealt facts actually reach a settlement. Snake settles only on a
+     * completed round on which somebody three-putted, so every property above
+     * — zero-sum, determinism, retraction equivalence, the rotation pair —
+     * would hold VACUOUSLY over a Snake that never moved a cent. This is the
+     * same question `catalog.test.ts` asks with "moved no money — the guard
+     * proves nothing", asked of the generator instead of the fixture.
+     */
+    const settled = fc
+      .sample(arbitraryRoundAndEvents(), { numRuns: 200 })
+      .some(({ round, log }) => {
+        const gameId = round.games.find((g) => g.type === 'snake')?.gameId
+        if (!gameId) return false
+        const d = deriveRound(round, log.events).derivations.get(gameId)
+        return Object.values(d?.settlement.perPlayerCents ?? {}).some((c) => c !== 0)
+      })
+    expect(settled, 'the fuzz never makes a putt-driven game settle').toBe(true)
   })
 
   /**
