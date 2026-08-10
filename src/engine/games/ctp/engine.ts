@@ -1,12 +1,13 @@
 import { z } from 'zod'
-import type { Award, GameEngine, GameDerivation } from '../../catalog'
+import type { GameEngine, GameDerivation } from '../../catalog'
+import { deriveAwardPot, type AwardHoleResult } from '../../core/awardPot'
 import type { RoundContext } from '../../core/context'
 import type { GameScopedEvent } from '../../core/events'
-import { addLine, emptySettlement, formatCents, type Settlement } from '../../core/money'
+import { formatCents } from '../../core/money'
 import { duplicateInstanceProblems } from '../../core/setup'
 import { standingsFromSettlement } from '../../core/standings'
 import { latestHoleSummary, summaryString } from '../../core/summary'
-import type { GameConfig, HandicapSettings, RoundPlayer, Uuid } from '../../core/types'
+import type { GameConfig, HandicapSettings, RoundPlayer } from '../../core/types'
 
 export const ctpConfigSchema = z.object({
   /** what the closest tee shot is worth; the winner collects this from each other player */
@@ -15,13 +16,8 @@ export const ctpConfigSchema = z.object({
 
 export type CtpConfig = z.infer<typeof ctpConfigSchema>
 
-export type CtpHoleResult =
-  /** eligible, played, decided: this player was closest */
-  | { hole: number; kind: 'won'; winnerId: Uuid }
-  /** eligible and played, but the hole hasn't settled yet */
-  | { hole: number; kind: 'pending' }
-  /** eligible, played out, and nobody was ever given it */
-  | { hole: number; kind: 'unclaimed' }
+/** The award kit's classification, under the name this game's tests know it by. */
+export type CtpHoleResult = AwardHoleResult
 
 export interface CtpDerivation extends GameDerivation {
   holeResults: CtpHoleResult[]
@@ -40,81 +36,18 @@ function derive(
   const playerIds = players.map((p) => p.playerId)
   const nameOf = new Map(players.map((p) => [p.playerId, p.name]))
 
-  // LAST WRITE WINS, the same rule `deriveGross` applies to a corrected score:
-  // re-tapping a different player on a hole that already has a winner is a
-  // correction, not a second award. The events behind it are all kept so undo
-  // can CLEAR the hole rather than reveal whoever held it before — "tap the lit
-  // cell to take it back" has to mean the hole is unawarded again, or a mistap
-  // silently leaves the previous winner holding money nobody re-confirmed.
-  const winnerByHole = new Map<number, Uuid>()
-  const eventIdsByHole = new Map<number, Uuid[]>()
-  for (const e of events) {
-    if (e.kind !== 'ctp/award') continue
-    const { hole, playerId } = e.data as { hole: number; playerId: Uuid }
-    winnerByHole.set(hole, playerId)
-    eventIdsByHole.set(hole, [...(eventIdsByHole.get(hole) ?? []), e.id])
-  }
-
   // Par 3s only, and the engine answers that off the frozen course snapshot —
   // which is what lets the award grid stay generic and offer nothing elsewhere.
-  const eligible = (hole: number) => ctx.par(hole) === 3
-  const eligibleHoles = ctx.holesPlayed.filter(eligible)
-
-  // A CTP IS UNCLAIMED EXACTLY WHEN IT CAN NO LONGER BE CLAIMED, which is when
-  // the round is over — the same instant the award grid stops being tappable.
-  //
-  // Not `finalized`, which goes true the moment play moves on: "no award yet"
-  // would then read as "unclaimed" on the bar and in notes while the group is
-  // two holes down the fairway and fully intends to record it at the turn,
-  // which is the exact workflow the award channel exists to allow (MAI-46).
-  //
-  // Nor "every hole finalized", the proxy Skins uses to kill its carry. That is
-  // right for Skins — a carry dies when no hole is left to WIN it, and a hole
-  // missing a score still settles among the scores posted — and wrong here for
-  // a reason worth stating: one player picking up on the par 3 leaves that hole
-  // finalized-but-incomplete, so the proxy fires while the round is live and
-  // the cell is still lit for the taking. Same bug as the first, one layer down.
-  const roundOver = ctx.completed
-
-  const settlement: Settlement = emptySettlement(playerIds)
-  const wonByPlayer = new Map<Uuid, number>(playerIds.map((id) => [id, 0]))
-  const holeResults: CtpHoleResult[] = []
-
-  for (const hole of eligibleHoles) {
-    // A hole nobody played is not a hole that went unclaimed — completion
-    // finalizes the holes the group never reached, and narrating those would be
-    // a claim about golf that never happened (MAI-38).
-    if (!ctx.anyScored(hole)) continue
-    if (!ctx.finalized(hole)) {
-      holeResults.push({ hole, kind: 'pending' })
-      continue
-    }
-    const raw = winnerByHole.get(hole)
-    // An award naming somebody who isn't in this round can only come from a
-    // corrupt or edited log; treat it as no award rather than paying a ghost.
-    const winnerId = raw !== undefined && playerIds.includes(raw) ? raw : undefined
-    if (winnerId === undefined) {
-      holeResults.push({ hole, kind: roundOver ? 'unclaimed' : 'pending' })
-      continue
-    }
-    wonByPlayer.set(winnerId, (wonByPlayer.get(winnerId) ?? 0) + 1)
-    // THE WHOLE ROSTER PAYS, not only the players who posted a score. Closest
-    // to the pin is decided by the tee shot, so a winner who then picked up
-    // still won it, and voiding on a missing score would be wrong golf. (Skins
-    // settles among posted scores because winning THERE requires a score. Here
-    // it doesn't.) Zero-sum by construction: the winner collects one stake from
-    // each of the others.
-    addLine(settlement, {
-      label: `Hole ${hole} — ${nameOf.get(winnerId)} closest to the pin`,
-      perPlayerCents: Object.fromEntries(
-        playerIds.map((id) => [
-          id,
-          id === winnerId ? stakeCents * (playerIds.length - 1) : -stakeCents,
-        ]),
-      ),
-    })
-    holeResults.push({ hole, kind: 'won', winnerId })
-  }
+  // Everything else — last-write-wins, when a hole is decided, when an unawarded
+  // one is dead, what an undo retracts — is the shared kit's (core/awardPot.ts).
+  const { holeResults, settlement, wonByPlayer, awards } = deriveAwardPot(ctx, events, {
+    gameId: game.gameId,
+    stakeCents,
+    eligible: (hole) => ctx.par(hole) === 3,
+    group: GROUP,
+    eventKind: 'ctp/award',
+    lineLabel: (hole, winner) => `Hole ${hole} — ${winner} closest to the pin`,
+  })
 
   const unclaimed = holeResults.filter((r) => r.kind === 'unclaimed').map((r) => r.hole)
   // Money nobody collected is something to SAY, not a $0 settlement line —
@@ -124,9 +57,12 @@ function derive(
     unclaimed.length > 0
       ? [
           `${GROUP} went unclaimed on ${unclaimed.length === 1 ? 'hole' : 'holes'} ` +
-            `${unclaimed.join(', ')} — nobody was given it, so nothing was paid`,
+            `${unclaimed.join(', ')} — nobody was given ` +
+            `${unclaimed.length === 1 ? 'it' : 'them'}, so nothing was paid`,
         ]
       : undefined
+  // No count-instead-of-list branch here, unlike Long Drive: a card holds about
+  // four par 3s, so the list is always short enough to read.
 
   const ctpLabel = (n: number) => `${n} CTP${n === 1 ? '' : 's'}`
   const standings = standingsFromSettlement(players, settlement, (p) =>
@@ -162,33 +98,6 @@ function derive(
       `↳ ${formatCents(stakeCents)} from each of ${others} other player${others === 1 ? '' : 's'}` +
         ` — ${formatCents(stakeCents * others)}`,
     ]
-  }
-
-  // Offered on ANY par 3 the round is playing, scored or not — the tap happens
-  // on the tee, before anybody writes a number down, and it stays tappable for
-  // the rest of the round. No frontier gate, by design (MAI-46).
-  const awards = (hole: number): Award[] => {
-    if (!eligible(hole)) return []
-    const winnerId = winnerByHole.get(hole)
-    return players.map((p) => {
-      const taken = winnerId === p.playerId
-      return {
-        id: `ctp-${hole}-${p.playerId}`,
-        gameId: game.gameId,
-        hole,
-        playerId: p.playerId,
-        group: GROUP,
-        label: p.name,
-        taken,
-        eventKind: 'ctp/award',
-        data: { hole, playerId: p.playerId },
-        // Only the lit cell carries an undo, so a screen cannot retract off a
-        // cell that was never tapped. Every award event on the hole, so taking
-        // it back CLEARS the hole rather than revealing whoever held it before
-        // — see the last-write-wins note above.
-        ...(taken && { undoEventIds: eventIdsByHole.get(hole) ?? [] }),
-      }
-    })
   }
 
   return {

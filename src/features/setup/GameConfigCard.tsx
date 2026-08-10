@@ -55,6 +55,8 @@ interface Props {
    */
   label: string
   players: FieldPlayer[]
+  /** the holes this round will play, in play order — for the `holes` field */
+  holes: readonly number[]
   draft: GameDraft
   /**
    * This game's own `validateSetup` problems — see SetupScreen's
@@ -88,6 +90,7 @@ export function GameConfigCard({
   engine,
   label,
   players,
+  holes,
   draft,
   problems,
   open,
@@ -202,6 +205,7 @@ export function GameConfigCard({
                 field={field}
                 value={config[field.key]}
                 players={players}
+                holes={holes}
                 gameName={label}
                 onChange={(v) => setConfigValue(field.key, v)}
               />

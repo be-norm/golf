@@ -22,12 +22,23 @@ export function ConfigField({
   field,
   value,
   players,
+  holes,
   gameName,
   onChange,
 }: {
   field: ConfigFieldSpec
   value: unknown
   players: FieldPlayer[]
+  /**
+   * The holes this round will play, IN PLAY ORDER — `holesForRound`'s answer,
+   * which is the same function the engine uses at tee-off, so the grid cannot
+   * offer a hole the round won't walk. Only the `holes` field reads it.
+   *
+   * Always populated in practice: the wizard's games step comes after the
+   * course and the range (`STEP`), so a field never renders before there is a
+   * card to derive it from.
+   */
+  holes?: readonly number[]
   /**
    * `gameLabel` for the game this field belongs to. Two instances of one game
    * can sit in the same section — that is what this screen was rebuilt for —
@@ -102,6 +113,116 @@ export function ConfigField({
           </div>
         </div>
       )
+    case 'holes': {
+      // A preset's own `value`, or an explicit list of hole numbers. The two
+      // are one field because the spec has no conditional visibility — see the
+      // kind's note in catalog.ts.
+      const picked = Array.isArray(value) ? (value as number[]) : []
+      const custom = Array.isArray(value)
+      const offered = holes ?? []
+      /**
+       * Holes chosen for a round that no longer plays them — pick 12 and 15 on
+       * an eighteen, go back and tap Front 9, and the games are kept (nothing
+       * resets them) while the grid can only paint holes 1–9.
+       *
+       * SAYING SO IS THE WHOLE POINT. Without it those picks render as nothing
+       * pressed, which reads as "we chose no holes" — and the engine's own
+       * fallback only speaks on the first-tee screen, after the round is
+       * written. `validateSetup` cannot catch it either: it sees config,
+       * players and siblings, never the course. This component is handed the
+       * round's holes, so it is the one place that can say it while it is still
+       * fixable. Stated, not blocked — MAI-57 is explicit that an inert bet is
+       * surfaced rather than refused.
+       */
+      // Sorted for the sentence, because `picked` is in the PREVIOUS range's
+      // play order: a round started on 13 nominating 14 and 10 would otherwise
+      // read "Holes 14, 10 are not in this round", which looks like a bug.
+      const stale = picked.filter((h) => !offered.includes(h)).sort((a, b) => a - b)
+      const toggle = (hole: number) => {
+        // REBUILT FROM THE ROUND'S HOLES ON EVERY TAP, both branches. Two
+        // things fall out of that and neither is optional:
+        //
+        // KEEP PLAY ORDER, not tap order — the list is read back as prose
+        // ("Holes 3, 8") and settled hole by hole, and a set remembering which
+        // chip was tapped first would read as a jumble.
+        //
+        // AND DROP STRAYS, which the message below promises. Filtering `picked`
+        // on the remove branch kept holes this round no longer plays, so
+        // deselecting one left the bet inert with `Tee off` still enabled —
+        // `validateSetup` only refuses an EMPTY list — reached by the very tap
+        // the warning recommends.
+        const on = picked.includes(hole)
+        onChange(offered.filter((h) => (h === hole ? !on : picked.includes(h))))
+      }
+      return (
+        <div>
+          <p className="mb-2 font-medium">{field.label}</p>
+          {field.hint && <p className="mb-2 text-xs text-stone-400">{field.hint}</p>}
+          <div className="flex flex-wrap gap-2">
+            {field.presets.map((p) => (
+              <button
+                key={p.value}
+                onClick={() => onChange(p.value)}
+                className={`px-3.5 py-2 text-lg ${
+                  value === p.value
+                    ? 'pixel border-felt-300 bg-felt-700'
+                    : 'border-2 border-stone-700 bg-stone-800'
+                }`}
+              >
+                {p.label}
+              </button>
+            ))}
+            <button
+              // Entering custom mode with NOTHING selected, deliberately: a
+              // preset silently expanded into the holes it happens to mean
+              // would look like the group had chosen each of them, and the
+              // empty state is what `validateSetup` refuses out loud.
+              onClick={() => onChange(custom ? picked : [])}
+              className={`px-3.5 py-2 text-lg ${
+                custom
+                  ? 'pixel border-felt-300 bg-felt-700'
+                  : 'border-2 border-stone-700 bg-stone-800'
+              }`}
+            >
+              {field.customLabel}
+            </button>
+          </div>
+          {custom && (
+            // Deliberately NOT a `role="group"` wrapper, which is what a11y
+            // would otherwise want here: setup's chosen-game CARDS are the
+            // screen's groups, and the tests reach one game's controls by
+            // walking them positionally (`gameCards`). A nested group would
+            // silently shift that walk. So the disambiguation rides each button
+            // instead, exactly as the money stepper's label does.
+            <div className="mt-2.5 flex flex-wrap gap-1.5">
+              {offered.map((hole) => (
+                <button
+                  key={hole}
+                  aria-pressed={picked.includes(hole)}
+                  aria-label={gameName ? `hole ${hole} — ${gameName}` : `hole ${hole}`}
+                  onClick={() => toggle(hole)}
+                  className={`pixel-press size-11 text-lg ${
+                    picked.includes(hole)
+                      ? 'border-felt-500 bg-felt-900/60 text-felt-300'
+                      : 'border-stone-600 bg-stone-800 text-stone-300'
+                  }`}
+                >
+                  {hole}
+                </button>
+              ))}
+            </div>
+          )}
+          {custom && stale.length > 0 && (
+            <p className="mt-2 text-sm text-flag-500">
+              {stale.length === 1 ? 'Hole' : 'Holes'} {stale.join(', ')}{' '}
+              {stale.length === 1 ? 'is' : 'are'} not in this round
+              {picked.length === stale.length ? ' — nothing here will be played for' : ''}. Tapping
+              any hole drops {stale.length === 1 ? 'it' : 'them'}.
+            </p>
+          )}
+        </div>
+      )
+    }
     case 'teams': {
       // 2v2 assignment: value = { a: [draftId, draftId], b: [draftId, draftId] }
       const teams = (value ?? { a: [], b: [] }) as { a: string[]; b: string[] }

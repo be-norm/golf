@@ -38,6 +38,16 @@ function configChips(engine: GameEngine, config: Record<string, unknown>): strin
     else if (f.kind === 'select') {
       const opt = f.options.find((o) => o.value === v)
       if (opt) chips.push(`${f.label}: ${opt.label}`)
+    } else if (f.kind === 'holes') {
+      // The full list, not `label.ts`'s chip-sized "4 holes": this card has the
+      // room, and it is the one place a group can check the bet is on the holes
+      // they meant before anybody tees off.
+      if (typeof v === 'string') {
+        const preset = f.presets.find((p) => p.value === v)
+        if (preset) chips.push(`${f.label}: ${preset.label}`)
+      } else if (Array.isArray(v) && v.length > 0) {
+        chips.push(`${f.label}: ${v.join(', ')}`)
+      }
     }
   }
   return chips
@@ -230,6 +240,18 @@ export function RoundStartScreen() {
               {chips.length > 0 && (
                 <p className="mt-1 text-sm text-stone-300">{chips.join(' · ')}</p>
               )}
+
+              {/* What the game has to say about THIS round before anyone tees
+                  off — today that is only a structurally inert bet ("no par 5s
+                  in the holes you are playing"), because every other note gates
+                  itself on `ctx.completed`. Generic on purpose: the screen
+                  learns no golf, it just prints whichever game had something to
+                  say (invariant #7). */}
+              {view.derivations.get(game.gameId)?.notes?.map((note) => (
+                <p key={note} className="mt-1.5 text-sm text-coin-400">
+                  {note}
+                </p>
+              ))}
 
               {/* teams / rotation, by name */}
               {engine.configFields.map((f) => {

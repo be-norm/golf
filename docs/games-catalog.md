@@ -228,10 +228,23 @@ and the group may still be intending to record it. The first `category: 'side'` 
 `family: 'award'` engine, so it is also what makes the picker's Side Bets section and its
 "Awards" heading real.
 
-### 31. Long Drive — Tier 1. Inputs: one award per eligible hole.
-Usually one nominated hole (a par 5), sometimes several; fairway-only is the common house
-rule. Same shape as CTP — one winner, one award, same dead-money problem when nobody keeps it
-in play. Eligible holes are config, not derivable, since the group picks them at the tee.
+### 31. Long Drive `[shipped]` — Tier 1. Inputs: one award per eligible hole (MAI-57).
+One winner per designated hole collects the stake from every other player; nothing carries.
+Fairway-only is the common house rule and the app does not model it — the group judges, the
+app records who won.
+**Eligible holes are CONFIG, not derivable**, since the group picks them at the tee: `par5s`
+(par 5 *or longer*, so a par 6 counts), `all`, or a nominated `number[]`. That third option
+is what the `holes` `ConfigFieldSpec` kind exists for — presets declared by the engine plus a
+grid of the round's own holes in PLAY order, so a back nine from 13 offers 13–18, 10–12.
+A nominated list is intersected with the round rather than pruned in setup: change the range
+after picking and the bet narrows, it does not silently rewrite itself.
+**Dead money, twice over.** An unawarded designated hole goes on `notes` once the round is
+over, exactly as CTP's does. But this game can also be **inert** — no par 5 in the holes being
+played, or a list naming none of them — and that note is deliberately NOT gated on
+`ctx.completed`: it is true before anyone swings, and the settle screen is the one moment the
+group can no longer act on it. `RoundStartScreen` renders game notes for that reason.
+The second `family: 'award'` engine, which is what turned CTP's private logic into
+`core/awardPot` and made `AwardGrid`'s two-game heading path real.
 
 ---
 
@@ -258,10 +271,13 @@ in play. Eligible holes are config, not derivable, since the group picks them at
     (a Nassau press, a hammer throw, a Banker wager). These live behind a button and only
     *badge* when the game's convention says act now (`recommended`). Frontier-gated: they
     belong to the tee you are standing on. The engine supplies the verb (`meta.actions`).
-  - **Per-player, per-hole and permanent → `awards` / `Award`.** CTP, greenies, sandies, the
-    snake. A grid of group rows × player cells under the score rows, no frontier gate and no
+  - **Per-player, per-hole and permanent → `awards` / `Award`.** CTP, Long Drive, greenies,
+    sandies. A grid of group rows × player cells under the score rows, no frontier gate and no
     all-scored gate — an award belongs to its hole forever, so it stays editable until the
-    round is completed.
+    round is completed. The mechanical half of a one-winner-per-hole bet lives in
+    `core/awardPot` (MAI-57): last-write-wins, the pending/unclaimed rules, the ghost-player
+    guard, the stake-from-everyone settlement and the cells. A new award game supplies an
+    eligibility rule and its own words, nothing else.
 - **A game that needs a PICTURE puts a token in the string** (`:wolf-shades:`,
   `engine/core/glyphs.ts`), and the app swaps in 16×16 pixel art. Only `holeSummary` and
   `requiredInputs` decode it — the pinned bar renders `summary`/`summaryParts` raw, and

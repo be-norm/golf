@@ -4,7 +4,9 @@ import { buildRoundContext, type RoundContext } from './core/context'
 import { effectiveEvents, gameEventsFor } from './core/replay'
 import type { Settlement } from './core/money'
 import type {
+  Award,
   GameConfig,
+  GameEventOffer,
   HandicapSettings,
   Round,
   RoundPlayer,
@@ -12,55 +14,11 @@ import type {
   Uuid,
 } from './core/types'
 
-// Defined in core/types.ts (core/standings.ts builds them, and core cannot
-// import upward from the catalog), re-exported here because engines reach for
-// it alongside GameDerivation.
-export type { StandingLine }
-
-/**
- * The WRITE half the two optional channels share: offer something tappable,
- * emit exactly one game event, undo by retracting it (invariant #2 — compensate,
- * never delete).
- *
- * Deliberately NOT the lifecycle. WHEN a thing may be tapped is the entire
- * difference between an action and an award — a press belongs to the tee you
- * are standing on, an award belongs to whichever hole it happened on, forever —
- * and that difference lives on the screens, not here.
- */
-export interface GameEventOffer {
-  /**
-   * Stable id — the same offer across re-derives keeps the same id.
-   *
-   * Unique WITHIN this game, not across the round: an engine cannot see its
-   * siblings, and a round can hold two instances of one game (MAI-44), so two
-   * Nassaus both mint `nassau-press-front-3`. Any consumer flattening offers
-   * from several games into one keyed list must compose with `gameId`.
-   */
-  id: string
-  gameId: Uuid
-  eventKind: string
-  /**
-   * Appended verbatim as the game event's data.
-   *
-   * IT MUST CARRY `hole`. `buildHoleLedger` places a game event in its
-   * prefix replay by reading `data.hole` (ledger.ts), so a payload without one
-   * is attributed to every prefix and lands its money on the wrong ledger row.
-   * Awards make this load-bearing rather than incidental: they are the one
-   * thing in the app designed to be recorded LONG after the hole they describe.
-   */
-  data: Record<string, unknown>
-  /**
-   * Already in effect. The offer stays visible rather than vanishing, so a
-   * mistap is visible and reversible instead of silently final.
-   */
-  taken?: boolean
-  /**
-   * Events to retract to undo it (invariant #2: compensate, never delete).
-   * Empty when the GAME started it rather than the player — an auto-press is
-   * not theirs to undo, so the UI shows it engaged but inert.
-   */
-  undoEventIds?: Uuid[]
-}
+// Defined in core/types.ts (core builds all three — `core/standings.ts` the
+// standings, `core/awardPot.ts` the offers and awards — and core cannot import
+// upward from the catalog), re-exported here because engines reach for them
+// alongside GameDerivation.
+export type { StandingLine, GameEventOffer, Award }
 
 /** A blocking prompt the scoring UI renders as a generic chip — no game-specific screens. */
 export interface InputRequest {
@@ -144,39 +102,6 @@ export interface GameAction extends GameEventOffer {
   recommendedReason?: string
 }
 
-/**
- * ONE PLAYER, ONE THING, ONE HOLE — closest to the pin, a greenie, a sandie,
- * the snake. The third input channel, and it exists because neither of the
- * other two fits (MAI-46):
- *
- * - `requiredInputs` INTERRUPTS scoring: its hole cannot settle until someone
- *   answers, so it renders as a gold chip above the score rows. Nobody is stuck
- *   waiting on a greenie. (It has never DISABLED score entry — the screen has
- *   no such gate — so don't write code that assumes one.)
- * - `availableActions` is a flat list behind a button, and it is frontier-gated
- *   (`ScoringScreen`): correct for a press, which must be declared on the tee
- *   you are standing on, and wrong for an award in exactly the cases awards
- *   exist for. You remember on 12 that Rob had the greenie on 7; you mistap a
- *   KP and notice once every hole is scored. Both must stay recordable.
- *
- * THE LIFECYCLE RULE, which is the whole ticket: editable on ANY hole the round
- * has reached, including after every hole is scored, right up to
- * `round/completed`. Awards do not inherit the frontier gate.
- *
- * The engine decides which groups appear on which hole (KP only on par 3s), so
- * the grid stays generic and no screen ever grows per-game branching.
- */
-export interface Award extends GameEventOffer {
-  hole: number
-  playerId: Uuid
-  /** the row: what is being given, e.g. "Closest to the pin" */
-  group: string
-  /** the cell: who it would be given to, i.e. the player's name */
-  label: string
-  /** a cell is a toggle and is never indeterminate, so this is not optional */
-  taken: boolean
-}
-
 export interface GameDerivation {
   standings: StandingLine[]
   /** one-liner for the pinned mini-bar, e.g. "Ben +$3 · 2 carried" */
@@ -225,9 +150,18 @@ export interface GameDerivation {
   awards?(hole: number): Award[]
   settlement: Settlement
   /**
-   * Things the game has to SAY on the settle surface that are not money
-   * movements — "3 skins died unwon", say. Rendered as annotation, below the
-   * money and visibly apart from it.
+   * Things the game has to SAY that are not money movements — "3 skins died
+   * unwon", say. Rendered as annotation, below the money and visibly apart
+   * from it.
+   *
+   * THREE SURFACES, and not all of them are the end of the round: the settle
+   * screen, the standings sheet mid-round, and the first-tee screen
+   * (`RoundStartScreen`). Most notes gate themselves on `ctx.completed`,
+   * because dead money is only dead once it can no longer be won — but that is
+   * each game's judgement, not this channel's rule. A note that is STRUCTURAL
+   * (Long Drive on a card with no par 5 can never pay anything) is true from
+   * the first tee and must not wait for the settle screen to be read out,
+   * which is the one moment the group can no longer act on it.
    *
    * This channel exists so narration never has to be smuggled into
    * `settlement.lines`. That field is the record of money that MOVED; a
@@ -261,6 +195,35 @@ export type ConfigFieldSpec =
   | { key: string; kind: 'select'; label: string; options: { value: string; label: string }[] }
   | { key: string; kind: 'teams'; label: string }
   | { key: string; kind: 'rotation'; label: string }
+  /**
+   * WHICH HOLES a bet runs on — a named rule, or a list the group picked at the
+   * tee. The value is a preset's `value` (a string) OR an explicit `number[]`.
+   *
+   * ONE FIELD RATHER THAN A SELECT PLUS A CONDITIONAL LIST, because
+   * `ConfigFieldSpec` has no conditional-visibility mechanism and adding one
+   * (`showWhen`) is the bigger change: every renderer of these specs would have
+   * to honour it, and one that didn't would silently draw a dead control. One
+   * key, one value keeps the spec declarative.
+   *
+   * THE PRESETS ARE THE ENGINE'S, so golf semantics never land inside a field
+   * kind — "par 5s" is Long Drive's rule, not this control's, and Rabbit's
+   * "9 and 18" will be its own. The editor only knows "a named rule, or these
+   * numbers", which is why the next game to want holes needs no UI work.
+   *
+   * The offered numbers are THE ROUND'S, in play order (`holesForRound`), so a
+   * round teeing off on 10 offers 10…18, 1…9 — position is what sequences a
+   * round, not the number painted on the marker (invariant #9).
+   */
+  | {
+      key: string
+      kind: 'holes'
+      label: string
+      hint?: string
+      /** named alternatives to an explicit list, in the engine's own words */
+      presets: { value: string; label: string }[]
+      /** the chip that reveals the grid, e.g. "Pick them" */
+      customLabel: string
+    }
 
 /**
  * Whether a game can be the round's main event, a side bet alongside one, or

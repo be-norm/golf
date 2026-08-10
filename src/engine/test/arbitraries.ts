@@ -192,6 +192,45 @@ const ctpFuzz: GameFuzz = {
 }
 
 /**
+ * The award channel's second game — and the first config in the catalog that
+ * names HOLE NUMBERS.
+ *
+ * WHICH IS WHY IT DRAWS ONLY `par5s` AND `all`, NEVER A NOMINATED LIST. Do not
+ * "complete" this by adding one: `arbitraryRotationPair` builds its straight
+ * card by RENUMBERING the wrapped one and hands the SAME config to both. Every
+ * other config in the catalog survives that — teams and rotations name players,
+ * CTP's eligibility is read off par, and the renumbered card carries the same
+ * pars in the same order. A list of hole numbers does not: at `startHole: 5`,
+ * `holes: [3, 8]` sits at walk positions 16 and 3 on one card and 2 and 7 on
+ * the other, while awards are seeded by POSITION — so the two settle
+ * differently and the property fails on a perfectly correct engine.
+ *
+ * The nominated list is covered by goldens instead (`longDrive.test.ts` L7/L8),
+ * which is where it belongs: nothing about it is order-blind.
+ */
+const longDriveFuzz: GameFuzz = {
+  type: 'longDrive',
+  eligible: (n) => n >= 2,
+  arbitrary: () =>
+    fc
+      .tuple(fc.boolean(), fc.array(fc.integer({ min: 0, max: 5 }), { minLength: 18, maxLength: 18 }))
+      .map(([everyHole, seeds]) => (ids: readonly Uuid[]) => ({
+        config: { stakeCents: 200, holes: everyHole ? 'all' : 'par5s' },
+        // one seed per hole: 0–3 award it to that player, 4 leave it
+        // unawarded, 5 award it to somebody who ISN'T in the round — which
+        // must move no money rather than pay a ghost. Not filtered to
+        // designated holes: an award on an ineligible one is inert, and the
+        // fuzz should keep proving it.
+        events: (hole: number, idx: number) => {
+          const seed = seeds[idx]!
+          if (seed === 4) return []
+          const playerId = seed === 5 ? 'p-nobody' : (ids[seed % ids.length] ?? ids[0]!)
+          return [{ kind: 'longDrive/award', data: { hole, playerId } }]
+        },
+      })),
+}
+
+/**
  * Order matters: it decides the order games sit in `round.games`, and so which
  * `gameId` each one gets. Keep new entries appended.
  */
@@ -203,9 +242,40 @@ export const GAME_FUZZ: readonly GameFuzz[] = [
   wolfFuzz,
   ctpFuzz,
   matchPlayFuzz,
+  longDriveFuzz,
 ]
 
 const PLAYER_NAMES = ['A', 'B', 'C', 'D'] as const
+
+/**
+ * PUTTS ARE DEALT BY THE ROUND, NOT BY A GAME (MAI-90).
+ *
+ * `FuzzGame.events` emits `game/event` only, which is right — putts are a
+ * scorecard fact that several games read and none owns, so they belong beside
+ * the scores in the generators below rather than inside whichever engine
+ * happens to want them.
+ *
+ * One seed per player per hole: 0–4 is a COUNT (0 is a chip-in, and is not the
+ * same as unrecorded — the distinction `ctx.puttsFor` exists to keep); 5
+ * records three and then CLEARS them, which must leave the hole not-recorded
+ * rather than at zero, and gives retraction-equivalence a second event kind to
+ * chew on; 6 leaves the hole alone.
+ */
+function appendPutts(log: EventLog, seed: number, playerId: Uuid, hole: number): void {
+  if (seed <= 4) {
+    log.append({ type: 'score/putts', playerId, hole, putts: seed })
+  } else if (seed === 5) {
+    log.append({ type: 'score/putts', playerId, hole, putts: 3 })
+    log.append({ type: 'score/puttsClear', playerId, hole })
+  }
+}
+
+/** Per hole, per player-slot, drawn for all 18 so the walk always has cover. */
+const puttSeeds = () =>
+  fc.array(fc.array(fc.integer({ min: 0, max: 6 }), { minLength: 4, maxLength: 4 }), {
+    minLength: 18,
+    maxLength: 18,
+  })
 
 /**
  * A round of 2–4 players with every eligible game, and a log of hole-by-hole
@@ -253,9 +323,21 @@ export function arbitraryRoundAndEvents(extra: readonly GameFuzz[] = []) {
         }),
         { minLength: 1, maxLength: 18 },
       ),
+      putts: puttSeeds(),
+      /**
+       * DOES THE ROUND FINISH? Until this existed, no property run ever
+       * completed one — so every `ctx.completed` branch in the catalog went
+       * unfuzzed: Skins' dead carry, CTP's and Long Drive's unclaimed holes,
+       * Wolf's missing picks, and any game that settles only at the end.
+       *
+       * A boolean rather than always-on, so both worlds stay covered and
+       * fast-check shrinks to `false` — a counterexample that survives to there
+       * is not about completion.
+       */
+      completed: fc.boolean(),
       games: fc.tuple(...registry.map((g) => g.arbitrary())),
     })
-    .map(({ playerCount, handicaps, net, startHole, scores, games }) => {
+    .map(({ playerCount, handicaps, net, startHole, scores, putts, completed, games }) => {
       const players = makePlayers(
         PLAYER_NAMES.slice(0, playerCount).map((name, i) => ({ name, ch: handicaps[i]! })),
       )
@@ -284,6 +366,10 @@ export function arbitraryRoundAndEvents(extra: readonly GameFuzz[] = []) {
         players,
         holes: 'full18',
         startHole,
+        // No engine reads this — only the scoring screen does — but a round
+        // carrying putts while denying it counts them is a lie waiting to
+        // confuse whoever reads a counterexample.
+        trackPutts: true,
         games: entries.map((e) => ({ type: e.type, config: e.game.config, handicap })),
       })
 
@@ -301,6 +387,8 @@ export function arbitraryRoundAndEvents(extra: readonly GameFuzz[] = []) {
             log.append({ type: 'score/set', playerId: p.playerId, hole, gross })
           }
         })
+        // putts sit beside the stroke on the row, so they land with it
+        players.forEach((p, pi) => appendPutts(log, putts[holeIdx]![pi]!, p.playerId, hole))
         // each game's own events land after that hole's scores, in log order
         entries.forEach((e, gi) => {
           if (!e.game.events) return
@@ -310,6 +398,7 @@ export function arbitraryRoundAndEvents(extra: readonly GameFuzz[] = []) {
           }
         })
       })
+      if (completed) log.append({ type: 'round/completed' })
       return { round, log }
     })
 }
@@ -373,9 +462,11 @@ export function arbitraryRotationPair(extra: readonly GameFuzz[] = []) {
         }),
         { minLength: 1, maxLength: 18 },
       ),
+      putts: puttSeeds(),
+      completed: fc.boolean(),
       games: fc.tuple(...registry.map((g) => g.arbitrary())),
     })
-    .map(({ playerCount, handicaps, net, startHole, scores, games }) => {
+    .map(({ playerCount, handicaps, net, startHole, scores, putts, completed, games }) => {
       const players = makePlayers(
         PLAYER_NAMES.slice(0, playerCount).map((name, i) => ({ name, ch: handicaps[i]! })),
       )
@@ -389,7 +480,13 @@ export function arbitraryRotationPair(extra: readonly GameFuzz[] = []) {
         .map(({ g, build }) => ({ type: g.type, game: build(ids) }))
       const gameDefs = entries.map((e) => ({ type: e.type, config: e.game.config, handicap }))
 
-      const wrapped = makeRound({ players, holes: 'full18', startHole, games: gameDefs })
+      const wrapped = makeRound({
+        players,
+        holes: 'full18',
+        startHole,
+        trackPutts: true,
+        games: gameDefs,
+      })
       const walk = holesForRound(wrapped)
       // The renumbered card: its hole i+1 IS the (i+1)th hole of the wrapped
       // walk, carrying that hole's par and stroke index so handicap allocation
@@ -397,6 +494,7 @@ export function arbitraryRotationPair(extra: readonly GameFuzz[] = []) {
       const straight = makeRound({
         players,
         holes: 'full18',
+        trackPutts: true,
         course: makeCourse(
           walk.map((h) => PARS[h - 1]!),
           walk.map((h) => SIS[h - 1]!),
@@ -414,6 +512,9 @@ export function arbitraryRotationPair(extra: readonly GameFuzz[] = []) {
               log.append({ type: 'score/set', playerId: p.playerId, hole, gross })
             }
           })
+          // the same putts at the same POSITION of the walk, so both cards see
+          // the identical three-putt on the identical hole OF THE ROUND
+          players.forEach((p, pi) => appendPutts(log, putts[holeIdx]![pi]!, p.playerId, hole))
           entries.forEach((e, gi) => {
             if (!e.game.events) return
             const gameId = wrapped.games[gi]!.gameId
@@ -424,6 +525,7 @@ export function arbitraryRotationPair(extra: readonly GameFuzz[] = []) {
             }
           })
         })
+        if (completed) log.append({ type: 'round/completed' })
         return log
       }
 

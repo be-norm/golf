@@ -130,6 +130,39 @@ describe('replay invariants (fast-check)', () => {
   })
 
   /**
+   * A DIMENSION THAT NEVER FIRES IS COVERAGE THEATRE — the same reason "the
+   * fuzz actually deals every registered engine" sits two tests up.
+   *
+   * Putts and completion were both added for Snake (MAI-58), and both are easy
+   * to add in a shape that generates nothing: a seed range that never reaches
+   * the clear, a boolean read but never appended. Completion in particular went
+   * unfuzzed for the whole catalog until now — Skins' dead carry, the award
+   * games' unclaimed holes and Wolf's missing picks all hang off it — so the
+   * one thing worse than not dealing it is believing we do.
+   */
+  it('the fuzz actually deals putts, clears, and rounds that finish', () => {
+    for (const [name, arb] of [
+      ['rounds', arbitraryRoundAndEvents()],
+      // the rotation pair is a SECOND literal of the same shape and can drift
+      // from the first; it is the only property that can see a positional bug,
+      // so a putt it never deals is a three-putt Snake never has to place
+      ['rotation pair', arbitraryRotationPair().map((p) => p.wrapped)],
+    ] as const) {
+      const samples = fc.sample(arb, { numRuns: 200 })
+      const kinds = new Set(samples.flatMap(({ log }) => log.events.map((e) => e.type)))
+      for (const kind of ['score/putts', 'score/puttsClear', 'round/completed']) {
+        expect(kinds, `${name} never deal ${kind}`).toContain(kind)
+      }
+      // …and not ALWAYS finished, or the live half stops being covered — which
+      // is the half where an award is still tappable and a snake still moves
+      expect(
+        samples.some(({ log }) => !log.events.some((e) => e.type === 'round/completed')),
+        `${name} always finish`,
+      ).toBe(true)
+    }
+  })
+
+  /**
    * A KNOWN VIOLATION, asserted so it self-retires. Wolf itemises per-player
    * points ("A — 3 pts") rather than per-transaction money, so a player whose
    * points land on the average nets zero and still earns a settlement row.

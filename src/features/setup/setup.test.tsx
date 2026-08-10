@@ -786,6 +786,171 @@ describe('SetupScreen — choosing games', () => {
   })
 
   /**
+   * MAI-57. A bet can name the holes it runs on, and the grid it names them
+   * from is THE ROUND'S — `willPlay`, the same `holesForRound` answer the
+   * engine derives by at tee-off. Nothing else on this screen could supply it:
+   * `validateSetup` sees config, players and siblings, never the course.
+   */
+  describe('a bet that names its holes', () => {
+    /** an 18-hole course, through to the games step with a Long Drive chosen */
+    async function toLongDrive(range?: 'Back 9', startHole?: string) {
+      await db.courses.put(eighteen)
+      await db.saved_courses.put({ userId: LOCAL_USER, courseId: eighteen.id, updatedAt: SAVED_AT })
+      const router = createMemoryRouter(routes, { initialEntries: ['/setup'] })
+      render(<RouterProvider router={router} />)
+      await userEvent.click(await screen.findByText('Wood Wind'))
+      if (range) await userEvent.click(screen.getByRole('button', { name: range }))
+      if (startHole) await userEvent.click(screen.getByRole('button', { name: startHole }))
+      await cont()
+      await addPlayer('Ann', 10)
+      await addPlayer('Bo', 10)
+      await cont()
+      await pickGame('Skins')
+      await pickGame('Long Drive', 'side')
+      await userEvent.click(screen.getByRole('button', { name: 'Pick them' }))
+    }
+
+    const holeButtons = () =>
+      screen
+        .getAllByRole('button')
+        .map((b) => b.getAttribute('aria-label'))
+        .filter((l): l is string => !!l && l.startsWith('hole '))
+        .map((l) => l.replace(/^hole (\d+).*$/, '$1'))
+
+    it('offers the holes this round plays, and stores the ones tapped', async () => {
+      await toLongDrive()
+      expect(holeButtons()).toEqual(Array.from({ length: 18 }, (_, i) => String(i + 1)))
+
+      await userEvent.click(screen.getByRole('button', { name: /^hole 3 —/ }))
+      await userEvent.click(screen.getByRole('button', { name: /^hole 8 —/ }))
+      await teeOff()
+      await waitFor(async () => expect(await roundFor('eighteen')).toBeDefined())
+
+      const round = (await roundFor('eighteen'))!
+      const ld = round.games.find((g) => g.type === 'longDrive')!
+      expect((ld.config as { holes: unknown }).holes).toEqual([3, 8])
+    })
+
+    /**
+     * IN PLAY ORDER, not hole order. A back nine from 13 walks 13–18 then
+     * 10–12, and the grid has to present that walk — a group nominating "the
+     * last two" is pointing at 11 and 12, which sit at the END of this round
+     * and the MIDDLE of a numerically sorted list (invariant #9).
+     */
+    it('offers a wrapped round its holes in the order it will play them', async () => {
+      await toLongDrive('Back 9', '13')
+      expect(holeButtons()).toEqual(['13', '14', '15', '16', '17', '18', '10', '11', '12'])
+    })
+
+    /** Tapping holes in any order still stores them in play order, because the
+     *  list is read back as prose and settled hole by hole. */
+    it('stores nominated holes in play order however they were tapped', async () => {
+      await toLongDrive()
+      for (const h of [8, 3, 12]) {
+        await userEvent.click(screen.getByRole('button', { name: new RegExp(`^hole ${h} —`) }))
+      }
+      await teeOff()
+      await waitFor(async () => expect(await roundFor('eighteen')).toBeDefined())
+
+      const round = (await roundFor('eighteen'))!
+      const ld = round.games.find((g) => g.type === 'longDrive')!
+      expect((ld.config as { holes: unknown }).holes).toEqual([3, 8, 12])
+    })
+
+    /**
+     * Holes nominated for a round that no longer plays them.
+     *
+     * Going back to the tees step keeps the chosen games — nothing resets them
+     * — so an eighteen's holes 12 and 15 survive a tap on Front 9, where the
+     * grid can only paint 1–9. They would otherwise render as NOTHING PRESSED,
+     * which reads as "we picked no holes" while `Tee off` stays enabled and the
+     * round is written with a bet that can never pay. `validateSetup` cannot
+     * see the course; this screen can.
+     */
+    it('says when nominated holes are no longer in the round', async () => {
+      await toLongDrive()
+      for (const h of [12, 15]) {
+        await userEvent.click(screen.getByRole('button', { name: new RegExp(`^hole ${h} —`) }))
+      }
+      // …and now the round becomes a front nine: games → players → tees
+      const back = () => userEvent.click(screen.getByRole('button', { name: /Back/ }))
+      await back()
+      await back()
+      await userEvent.click(screen.getByRole('button', { name: 'Front 9' }))
+      await cont()
+      await cont()
+
+      expect(holeButtons()).toEqual(['1', '2', '3', '4', '5', '6', '7', '8', '9'])
+      expect(
+        screen.getByText(/Holes 12, 15 are not in this round — nothing here will be played for/),
+      ).toBeInTheDocument()
+
+      // tapping any hole drops the strays, exactly as it says
+      await userEvent.click(screen.getByRole('button', { name: /^hole 4 —/ }))
+      expect(screen.queryByText(/not in this round/)).not.toBeInTheDocument()
+      await teeOff()
+      await waitFor(async () => expect(await roundFor('eighteen')).toBeDefined())
+      const ld = (await roundFor('eighteen'))!.games.find((g) => g.type === 'longDrive')!
+      expect((ld.config as { holes: unknown }).holes).toEqual([4])
+    })
+
+    /**
+     * ANY hole, including one being turned OFF — which is the tap the message
+     * recommends and the one the first fix missed. Deselecting rebuilt the list
+     * from `picked` rather than from the round's holes, so the strays survived,
+     * the warning re-rendered immediately after the user did what it asked, and
+     * `Tee off` stayed enabled over a bet that could never pay (`validateSetup`
+     * refuses only an EMPTY list).
+     */
+    it('drops strays when a hole is turned off, not only when one is turned on', async () => {
+      await toLongDrive()
+      // TWO in-round holes, not one. Turning off the only survivor cannot tell
+      // "drop the strays" apart from "drop everything" — a toggle whose remove
+      // branch returned `[]` passed the single-hole version of this test.
+      for (const h of [4, 5, 12, 15]) {
+        await userEvent.click(screen.getByRole('button', { name: new RegExp(`^hole ${h} —`) }))
+      }
+      const back = () => userEvent.click(screen.getByRole('button', { name: /Back/ }))
+      await back()
+      await back()
+      await userEvent.click(screen.getByRole('button', { name: 'Front 9' }))
+      await cont()
+      await cont()
+
+      // holes 4 and 5 survive the range change; 12 and 15 do not
+      expect(screen.getByText(/Holes 12, 15 are not in this round/)).toBeInTheDocument()
+      await userEvent.click(screen.getByRole('button', { name: /^hole 4 —/ }))
+
+      expect(screen.queryByText(/not in this round/)).not.toBeInTheDocument()
+      // 5 IS STILL SELECTED — the deselect dropped the strays and hole 4, and
+      // nothing else. This is the assertion the single-hole version could not
+      // make, and the one a "return []" remove branch fails.
+      await teeOff()
+      await waitFor(async () => expect(await roundFor('eighteen')).toBeDefined())
+      const ld = (await roundFor('eighteen'))!.games.find((g) => g.type === 'longDrive')!
+      expect((ld.config as { holes: unknown }).holes).toEqual([5])
+    })
+
+    /**
+     * Entering custom mode selects NOTHING rather than expanding the preset it
+     * replaces — holes the group never chose must not look chosen — so the
+     * empty state is reachable, and it is refused out loud rather than teeing
+     * off a bet that can never pay.
+     */
+    it('refuses to tee off a nominated bet with no holes', async () => {
+      await toLongDrive()
+      // on the bet's own card AND in the list above Tee off — both, as every
+      // other setup problem is shown
+      expect(screen.getAllByText('Long Drive needs at least one hole')).toHaveLength(2)
+      expect(screen.getByRole('button', { name: /Tee off/ })).toBeDisabled()
+
+      await userEvent.click(screen.getByRole('button', { name: /^hole 5 —/ }))
+      expect(screen.queryByText('Long Drive needs at least one hole')).not.toBeInTheDocument()
+      expect(screen.getByRole('button', { name: /Tee off/ })).toBeEnabled()
+    })
+  })
+
+  /**
    * Starting hole — the picker, the stamp, and the rule that keeps MAI-41
    * revertible.
    */

@@ -130,7 +130,9 @@ way it was.
 
 - `src/engine/core/` — events, replay, handicap allocation, money, plus the shared game kits
   (`match` for match play + the one `closeMargin`, `points` for rank-points/points-money,
-  `standings`); `src/engine/games/<game>/` —
+  `standings`, `awardPot` for one-winner-per-eligible-hole bets — CTP and Long Drive, and the
+  place the pending/unclaimed rules live so a third award game inherits them rather than
+  rediscovering them); `src/engine/games/<game>/` —
   one engine per game + golden fixtures; `src/engine/catalog.ts` — GameEngine registry
 - `src/db/` — Dexie schema + repos; `src/features/` — screens; `src/components/` — primitives;
   `src/lib/` — app-layer helpers shared across features (`date.ts` is the fixed, locale-independent
