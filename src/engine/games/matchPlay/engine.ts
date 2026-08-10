@@ -235,20 +235,23 @@ export const matchPlayEngine: GameEngine<MatchPlayConfig> = {
     blurb: 'One match over the round. Go up more holes than are left and it is over.',
     minPlayers: 2,
     maxPlayers: 4,
-    // 'either', not 'main'. The picker offers a game in the side-bet section
-    // only if its category admits one (GamePickerSheet), and a match riding
-    // alongside a group game is ordinary: a pair playing skins and a match at
-    // the same time, or a four-ball whose main event is the skins pot. 'main'
-    // would make both unbuildable. Nothing is lost, either: an 'either' game
-    // with no main beside it still reads as the main event (roleOf), and beside
-    // a Nassau it correctly reads as the side bet instead of leaving the round
-    // with two main events for `primaryGame` to pick between on order alone.
+    // MAIN ONLY. A match is the round's event, not something running quietly
+    // beside one: the whole card is the bet, so there is nothing left for a
+    // main game to be. The picker offers a game in its side-bet section only if
+    // its category admits one (GamePickerSheet), so this keeps Match Play out
+    // of there entirely — deliberately, and the same call Nassau makes.
     //
-    // What it does NOT buy is a match between two players out of four. Sides
-    // are `nonEmptyPartitionProblems` — every player on exactly one of them —
-    // so a foursome's match is 2v2, never Ann v Bob with the other two sitting
-    // it out. Subset sides would be a change to the shared teams contract.
-    category: 'either',
+    // Two consequences worth knowing rather than rediscovering. A round holding
+    // Match Play AND a Nassau has two games claiming the main event, and
+    // `primaryGame` (src/lib/gameRoles.ts) then picks the first in round order
+    // for the scorecard's stroke dots and the share card's stroke note. And a
+    // Skins beside it correctly demotes itself, since Skins is 'either'.
+    //
+    // Separately: sides partition the WHOLE roster
+    // (`nonEmptyPartitionProblems`), so a foursome's match is 2v2 or 3v1, never
+    // Ann v Bob with the other two sitting it out. Subset sides would be a
+    // change to the shared teams contract, not to this engine.
+    category: 'main',
     family: 'match',
     // 1v1 by default, fixed sides when `teams` is set — the same set Nassau
     // declares, and for the same reason: the axis lives in the config.
