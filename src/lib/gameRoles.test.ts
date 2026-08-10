@@ -73,6 +73,23 @@ describe('primaryGame', () => {
 })
 
 describe('strokeGame', () => {
+  /**
+   * A round of nothing but side bets falls through to `games[0]`, so a CTP that
+   * arrived NET — an import, a hand-edited log, a round written before the game
+   * declared itself — would draw stroke dots on the scorecard and print
+   * "underline = handicap stroke: Closest to the Pin" onto the share card, for
+   * an allocation the engine never reads. Setup no longer offers the choice;
+   * this is what covers the rounds that already made it.
+   */
+  it('never names a game strokes cannot decide, even stored as net', () => {
+    const net = { mode: 'net' as const, allowancePct: 100, reference: 'offLow' as const }
+    const ctp: GameConfig = { gameId: 'g1', type: 'ctp', handicap: net, config: {} }
+    const r = { games: [ctp] } as unknown as Round
+    expect(primaryGame(r)).toBe(ctp)
+    expect(strokeGame(r)).toBeUndefined()
+  })
+
+
   it('is the primary game when it allocates strokes', () => {
     const r = round([{ type: 'nassau', handicap: net }])
     expect(strokeGame(r)).toBe(r.games[0])

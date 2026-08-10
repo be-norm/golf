@@ -122,11 +122,18 @@ export function SideBetRow({
               onChange={(v) => setConfigValue(field.key, v)}
             />
           ))}
-          <HandicapControls
-            handicap={draft.handicap}
-            gameName={label}
-            onChange={(handicap) => onChange({ ...draft, handicap })}
-          />
+          {/* Hidden, not disabled, when strokes cannot decide the game — a
+              control that changes nothing is worse than no control. See
+              `meta.grossOnly`. */}
+          {engine.meta.grossOnly ? (
+            <p className="text-sm text-stone-400">Handicaps don’t apply — it isn’t decided by strokes.</p>
+          ) : (
+            <HandicapControls
+              handicap={draft.handicap}
+              gameName={label}
+              onChange={(handicap) => onChange({ ...draft, handicap })}
+            />
+          )}
           <button
             aria-label={`${label} rules`}
             onClick={onRules}

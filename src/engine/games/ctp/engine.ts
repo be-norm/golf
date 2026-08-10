@@ -133,6 +133,8 @@ export const ctpEngine: GameEngine<CtpConfig> = {
     category: 'side',
     family: 'award',
     shapes: ['solo'],
+    // Handicaps have nothing to say here, so setup does not offer them.
+    grossOnly: true,
     rules: {
       tagline: 'Every par 3 is worth money to whoever stiffs it.',
       howToPlay: [

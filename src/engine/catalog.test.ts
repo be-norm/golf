@@ -118,6 +118,23 @@ describe('engine registry invariants', () => {
     }
   })
 
+  /**
+   * `meta.grossOnly` is a claim about the GAME — strokes cannot decide it — and
+   * setup acts on it by hiding the handicap control entirely. An engine
+   * declaring it while defaulting to net would ship a round whose stored policy
+   * nobody can see or change, which is worse than either honest answer.
+   *
+   * Nothing enforces the other direction: a gross DEFAULT is not a claim (Skins
+   * ships gross and is routinely flipped to net — that is the whole reason
+   * `gameLabel` has a discriminator ladder).
+   */
+  it('never declares strokes irrelevant while defaulting to net', () => {
+    for (const engine of shippedEngines()) {
+      if (!engine.meta.grossOnly) continue
+      expect(engine.defaultHandicap().mode, `${engine.type} grossOnly`).toBe('gross')
+    }
+  })
+
   it('every game declares where it belongs', () => {
     for (const engine of shippedEngines()) {
       expect(CATEGORIES, `${engine.type} category`).toContain(engine.meta.category)
