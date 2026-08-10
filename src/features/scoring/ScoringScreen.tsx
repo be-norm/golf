@@ -228,15 +228,6 @@ export function ScoringScreen() {
     : []
   const holeInputs = inputs.filter((i) => i.hole === currentHole)
 
-  // Deliberately NOT a useMemo: `currentHole` is derived below the early
-  // returns, so keying a hook on it would mean moving one or the other. It is a
-  // handful of array pushes, and `awards(hole)` builds one hole's worth by
-  // design (see GameDerivation.awards).
-  //
-  // COMPLETED IS THE ONE GATE. Awards are editable on any hole the round has
-  // reached, right up to `round/completed` — not frontier-gated like the press
-  // button above, and not withdrawn once every hole is scored. Read off the
-  // EVENTS rather than `round.status`, so a reopened round gets its grid back.
   /**
    * DOES THIS ROUND COUNT PUTTS? (MAI-90, MAI-58.)
    *
@@ -257,6 +248,15 @@ export function ScoringScreen() {
    */
   const countingPutts = round.trackPutts || roundReads('putts', round.games)
 
+  // Deliberately NOT a useMemo: `currentHole` is derived below the early
+  // returns, so keying a hook on it would mean moving one or the other. It is a
+  // handful of array pushes, and `awards(hole)` builds one hole's worth by
+  // design (see GameDerivation.awards).
+  //
+  // COMPLETED IS THE ONE GATE. Awards are editable on any hole the round has
+  // reached, right up to `round/completed` — not frontier-gated like the press
+  // button above, and not withdrawn once every hole is scored. Read off the
+  // EVENTS rather than `round.status`, so a reopened round gets its grid back.
   const roundOver = isCompleted(round, effectiveEvents(view.events))
   const holeAwards: Award[] = []
   if (!roundOver) {

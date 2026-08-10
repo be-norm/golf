@@ -97,9 +97,11 @@ function derive(
       holderId: bite.playerId,
       ...(previous && { from: previous.holderId }),
       putts: bite.putts,
-      // EVERY BITE DOUBLES IT, including one that doesn't change hands — the
-      // same player three-putting again is the snake biting again, which is how
-      // the house rule is played and what makes it frightening.
+      // The snake comes OUT at the stake and doubles on every bite after that
+      // — `bites.length` is the count before this one, so the first is 1×. A
+      // bite that does not change hands still doubles it: the same player
+      // three-putting again is the snake biting again, which is how the house
+      // rule is played and what makes it frightening.
       potCents: doubling ? potCents * 2 ** bites.length : potCents,
     })
   }
@@ -128,7 +130,13 @@ function derive(
    * exactly when it can no longer be claimed.
    */
   const settlement: Settlement = emptySettlement(playerIds)
-  if (ctx.completed && held) {
+  // `others > 0` is not paranoia: `validateSetup` refuses a one-player round,
+  // but `importRound` validates a roster with `.min(1)`, so one can arrive from
+  // an export. The line would then be every-entry-zero and still pushed, making
+  // `lines.length === 0` — the settle panel's "No money moved." signal — false
+  // on a round where nothing moved, which is the same MAI-40 rule the
+  // no-three-putt note above exists to respect.
+  if (ctx.completed && held && playerIds.length > 1) {
     const others = playerIds.length - 1
     addLine(settlement, {
       label: `${nameOf.get(held.holderId)} holds the snake`,
@@ -256,7 +264,7 @@ export const snakeEngine: GameEngine<SnakeConfig> = {
       ],
       scoring: [
         'The holder pays the pot to every other player. At $1 in a foursome that is $3 from them and $1 to each of the others.',
-        'With a doubling pot the value doubles on every three-putt, including one by the player already holding it — three-putting twice running doubles it twice.',
+        'With a doubling pot the snake comes out worth the stake, then doubles on every three-putt after that — $1, $2, $4, $8. A player who already has it and three-putts again doubles it just the same.',
         'Handicaps do not apply. A three-putt is a three-putt.',
         'More than one three-putt on the same hole? The worst count takes it — a four-putt beats a three-putt. If those tie, it goes to whoever is later in the player list, since the app does not track who putted out last.',
         'Money moves only when the round is finished, because until then the snake can still be passed.',

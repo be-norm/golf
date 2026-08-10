@@ -77,13 +77,18 @@ export function buildHoleLedger(
   // Round completion finalizes everything at once — attribute the money it
   // locks to the last hole anyone actually played (an early-finished round
   // must not show money moving on an unplayed hole 18).
-  const scored = new Set(
-    events
-      .filter((e): e is Extract<RoundEvent, { type: 'score/set' }> => e.type === 'score/set')
-      .map((e) => e.hole),
-  )
+  //
+  // "PLAYED" IS `ctx.anyScored`, THE SAME QUESTION THE ENGINES ASK. This used
+  // to scan raw `score/set` events, which no retraction or clear ever reaches,
+  // so undoing the only score on the last hole left the money attributed to a
+  // hole every engine agrees nobody played — reachable with the header undo.
+  // Latent while only narration rode on it (Skins places its dead carry with
+  // the same expression); money the moment a game settled entirely on
+  // completion, because the payment landed on one row and the sentence
+  // explaining it on another (MAI-58).
   const completionHole =
-    [...holesPlayed].reverse().find((h) => scored.has(h)) ?? holesPlayed[holesPlayed.length - 1]
+    [...holesPlayed].reverse().find((h) => ctx.anyScored(h)) ??
+    holesPlayed[holesPlayed.length - 1]
   const completionIdx = completionHole === undefined ? -1 : positionOf.get(completionHole)!
   holesPlayed.forEach((hole, idx) => {
     const prefix = events.filter((e) => {

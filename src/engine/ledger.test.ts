@@ -304,6 +304,47 @@ describe('buildHoleLedger', () => {
     expect(paid[0]!.hole).toBe(4)
   })
 
+  /**
+   * THE COMPLETION HOLE IS A HOLE SOMEBODY PLAYED, and "played" has to mean
+   * what the derivation means by it.
+   *
+   * This was read off raw `score/set` events, which no retraction or clear ever
+   * reaches — so undoing the only score on the last hole left the ledger still
+   * attributing a completed round's money there, on a hole `ctx.anyScored` (and
+   * therefore every engine) says nobody played. Reachable with the header undo.
+   *
+   * Latent while only narration rode on it (Skins places its dead carry with
+   * the same expression), and money the moment Snake shipped: its entire
+   * settlement lands on the hole this picks, so the payment appeared on one row
+   * while the sentence explaining it sat on another (MAI-58).
+   */
+  it('places a completed round on the last hole still standing after an undo', () => {
+    const round = makeRound({
+      players: makePlayers([{ name: 'A' }, { name: 'B' }]),
+      holes: 'front9',
+      trackPutts: true,
+      games: [{ type: 'snake', config: { potCents: 100, doubling: false } }],
+    })
+    const log = new EventLog()
+    log.scoreByHole(round, { A: [4, 4, 4], B: [4, 4, 4] }, [1, 2, 3])
+    log.append({ type: 'score/putts', playerId: 'p-a', hole: 2, putts: 3 })
+    // hole 4 is entered and then undone — the group mis-tapped and backed out
+    const slip = log.append({ type: 'score/set', playerId: 'p-a', hole: 4, gross: 5 })
+    log.append({ type: 'meta/retract', targetEventId: slip.id })
+    log.append({ type: 'round/completed' })
+
+    const { ctx, derivations } = deriveRound(round, log.events)
+    const rows = buildHoleLedger(round, log.events, ctx, derivations).get('game-1')!
+    const paid = rows.filter((r) => r.deltas.length > 0)
+
+    expect(ctx.anyScored(4)).toBe(false)
+    expect(paid).toHaveLength(1)
+    // hole 3, not the undone hole 4 …
+    expect(paid[0]!.hole).toBe(3)
+    // … and the sentence explaining it is on that same row
+    expect(paid[0]!.summary.join(' ')).toContain('left holding the snake')
+  })
+
   it('respects retractions in prefixes (corrected hole re-attributes cleanly)', () => {
     const round = makeRound({
       players: makePlayers([{ name: 'A' }, { name: 'B' }]),

@@ -193,8 +193,8 @@ Outright hole win captures (or frees, traditional convention) the rabbit; holder
 
 ### 21. Snake `[shipped]` — Tier 2. Inputs: putts per hole (MAI-58).
 Three-putt and you hold the snake; whoever holds it at the end pays the pot to everyone else.
-Fixed or doubling — with doubling, **every** bite doubles it, including one by the player
-already holding it, so three-putting twice running doubles it twice.
+Fixed or doubling — with doubling the snake comes out worth the stake and doubles on every
+bite *after* that ($1, $2, $4, $8), including a bite by the player already holding it.
 **The first engine that reads a `RoundFact`**, and it has no event kinds at all: a pure
 function of its config and `RoundContext`. `meta.reads: ['putts']` is the entire wiring —
 setup sees the declaration, switches putt counting on for the round and names the game that
