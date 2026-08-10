@@ -147,25 +147,31 @@ describe('a malformed game never takes a screen down', () => {
     })
 
     /**
-     * THE ONE THAT SURVIVES THE SCHEMA CHANGING, and the reason it is here
-     * rather than in the engine's own fixtures.
+     * THE ONE THAT STATES THE INVARIANT RATHER THAN THE GATE.
      *
-     * Every guard above asserts a game is REFUSED, so all of them are really
-     * assertions about `teamsSchema`. The engine's settlement is still built on
-     * the assumption that the sides it is handed are non-empty and disjoint —
+     * Every guard above asserts a game is REFUSED, which makes all of them
+     * assertions about `teamsSchema` specifically. The engine's settlement is
+     * separately built on the assumption that the sides it is handed are
+     * non-empty, disjoint, and made of players who are actually in the round —
      * `sides[loseSide].map` debits nobody when a side is empty, and
      * `Object.fromEntries` collapses a duplicated id to one credit while the
-     * opponent is charged for two. Match Play's own `meta` comment openly
-     * contemplates relaxing the partition rule so two of a foursome can play
-     * while the others sit out. Whoever does that will loosen the schema, watch
-     * these three tests turn red, adjust them, and reopen the hole with nothing
-     * left standing between a hand-edited round file and money out of nothing.
+     * opponent is charged for two. Those are three different gates in three
+     * different files (`teamsSchema`, `addLine`, and `nonEmptyPartitionProblems`
+     * behind `validateSetup`, which never runs on an import at all), and a test
+     * naming any one of them stops guarding the moment that one moves.
      *
-     * So state the invariant instead of the gate: whatever sides a game arrives
-     * carrying, it either does not settle or it settles to zero. True today via
-     * the refusals, and still true — still checked — the day the refusals go.
+     * So say the thing that has to stay true however they are arranged:
+     * whatever sides a game arrives carrying, it either does not settle, or it
+     * settles to zero ACROSS THE ROUND'S ROSTER.
+     *
+     * That last clause is the whole point. Summing the settlement's own keys
+     * cannot see the failure it is here to catch: a line paying somebody who
+     * isn't in the round balances perfectly against them, so the total reads
+     * zero while `buildSummaryCard` — which builds standings from
+     * `round.players` — shows the real player's credit with no matching debit.
      */
-    it('any team shape either settles zero-sum or does not settle at all', () => {
+    it('any team shape either settles zero-sum across the roster, or not at all', () => {
+      const roster = ['p-a', 'p-b']
       const SHAPES = [
         { a: ['p-a'], b: ['p-b'] },
         { a: ['p-a', 'p-b'], b: [] },
@@ -175,17 +181,32 @@ describe('a malformed game never takes a screen down', () => {
         { a: ['p-a'], b: ['p-b', 'p-b'] },
         { a: ['p-a'], b: ['p-a'] },
         { a: ['p-a', 'p-b'], b: ['p-a'] },
+        // the only malformed shape that still DERIVES — non-empty and disjoint,
+        // so the schema has nothing to say about it, and the roster check in
+        // `addLine` is what keeps it from paying
         { a: ['p-ghost'], b: ['p-b'] },
       ]
+      let derived = 0
       for (const teams of SHAPES) {
         const d = settled(twoSided(teams)).derivations.get('game-1')
-        if (!d) continue // refused outright — the defence we have today
-        const cents = Object.values(d.settlement.perPlayerCents)
+        if (!d) continue // refused outright — one of the defences we have today
+        derived += 1
+        const cents = d.settlement.perPlayerCents
+        const where = JSON.stringify(teams)
         expect(
-          cents.reduce((a, b) => a + b, 0),
-          JSON.stringify(teams),
+          Object.keys(cents).every((id) => roster.includes(id)),
+          where,
+        ).toBe(true)
+        expect(
+          roster.reduce((sum, id) => sum + (cents[id] ?? 0), 0),
+          where,
         ).toBe(0)
       }
+      // Without this the loop is silently skippable: today 7 of the 9 shapes
+      // are refused and assert nothing, so a change that stopped the other two
+      // deriving — a renamed type, a new required config field — would leave a
+      // test that runs zero expectations and still reads as full coverage.
+      expect(derived, 'no shape settled — the loop asserted nothing').toBeGreaterThan(0)
     })
   })
 

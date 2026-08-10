@@ -32,7 +32,33 @@ export function emptySettlement(playerIds: readonly Uuid[]): Settlement {
   }
 }
 
+/**
+ * Add a money movement — and refuse one that names somebody who is not in the
+ * round.
+ *
+ * `emptySettlement` seeds the roster, so an id it did not seed is a player the
+ * round does not have: a team config carrying a stale id, restored from an
+ * export `importRound` validated loosely. Accruing it was silently fatal in a
+ * way nothing downstream could see. The line still balances against the ghost,
+ * so `assertZeroSum` — which sums the settlement's OWN keys — stays happy; but
+ * `buildSummaryCard` builds standings from `round.players` (summaryCard.ts), so
+ * the share card and the settle screen show the real player's credit with no
+ * matching debit. Five dollars out of nothing, on the surfaces that are the
+ * whole point of the app.
+ *
+ * Refusing the WHOLE line, not just the ghost's share: dropping one side of a
+ * payment is what unbalances it. A game that cannot say who is paying moves no
+ * money at all, which is the same rule `deriveRound` applies to a game whose
+ * config its engine rejects, and the same one `ctp` applies to an award naming
+ * a player who isn't playing.
+ *
+ * Silently, and deliberately — throwing here would white-screen a round the
+ * user can still open, which is exactly what `malformed.test.ts` exists to
+ * prevent.
+ */
 export function addLine(settlement: Settlement, line: SettlementLine): void {
+  const ids = Object.keys(line.perPlayerCents)
+  if (ids.some((id) => settlement.perPlayerCents[id] === undefined)) return
   settlement.lines.push(line)
   for (const [id, cents] of Object.entries(line.perPlayerCents)) {
     settlement.perPlayerCents[id] = (settlement.perPlayerCents[id] ?? 0) + cents
