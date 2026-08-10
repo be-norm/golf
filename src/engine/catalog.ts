@@ -4,7 +4,9 @@ import { buildRoundContext, type RoundContext } from './core/context'
 import { effectiveEvents, gameEventsFor } from './core/replay'
 import type { Settlement } from './core/money'
 import type {
+  Award,
   GameConfig,
+  GameEventOffer,
   HandicapSettings,
   Round,
   RoundPlayer,
@@ -12,55 +14,11 @@ import type {
   Uuid,
 } from './core/types'
 
-// Defined in core/types.ts (core/standings.ts builds them, and core cannot
-// import upward from the catalog), re-exported here because engines reach for
-// it alongside GameDerivation.
-export type { StandingLine }
-
-/**
- * The WRITE half the two optional channels share: offer something tappable,
- * emit exactly one game event, undo by retracting it (invariant #2 — compensate,
- * never delete).
- *
- * Deliberately NOT the lifecycle. WHEN a thing may be tapped is the entire
- * difference between an action and an award — a press belongs to the tee you
- * are standing on, an award belongs to whichever hole it happened on, forever —
- * and that difference lives on the screens, not here.
- */
-export interface GameEventOffer {
-  /**
-   * Stable id — the same offer across re-derives keeps the same id.
-   *
-   * Unique WITHIN this game, not across the round: an engine cannot see its
-   * siblings, and a round can hold two instances of one game (MAI-44), so two
-   * Nassaus both mint `nassau-press-front-3`. Any consumer flattening offers
-   * from several games into one keyed list must compose with `gameId`.
-   */
-  id: string
-  gameId: Uuid
-  eventKind: string
-  /**
-   * Appended verbatim as the game event's data.
-   *
-   * IT MUST CARRY `hole`. `buildHoleLedger` places a game event in its
-   * prefix replay by reading `data.hole` (ledger.ts), so a payload without one
-   * is attributed to every prefix and lands its money on the wrong ledger row.
-   * Awards make this load-bearing rather than incidental: they are the one
-   * thing in the app designed to be recorded LONG after the hole they describe.
-   */
-  data: Record<string, unknown>
-  /**
-   * Already in effect. The offer stays visible rather than vanishing, so a
-   * mistap is visible and reversible instead of silently final.
-   */
-  taken?: boolean
-  /**
-   * Events to retract to undo it (invariant #2: compensate, never delete).
-   * Empty when the GAME started it rather than the player — an auto-press is
-   * not theirs to undo, so the UI shows it engaged but inert.
-   */
-  undoEventIds?: Uuid[]
-}
+// Defined in core/types.ts (core builds all three — `core/standings.ts` the
+// standings, `core/awardPot.ts` the offers and awards — and core cannot import
+// upward from the catalog), re-exported here because engines reach for them
+// alongside GameDerivation.
+export type { StandingLine, GameEventOffer, Award }
 
 /** A blocking prompt the scoring UI renders as a generic chip — no game-specific screens. */
 export interface InputRequest {
@@ -142,39 +100,6 @@ export interface GameAction extends GameEventOffer {
    * vary between offers even though Nassau's happens not to (MAI-47).
    */
   recommendedReason?: string
-}
-
-/**
- * ONE PLAYER, ONE THING, ONE HOLE — closest to the pin, a greenie, a sandie,
- * the snake. The third input channel, and it exists because neither of the
- * other two fits (MAI-46):
- *
- * - `requiredInputs` INTERRUPTS scoring: its hole cannot settle until someone
- *   answers, so it renders as a gold chip above the score rows. Nobody is stuck
- *   waiting on a greenie. (It has never DISABLED score entry — the screen has
- *   no such gate — so don't write code that assumes one.)
- * - `availableActions` is a flat list behind a button, and it is frontier-gated
- *   (`ScoringScreen`): correct for a press, which must be declared on the tee
- *   you are standing on, and wrong for an award in exactly the cases awards
- *   exist for. You remember on 12 that Rob had the greenie on 7; you mistap a
- *   KP and notice once every hole is scored. Both must stay recordable.
- *
- * THE LIFECYCLE RULE, which is the whole ticket: editable on ANY hole the round
- * has reached, including after every hole is scored, right up to
- * `round/completed`. Awards do not inherit the frontier gate.
- *
- * The engine decides which groups appear on which hole (KP only on par 3s), so
- * the grid stays generic and no screen ever grows per-game branching.
- */
-export interface Award extends GameEventOffer {
-  hole: number
-  playerId: Uuid
-  /** the row: what is being given, e.g. "Closest to the pin" */
-  group: string
-  /** the cell: who it would be given to, i.e. the player's name */
-  label: string
-  /** a cell is a toggle and is never indeterminate, so this is not optional */
-  taken: boolean
 }
 
 export interface GameDerivation {
