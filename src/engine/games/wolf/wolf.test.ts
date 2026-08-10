@@ -252,6 +252,10 @@ describe('wolf — golden fixture (hand-verified)', () => {
     expect(d.holeSummary(2)).toEqual([':wolf: B (lone) vs. A & C & D'])
     // no pick either: just whose tee it is
     expect(d.holeSummary(3)).toEqual(['Wolf: C'])
+    // …and the SCREEN is asked to state none of it. A hole nobody played has
+    // nothing to show once the round is over — answered or not, so a pre-pick
+    // made off a tee the group then walked away from doesn't linger either.
+    expect(d.requiredInputs().map((i) => i.hole)).toEqual([1])
     // AND THE BAR, which is the half that was missed the first time round: the
     // fix belongs in `derive` (an unplayed hole is pending, not halved), not in
     // each narration channel, or the recap keeps saying it after the ledger
@@ -267,17 +271,12 @@ describe('wolf — golden fixture (hand-verified)', () => {
   })
 
   /**
-   * A PICK BELONGS TO THE WOLF WHO MADE IT.
-   *
-   * On trailing-player holes the wolf is whoever has fewest points, so a score
-   * correction can hand the role to someone else after a pick was recorded. A
-   * partner pick shows its own staleness — it names the new wolf, or names
-   * nobody. A lone or blind declaration does not, and it silently becomes
-   * someone else's call: harmless while nothing showed it, and a lie the moment
-   * the screen started saying "D went blind" (MAI-84). So the pick records the
-   * wolf it was made under.
+   * INSIDE THE ROTATION THE STAMP IS INERT. The wolf there is fixed by config
+   * and hole index and cannot legitimately move, so the stamp tells us nothing
+   * the rotation doesn't — and honouring one would let a corrupted or
+   * hand-edited log rewrite whose tee it was.
    */
-  it('drops a solo declaration when the wolf it was made under has changed', () => {
+  it('lets the rotation decide inside it, whatever a pick claims', () => {
     const players = makePlayers([{ name: 'A' }, { name: 'B' }, { name: 'C' }, { name: 'D' }])
     const round = makeRound({
       players,
@@ -288,7 +287,7 @@ describe('wolf — golden fixture (hand-verified)', () => {
     })
     const log = new EventLog()
     log.scoreByHole(round, { A: [3], B: [5], C: [5], D: [5] }, [1])
-    // A is the wolf on hole 1, but this says it was declared under B
+    // hole 1 is A's by rotation; this claims it was B's
     log.append({
       type: 'game/event',
       gameId: 'game-1',
@@ -297,24 +296,51 @@ describe('wolf — golden fixture (hand-verified)', () => {
     })
 
     const d = deriveRound(round, log.events).derivations.get('game-1')!
-    // stale: nothing computed, and the prompt is back so the group can re-declare
+    // A is the wolf, and the lone call computes against A's 3
+    expect(d.holeSummary(1)).toEqual([':wolf: A (lone) wins with 3', '↳ lone wolf — the hole doubles'])
+    expect(d.settlement.perPlayerCents['p-a']).toBe(600)
+  })
+
+  /**
+   * The one way left to go stale: a partner pick naming this hole's own wolf,
+   * which would compute a degenerate [wolf, wolf] side. Reachable from a roster
+   * change, or from a pre-MAI-84 log whose derived wolf has since moved.
+   */
+  it("drops a partner pick that names the hole's own wolf", () => {
+    const players = makePlayers([{ name: 'A' }, { name: 'B' }, { name: 'C' }, { name: 'D' }])
+    const round = makeRound({
+      players,
+      holes: 'front9',
+      games: [
+        { type: 'wolf', config: { pointCents: 100, rotation: ['p-a', 'p-b', 'p-c', 'p-d'] } },
+      ],
+    })
+    const log = new EventLog()
+    log.scoreByHole(round, { A: [3], B: [5], C: [5], D: [5] }, [1])
+    // A is the wolf on hole 1, and this rides A with A
+    pick(log, 1, 'p-a')
+
+    const d = deriveRound(round, log.events).derivations.get('game-1')!
+    // nothing computed, and the prompt is back so the group can re-declare
     expect(Object.values(d.settlement.perPlayerCents).every((c) => c === 0)).toBe(true)
     expect(d.requiredInputs().some((i) => i.hole === 1 && !i.answered)).toBe(true)
     expect(d.holeSummary(1)).toEqual(['Wolf: A'])
   })
 
   /**
-   * THE TRAILING-PLAYER WOLF IS PROVISIONAL while an earlier hole is
-   * unfinished, and picking under a provisional one is ordinary: the group is
-   * standing on the 9th tee with someone's 8th still unwritten. The first score
-   * on the 9th finalizes the 8th, the totals move, and the wolf can change
-   * underneath a pick already made.
+   * WHO THE WOLF WAS IS A THING THAT HAPPENED, NOT A DERIVATION.
    *
-   * The re-prompt is the CORRECT answer — the declaration really does belong to
-   * a player who is no longer the wolf — but it interrupts the hole, so it is
-   * pinned here rather than discovered on a Saturday.
+   * The trailing-player wolf is provisional while an earlier hole is unfinished,
+   * and picking under a provisional one is ordinary: the group is on the 9th tee
+   * with someone's 8th still unwritten. The first score on the 9th finalizes the
+   * 8th, the totals move, and the derived wolf becomes someone else.
+   *
+   * Recomputing there would throw away both the declaration and the hole's money
+   * — on 17 AND 18 of an ordinary round, since each finalizes on the next one's
+   * first score. The stamp the pick carries is the authority instead, so the hole
+   * stays exactly as it was played.
    */
-  it('re-prompts when a finalizing earlier hole moves the trailing-player wolf', () => {
+  it('keeps a declaration when a finalizing earlier hole moves the derived wolf', () => {
     const players = makePlayers([{ name: 'A' }, { name: 'B' }, { name: 'C' }, { name: 'D' }])
     const round = makeRound({
       players,
@@ -342,14 +368,14 @@ describe('wolf — golden fixture (hand-verified)', () => {
     expect(declared.requiredInputs().find((i) => i.hole === 9)?.answered?.value).toBe('lone')
 
     // …then the first score on 9 finalizes 8, D's lone loss puts them on −6,
-    // and the 9th's wolf becomes D
+    // and the DERIVED wolf for 9 would now be D
     log.append({ type: 'score/set', playerId: 'p-a', hole: 9, gross: 4 })
     const after = deriveRound(round, log.events).derivations.get('game-1')!
     expect(after.settlement.perPlayerCents['p-d']).toBe(-600)
-    // A's declaration is not D's to inherit: the hole goes back to pending and
-    // the prompt returns so the group can re-declare
-    expect(after.holeSummary(9)).toEqual(['Wolf: D'])
-    expect(after.requiredInputs().some((i) => i.hole === 9 && !i.answered)).toBe(true)
+    // but the 9th was A's tee when they played it, and it stays A's — the
+    // declaration survives instead of the panel reverting to a prompt mid-hole
+    expect(after.holeSummary(9)).toEqual([':wolf: A (lone) vs. B & C & D'])
+    expect(after.requiredInputs().find((i) => i.hole === 9)?.answered?.value).toBe('lone')
   })
 
   /**

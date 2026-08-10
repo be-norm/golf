@@ -609,8 +609,11 @@ export function ScoringScreen() {
             const key = `${input.gameId}:${input.id}`
             // A COMPLETED ROUND IS READ-ONLY HERE, answered or not — the same
             // gate `AwardGrid` takes below, and for a sharper reason than
-            // consistency: `enqueuePushRound` runs in `finish()` and nowhere
-            // else, so an answer recorded after the round is settled changes
+            // consistency: nothing re-pushes a round because its log grew.
+            // `finish()` pushes the snapshot it takes at that moment, and the
+            // only other pushes are claim-on-login (`remote/sync.ts`) and the
+            // diagnostics screen — neither of which a scorekeeper walks
+            // through. So an answer recorded after the round is settled changes
             // the money on this device and can never reach `round_archives`.
             // The synced copy keeps the old numbers and a reinstatement
             // restores them. Reopen → record → Finish is the flow that pushes,

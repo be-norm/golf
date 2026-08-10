@@ -127,45 +127,51 @@ function derive(
 
   ctx.holesPlayed.forEach((hole, idx) => {
     // wolf assignment: rotation, then fewest-points (ties: earliest in rotation)
-    let wolfId: Uuid
+    let derivedWolf: Uuid
     if (idx < rotationHoles) {
-      wolfId = rotation[idx % n]!
+      derivedWolf = rotation[idx % n]!
     } else {
-      wolfId = [...rotation].sort(
+      derivedWolf = [...rotation].sort(
         (a, b) => totals.get(a)! - totals.get(b)! || rotation.indexOf(a) - rotation.indexOf(b),
       )[0]!
     }
 
-    // A PICK CAN GO STALE LEGITIMATELY. On trailing-player holes (17–18, or the
-    // 9th of a nine) the wolf is whoever has fewest points, so a score
-    // correction can reassign it after the pick was recorded. Treat an orphaned
-    // pick as pending so the prompt re-appears, rather than computing on it.
+    // THE PICK NAMES ITS OWN WOLF, AND THAT STAMP IS THE AUTHORITY.
     //
-    // TWO WAYS TO GO STALE, and the second one only became visible when the
-    // screen started STATING the pick (MAI-84). A partner pick shows itself: it
-    // names the wolf, or names nobody in the round. A lone or blind
-    // declaration doesn't — reassign the wolf and it silently becomes someone
-    // else's declaration, and the app then says "D went blind" about a call D
-    // never made. So the pick records who was the wolf when it was made
-    // (`options[].data`, which exists for exactly this), and a mismatch is
-    // stale. Picks written before this carry no `wolf` and are left alone:
-    // absence means we cannot know, not that it disagrees.
+    // On a trailing-player hole the wolf is whoever has fewest points, which
+    // makes it PROVISIONAL while an earlier hole is unfinished — walk to the
+    // 17th with someone's 16th unwritten and the 17th's wolf is computed from
+    // 1–15. The first score on 17 finalizes 16, the totals move, and the wolf
+    // recomputes to someone else.
     //
-    // ON A TRAILING-PLAYER HOLE THE WOLF IS PROVISIONAL until every earlier
-    // hole has finalized, and the group can pick under a provisional one: leave
-    // the 8th unfinished, and the 9th tee's wolf is computed from holes 1–7. The
-    // first score entered on the 9th finalizes the 8th, the totals move, and the
-    // pick can go stale right there — the panel reverts to the prompt mid-hole
-    // and the group re-declares. That interruption is the correct answer (the
-    // wolf really did change, and the alternative is the silent
-    // mis-attribution this rule exists to stop) but it is a real behaviour, so
-    // it is pinned by a test rather than left to be discovered on a Saturday.
+    // Recomputing is the wrong answer, because who the wolf was is not a
+    // derivation — it is a THING THAT HAPPENED on that tee, and the group
+    // recorded it. Treating the stamp as a tripwire (the first attempt) threw
+    // away the declaration AND the hole's money on both 17 and 18 of an
+    // ordinary round; treating it as the authority keeps the hole exactly as it
+    // was played. It also closes the bug this stamp was added for — a lone call
+    // can no longer become somebody else's, because it stays attached to the
+    // player who made it.
+    //
+    // ONLY WHERE THE WOLF IS ACTUALLY PROVISIONAL. Inside the rotation the
+    // assignment is fixed by config and hole index and cannot legitimately
+    // move, so a stamp there tells us nothing the rotation doesn't — and
+    // letting one override it would hand a corrupted log the power to rewrite
+    // whose tee it was. The stamp must also name a CURRENT player; picks
+    // written before MAI-84 carry none and keep the derived wolf.
+    const declared = idx < rotationHoles ? undefined : declaredBy.get(hole)
+    const wolfId =
+      declared !== undefined && playerIds.includes(declared) ? declared : derivedWolf
+
+    // A partner pick must still name a current player other than this hole's
+    // wolf. That is the one way left to go stale — a roster change, or a pick
+    // made under a wolf the stamp doesn't vouch for (a pre-MAI-84 log, where
+    // the derived wolf can still move underneath it). Treat it as pending so
+    // the prompt re-appears, rather than computing a degenerate [wolf, wolf].
     const rawPick = picks.get(hole) ?? null
-    const declared = declaredBy.get(hole)
     const stale =
-      (rawPick?.kind === 'partner' &&
-        (rawPick.partnerId === wolfId || !playerIds.includes(rawPick.partnerId))) ||
-      (declared !== undefined && declared !== wolfId)
+      rawPick?.kind === 'partner' &&
+      (rawPick.partnerId === wolfId || !playerIds.includes(rawPick.partnerId))
     const pick = stale ? null : rawPick
 
     // Sides resolve as soon as the pick does — the scoring screen states them
@@ -344,14 +350,15 @@ function derive(
   const requiredInputs = (): InputRequest[] => {
     const inputs: InputRequest[] = []
     for (const r of holeResults) {
+      // NOTHING TO SAY ABOUT A HOLE NOBODY PLAYED, once the round is over —
+      // answered or not. A group walking in on the 12th would otherwise be
+      // asked about the 13th, or shown teams for it if someone had pre-picked
+      // off the tee before they quit. Same fabrication `derive` refuses further
+      // up (MAI-38).
+      if (ctx.completed && !ctx.anyScored(r.hole)) continue
       if (!r.pick) {
-        const anyScore = ctx.anyScored(r.hole)
-        // The frontier pre-prompt is "the tee you are standing on" — once the
-        // round is over nobody is standing on it, and asking for a pick on a
-        // hole nobody played is the same fabrication `derive` refuses further
-        // up: a group walking in on the 12th would be asked about the 13th
-        // (MAI-38).
-        if (!anyScore && (ctx.completed || r.hole !== frontier)) continue
+        // the frontier pre-prompt is "the tee you are standing on"
+        if (!ctx.anyScored(r.hole) && r.hole !== frontier) continue
       }
       const wolfName = nameOf.get(r.wolfId)
       inputs.push({
@@ -459,11 +466,11 @@ function derive(
    * only place that said so was the hole's own panel — one hole out of
    * eighteen, on a screen you have to already be standing on.
    *
-   * That was survivable while a missing pick meant "nobody tapped it". It stopped
-   * being survivable when the staleness rule widened to lone and blind (MAI-84):
-   * a score correction on an earlier hole can now drop a declaration that was
-   * made, and on a solo call that hole is the biggest swing on the card — six or
-   * nine stakes — quietly settling for zero.
+   * It always meant the same thing — nobody declared — and the wording says
+   * exactly that. (An earlier draft dropped declarations that HAD been made,
+   * when the derived wolf moved on a trailing hole; the stamp now pins the wolf
+   * instead, so this note never has to accuse a group of forgetting something
+   * they did.)
    *
    * `notes` is the round-level channel for exactly this, it renders on both the
    * standings sheet and the settle screen, and it is NOT money (MAI-40), so the
