@@ -244,7 +244,12 @@ in play. Eligible holes are config, not derivable, since the group picks them at
   non-derivable input by whether the hole can compute without it, and by whether it expires:
   - **Blocking → `requiredInputs` / `InputRequest`.** The hole is stuck until someone answers
     (Wolf's pick, a hammer accept/fold, BBB's point winners). Right to interrupt scoring.
-    An option may carry its own `data`, merged under `{ hole, choice }`.
+    An option may carry its own `data`, merged under `{ hole, choice }`. **An answered
+    request STAYS in the list** carrying `answered` — the screen turns it from a gold
+    interrupt into a quiet statement of what it recorded, with an Adjust affordance
+    (MAI-84). Same doctrine as `GameEventOffer.taken`: a decision that vanishes can be
+    neither read back nor fixed. Re-answering is one more event, not a retraction — every
+    input reducer is last-write-wins per hole.
   - **Optional, player-initiated → `availableActions` / `GameAction`.** Legal but not required
     (a Nassau press, a hammer throw, a Banker wager). These live behind a button and only
     *badge* when the game's convention says act now (`recommended`). Frontier-gated: they
@@ -253,6 +258,14 @@ in play. Eligible holes are config, not derivable, since the group picks them at
     snake. A grid of group rows × player cells under the score rows, no frontier gate and no
     all-scored gate — an award belongs to its hole forever, so it stays editable until the
     round is completed.
+- **A game that needs a PICTURE puts a token in the string** (`:wolf-shades:`,
+  `engine/core/glyphs.ts`), and the app swaps in 16×16 pixel art. Only `holeSummary` and
+  `requiredInputs` decode it — the pinned bar renders `summary`/`summaryParts` raw, and
+  `settlement.lines`/`detailLines`/`notes` are PAINTED ONTO A CANVAS for the share card,
+  where a token would be rasterised as literal `:wolf:` into an image people send each
+  other. `glyphs.test.ts` walks every engine and fails on a token anywhere else. Always
+  ship the word alongside the picture: a 16px graphic can't teach what "blind" costs, which
+  is also why the art is `aria-hidden`.
 
   Availability ("this is legal") is true on most holes; recommendation ("do it now") is rare.
   Nassau shipped them on one channel and nagged "Press?" on every hole while never saying why

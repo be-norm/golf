@@ -5,8 +5,9 @@ import type { GameScopedEvent } from '../../core/events'
 import { emptySettlement, type Settlement } from '../../core/money'
 import { sideStake } from '../../core/match'
 import { duplicateInstanceProblems } from '../../core/setup'
+import { glyph } from '../../core/glyphs'
 import { standingsFromSettlement } from '../../core/standings'
-import { latestHoleSummary, summaryString } from '../../core/summary'
+import { joinNames, latestHoleSummary, summaryString } from '../../core/summary'
 import { isPlayerPermutation } from '../../core/teams'
 import type { GameConfig, HandicapSettings, RoundPlayer, Uuid } from '../../core/types'
 
@@ -69,6 +70,20 @@ export interface WolfHoleResult {
   hole: number
   wolfId: Uuid
   pick: WolfPick | null
+  /**
+   * The sides the pick made, or null with no pick. Resolved BEFORE the hole is
+   * finalized, because the teams are what the group needs on screen while they
+   * are still playing the hole — not only once it settles.
+   */
+  sides: { wolf: Uuid[]; pack: Uuid[] } | null
+  /**
+   * Each side's best net ball once the hole is decided — NULL for a side that
+   * posted nothing, never `Infinity`. The comparison upstairs coerces to
+   * Infinity so a side with no scores loses; storing that would hand the first
+   * consumer to trust this doc a `"net Infinity"` to print. The WINNING side is
+   * always non-null (it posted, or it could not have won).
+   */
+  best: { wolf: number | null; pack: number | null } | null
   /** the signed SWING this hole, by player — sums to zero (see HOLE_UNITS) */
   points: Map<Uuid, number> | null
   outcome: 'wolfWin' | 'packWin' | 'halved' | 'pending'
@@ -86,9 +101,11 @@ function derive(
   const n = playerIds.length
 
   const picks = new Map<number, WolfPick>()
+  /** who was the wolf when the pick was recorded, for picks that say (below) */
+  const declaredBy = new Map<number, Uuid>()
   for (const e of events) {
     if (e.kind !== 'wolf/pick') continue
-    const data = e.data as { hole: number; choice: string }
+    const data = e.data as { hole: number; choice: string; wolf?: string }
     picks.set(
       data.hole,
       data.choice === 'lone'
@@ -97,6 +114,11 @@ function derive(
           ? { kind: 'blind' }
           : { kind: 'partner', partnerId: data.choice },
     )
+    // Last write wins here too, and absence must CLEAR: a re-pick recorded by
+    // an older build carries no wolf, and inheriting the previous event's
+    // would attribute it to whoever the first pick named.
+    if (data.wolf === undefined) declaredBy.delete(data.hole)
+    else declaredBy.set(data.hole, data.wolf)
   }
 
   const totals = new Map<Uuid, number>(playerIds.map((id) => [id, 0]))
@@ -105,49 +127,90 @@ function derive(
 
   ctx.holesPlayed.forEach((hole, idx) => {
     // wolf assignment: rotation, then fewest-points (ties: earliest in rotation)
-    let wolfId: Uuid
+    let derivedWolf: Uuid
     if (idx < rotationHoles) {
-      wolfId = rotation[idx % n]!
+      derivedWolf = rotation[idx % n]!
     } else {
-      wolfId = [...rotation].sort(
+      derivedWolf = [...rotation].sort(
         (a, b) => totals.get(a)! - totals.get(b)! || rotation.indexOf(a) - rotation.indexOf(b),
       )[0]!
     }
 
-    // A partner pick must name a current player other than the hole's wolf.
-    // A pick can go stale legitimately: on trailing-player holes a score
-    // correction can reassign the wolf after the pick was recorded — treat
-    // the orphaned pick as pending so the prompt re-appears, rather than
-    // silently computing a degenerate [wolf, wolf] side.
+    // THE PICK NAMES ITS OWN WOLF, AND THAT STAMP IS THE AUTHORITY.
+    //
+    // On a trailing-player hole the wolf is whoever has fewest points, which
+    // makes it PROVISIONAL while an earlier hole is unfinished — walk to the
+    // 17th with someone's 16th unwritten and the 17th's wolf is computed from
+    // 1–15. The first score on 17 finalizes 16, the totals move, and the wolf
+    // recomputes to someone else.
+    //
+    // Recomputing is the wrong answer, because who the wolf was is not a
+    // derivation — it is a THING THAT HAPPENED on that tee, and the group
+    // recorded it. Treating the stamp as a tripwire (the first attempt) threw
+    // away the declaration AND the hole's money on both 17 and 18 of an
+    // ordinary round; treating it as the authority keeps the hole exactly as it
+    // was played. It also closes the bug this stamp was added for — a lone call
+    // can no longer become somebody else's, because it stays attached to the
+    // player who made it.
+    //
+    // ONLY WHERE THE WOLF IS ACTUALLY PROVISIONAL. Inside the rotation the
+    // assignment is fixed by config and hole index and cannot legitimately
+    // move, so a stamp there tells us nothing the rotation doesn't — and
+    // letting one override it would hand a corrupted log the power to rewrite
+    // whose tee it was. The stamp must also name a CURRENT player; picks
+    // written before MAI-84 carry none and keep the derived wolf.
+    const declared = idx < rotationHoles ? undefined : declaredBy.get(hole)
+    const wolfId =
+      declared !== undefined && playerIds.includes(declared) ? declared : derivedWolf
+
+    // A partner pick must still name a current player other than this hole's
+    // wolf. That is the one way left to go stale — a roster change, or a pick
+    // made under a wolf the stamp doesn't vouch for (a pre-MAI-84 log, where
+    // the derived wolf can still move underneath it). Treat it as pending so
+    // the prompt re-appears, rather than computing a degenerate [wolf, wolf].
     const rawPick = picks.get(hole) ?? null
-    const pick =
+    const stale =
       rawPick?.kind === 'partner' &&
       (rawPick.partnerId === wolfId || !playerIds.includes(rawPick.partnerId))
-        ? null
-        : rawPick
+    const pick = stale ? null : rawPick
+
+    // Sides resolve as soon as the pick does — the scoring screen states them
+    // above the score rows while the hole is still being played (MAI-84).
+    const wolfSide: Uuid[] = pick
+      ? pick.kind === 'partner'
+        ? [wolfId, pick.partnerId]
+        : [wolfId]
+      : []
+    const packSide = playerIds.filter((id) => !wolfSide.includes(id))
+    const sides = pick ? { wolf: wolfSide, pack: packSide } : null
 
     if (!pick || !ctx.finalized(hole)) {
-      holeResults.push({ hole, wolfId, pick, points: null, outcome: 'pending' })
+      holeResults.push({ hole, wolfId, pick, sides, best: null, points: null, outcome: 'pending' })
       return
     }
 
-    const wolfSide: Uuid[] = pick.kind === 'partner' ? [wolfId, pick.partnerId] : [wolfId]
-    const packSide = playerIds.filter((id) => !wolfSide.includes(id))
-    // shared posted-only best ball: a side with no scores can't win
-    const wolfBest = ctx.bestNetAmongPosted(game.gameId, wolfSide, hole) ?? Infinity
-    const packBest = ctx.bestNetAmongPosted(game.gameId, packSide, hole) ?? Infinity
+    // shared posted-only best ball: a side with no scores can't win. The
+    // Infinity is a COMPARISON device and stays local to it — `best` keeps the
+    // honest null (see WolfHoleResult).
+    const posted = {
+      wolf: ctx.bestNetAmongPosted(game.gameId, wolfSide, hole),
+      pack: ctx.bestNetAmongPosted(game.gameId, packSide, hole),
+    }
+    const wolfBest = posted.wolf ?? Infinity
+    const packBest = posted.pack ?? Infinity
+    // NOBODY POSTED — which is the same statement as `!ctx.anyScored(hole)`,
+    // since the two sides between them are every player. This is NOT a halved
+    // hole, and calling it one was a claim about golf that never happened:
+    // `ctx.finalized` goes true for EVERY hole the moment the round completes,
+    // so a group finishing on the 12th had 13–18 reported as halved — in the
+    // ledger, in the standings sheet, and on the pinned bar (MAI-38).
+    //
+    // Pending is the one bucket that means "no result", so fixing it HERE fixes
+    // every consumer at once; guarding each narration channel separately is how
+    // the bar kept saying it after `holeSummary` was fixed. No money either way
+    // — this branch never touched `totals`.
     if (wolfBest === Infinity && packBest === Infinity) {
-      // zeros, not an empty map: `points` is documented as the swing BY PLAYER,
-      // and a halved hole where nobody posted is the same outcome as a halved
-      // hole where everybody tied. One of them answering `undefined` to
-      // `points.get(id)` is a trap for the first consumer to trust the doc.
-      holeResults.push({
-        hole,
-        wolfId,
-        pick,
-        points: new Map(playerIds.map((id) => [id, 0])),
-        outcome: 'halved',
-      })
+      holeResults.push({ hole, wolfId, pick, sides, best: null, points: null, outcome: 'pending' })
       return
     }
 
@@ -171,16 +234,24 @@ function derive(
       // 3/5-player variants would need this rule generalised first. That pairing
       // is load-bearing, so `wolf.test.ts` asserts the holes balance at every
       // player count `validateSetup` accepts — raise the cap and it fails.
-      const sides = { a: wolfSide, b: packSide }
+      const stakeSides = { a: wolfSide, b: packSide }
       const sign = wolfBest < packBest ? 1 : -1
-      const wolfShare = sideStake(units, sides, 'a')
-      const packShare = sideStake(units, sides, 'b')
+      const wolfShare = sideStake(units, stakeSides, 'a')
+      const packShare = sideStake(units, stakeSides, 'b')
       for (const id of wolfSide) points.set(id, sign * wolfShare)
       for (const id of packSide) points.set(id, -sign * packShare)
     }
 
     for (const [id, p] of points) totals.set(id, totals.get(id)! + p)
-    holeResults.push({ hole, wolfId, pick, points, outcome })
+    holeResults.push({
+      hole,
+      wolfId,
+      pick,
+      sides,
+      best: posted,
+      points,
+      outcome,
+    })
   })
 
   // A point IS a stake here, so money is the swing at face value — no gap
@@ -243,73 +314,230 @@ function derive(
   )
   const summary = summaryString(summaryParts)
 
+  // THE WOLF SIDE, marked. `(W)` for an ordinary partnered hole; the pixel wolf
+  // for lone and the same wolf in shades for blind — each followed by the word,
+  // because a 16px picture cannot teach what "blind" costs (core/glyphs.ts).
+  /**
+   * THE WOLF WEARS THE WOLF. One mark, always on the player who holds the tee —
+   * the pixel wolf, or the same wolf in shades once they call blind. It used to
+   * be `(W)` for a partnered hole and a glyph only for solo ones, which meant
+   * the same fact was written two ways and the picture only showed up on the
+   * quarter of holes somebody went alone.
+   *
+   * ATTACHED TO THE NAME, never leading the line: on a partnered hole the side
+   * is two players, and a mark in front of the pair leaves "which of these two
+   * called it?" answerable only by knowing `sides.wolf` puts the wolf first.
+   * The mode word still rides along for solo picks — a 16px graphic cannot
+   * teach what blind costs (core/glyphs.ts).
+   */
+  const wolfSideLabel = (r: WolfHoleResult): string => {
+    const kind = r.pick!.kind
+    const [w, ...rest] = r.sides!.wolf
+    const mark = kind === 'blind' ? glyph('wolf-shades') : glyph('wolf')
+    const wolf = `${nameOf.get(w!)} ${mark}`
+    return kind === 'partner'
+      ? `${wolf}${rest.length > 0 ? ` & ${joinNames(rest, nameOf)}` : ''}`
+      : `${wolf} (${kind})`
+  }
+  const packLabel = (r: WolfHoleResult): string => joinNames(r.sides!.pack, nameOf)
+  /** The teams, as the scoring screen stacks them above the score rows. */
+  const teamLines = (r: WolfHoleResult): string[] => [wolfSideLabel(r), 'vs.', packLabel(r)]
+
   // The wolf must decide on any hole that's being scored (or is next up) and
   // has no pick yet — a blocking chip, since the hole can't compute without it.
+  //
+  // AND THE ANSWERED ONES STAY (MAI-84). The teams used to vanish the moment
+  // they were picked, leaving no way to see them and no way to fix a mistap.
+  // An answered request carries `answered`, which the screen renders as a quiet
+  // statement with an Adjust affordance rather than a gold interrupt.
+  const frontier = ctx.holesPlayed.find(
+    (h) => !playerIds.every((id) => ctx.gross.get(id)?.get(h) !== undefined),
+  )
   const requiredInputs = (): InputRequest[] => {
     const inputs: InputRequest[] = []
     for (const r of holeResults) {
-      if (r.pick) continue
-      const anyScore = playerIds.some((id) => ctx.gross.get(id)?.get(r.hole) !== undefined)
-      const frontier = ctx.holesPlayed.find(
-        (h) => !playerIds.every((id) => ctx.gross.get(id)?.get(h) !== undefined),
-      )
-      if (!anyScore && r.hole !== frontier) continue
+      // NOTHING TO SAY ABOUT A HOLE NOBODY PLAYED, once the round is over —
+      // answered or not. A group walking in on the 12th would otherwise be
+      // asked about the 13th, or shown teams for it if someone had pre-picked
+      // off the tee before they quit. Same fabrication `derive` refuses further
+      // up (MAI-38).
+      if (ctx.completed && !ctx.anyScored(r.hole)) continue
+      if (!r.pick) {
+        // the frontier pre-prompt is "the tee you are standing on"
+        if (!ctx.anyScored(r.hole) && r.hole !== frontier) continue
+      }
       const wolfName = nameOf.get(r.wolfId)
       inputs.push({
         id: `wolf-pick-${r.hole}`,
         gameId: game.gameId,
         hole: r.hole,
-        prompt: `🐺 Hole ${r.hole}: ${wolfName} rides with…`,
+        prompt: `${glyph('wolf')} Hole ${r.hole}: ${wolfName} rides with…`,
+        // every option carries the wolf it was offered under, so a pick can be
+        // recognised as stale when a score correction reassigns the wolf
         options: [
           ...playerIds
             .filter((id) => id !== r.wolfId)
-            .map((id) => ({ value: id, label: nameOf.get(id)! })),
-          { value: 'lone', label: 'Lone Wolf 🐺' },
-          { value: 'blind', label: 'Blind Wolf 🙈' },
+            .map((id) => ({ value: id, label: nameOf.get(id)!, data: { wolf: r.wolfId } })),
+          { value: 'lone', label: `${glyph('wolf')} Lone Wolf`, data: { wolf: r.wolfId } },
+          {
+            value: 'blind',
+            label: `${glyph('wolf-shades')} Blind Wolf`,
+            data: { wolf: r.wolfId },
+          },
         ],
         eventKind: 'wolf/pick',
+        ...(r.pick && {
+          answered: {
+            value: r.pick.kind === 'partner' ? r.pick.partnerId : r.pick.kind,
+            lines: teamLines(r),
+          },
+        }),
       })
     }
     return inputs
   }
 
+  const isNet = game.handicap?.mode === 'net'
+  const scoreTag = (n: number) => (isNet ? `net ${n}` : `${n}`)
+  /**
+   * THE BALL THAT WON IT, and who owned it.
+   *
+   * One player made the low score: "Benjamin's net 4" — the FULL name, like the
+   * rest of the sentence. `firstName` is for the bar's compact chips, and two
+   * Mikes in a foursome is an ordinary Saturday, where "Mike Ross & Mike Doyle
+   * win with Mike's 4" names nobody.
+   *
+   * SEVERAL MADE IT and the possessive is a half-truth, so the sentence says
+   * what is actually true instead — the side's low ball was shared. Dropping
+   * the possessive and leaving the bare score was the first attempt, and it
+   * left a sentence with a hole in it: "…beat John & Grant — net 3".
+   *
+   * A lone wolf is the only player on their side, so neither applies: "B wins
+   * with B's 3" would just say B twice.
+   */
+  const lowBall = (side: readonly Uuid[], best: number, hole: number): string => {
+    const tag = scoreTag(best)
+    if (side.length < 2) return tag
+    const at = side.filter((id) => ctx.netFor(game.gameId, id, hole) === best)
+    return at.length === 1 ? `${nameOf.get(at[0]!)}'s ${tag}` : `matching ${tag}s`
+  }
+
+  /**
+   * ONE SENTENCE, then the cause. It used to enumerate every player's swing —
+   * which the money ledger prints again as cash directly underneath, and the
+   * standings sheet prints again as points above, so each name appeared three
+   * times on one card (MAI-84). The ledger's own delta row is the movement; the
+   * narration's job is to say who won the hole and with what.
+   */
   const holeSummary = (hole: number): string[] => {
     const r = holeResults.find((h) => h.hole === hole)
     if (!r) return []
-    const wolfName = nameOf.get(r.wolfId)
-    if (r.outcome === 'pending') return [`Wolf: ${wolfName}`]
-    const pickLabel =
-      r.pick!.kind === 'partner'
-        ? `with ${nameOf.get(r.pick!.partnerId)}`
-        : r.pick!.kind === 'lone'
-          ? 'lone'
-          : 'blind'
-    if (r.outcome === 'halved') return [`Wolf ${wolfName} (${pickLabel}) — halved`]
-    // BOTH sides. Under the old score table a losing wolf simply scored 0, so
-    // listing gains alone lost nothing; now they pay the hole's whole swing —
-    // a blind loss is nine stakes — and a ledger that shows "A +3, B +3, C +3"
-    // without D's −9 is exactly the "reader has to ask why" this convention
-    // exists to prevent.
-    const swing = (p: number) => `${p > 0 ? '+' : ''}${p}`
-    const movement = [...r.points!.entries()]
-      .filter(([, p]) => p !== 0)
-      .sort((x, y) => y[1] - x[1])
-      .map(([id, p]) => `${nameOf.get(id)} ${swing(p)}`)
-      .join(', ')
-    const lines = [`Wolf ${wolfName} (${pickLabel}) — ${movement}`]
-    // explain the elevated points behind a solo pick
-    // say what the multiplier DID — the swing is double or triple a partnered
-    // hole, and that is the whole reason these numbers look different
-    if (r.pick!.kind === 'lone') {
-      lines.push('↳ lone wolf — the hole doubles, and he plays it against all three')
+    // ONCE THE ROUND IS OVER A HOLE NOBODY PLAYED HAS NOTHING TO SAY. Mid-round
+    // the line is useful on an unplayed hole — "Wolf: C" is whose tee you are
+    // walking to — but after the group has walked in there is no tee to walk
+    // to, and the standings sheet would state teams for a hole that never
+    // happened. `buildHoleLedger` gates on `hasScore`; this is the same rule,
+    // put where every consumer gets it (MAI-38).
+    if (ctx.completed && !ctx.anyScored(hole)) return []
+    // Pending covers a hole nobody played, because `derive` files it that way
+    // rather than as a halve — see the nobody-posted branch.
+    if (r.outcome === 'pending') {
+      // `vs.` with the stop, the same token `teamLines` stacks — the ledger and
+      // the scoring panel state the same two sides and must not word it twice.
+      return r.sides
+        ? [`${wolfSideLabel(r)} vs. ${packLabel(r)}`]
+        : [`Wolf: ${nameOf.get(r.wolfId)}`]
     }
-    if (r.pick!.kind === 'blind') {
-      lines.push('↳ blind wolf — called before any tee shot, so the hole triples')
+    // No cause line: nothing moved, so the multiplier did nothing to explain —
+    // and the label already carries the word "(lone)" / "(blind)". A halve is
+    // two EQUAL posted balls, so both sides posted; the nobody-posted case is
+    // filed as pending and the guard above already took it.
+    if (r.outcome === 'halved') {
+      const at = r.best?.wolf != null ? ` at ${scoreTag(r.best.wolf)}` : ''
+      return [`${wolfSideLabel(r)} — halved${at}`]
     }
-    return lines
+    const kind = r.pick!.kind
+    // The multiplier is why these numbers look unlike a partnered hole's. It no
+    // longer has to name the wolf — the headline always does now, with the mode
+    // in the label — so this says only the part the label can't.
+    const cause =
+      kind === 'lone'
+        ? ['↳ lone wolf — the hole doubles']
+        : kind === 'blind'
+          ? ['↳ blind wolf — the hole triples']
+          : []
+    const wolfWon = r.outcome === 'wolfWin'
+    const side = wolfWon ? r.sides!.wolf : r.sides!.pack
+    // The WINNING side's ball is never null — a side that posted nothing
+    // compares as Infinity and cannot have won.
+    const best = (wolfWon ? r.best!.wolf : r.best!.pack)!
+    const won = lowBall(side, best, hole)
+    // THE WOLF IS NAMED ON EVERY DECIDED HOLE. Winners lead either way, but a
+    // pack win has no wolf in it, and dropping them there left roughly a
+    // quarter of holes unable to say whose hole it was — the two losing names
+    // are in the money row, with nothing marking which of them called it. The
+    // wolf-win and halved lines never had this problem; only this one did.
+    // "with" in both shapes, not a dash in one of them: the pack-win line is
+    // the same sentence with the losing side named, and swapping the joiner
+    // made it read like an afterthought rather than the reason.
+    return wolfWon
+      ? [`${wolfSideLabel(r)} ${side.length === 1 ? 'wins' : 'win'} with ${won}`, ...cause]
+      : [`${packLabel(r)} beat ${wolfSideLabel(r)} with ${won}`, ...cause]
   }
 
-  return { standings, summary, summaryParts, holeSummary, requiredInputs, settlement }
+  /**
+   * A HOLE THAT WAS PLAYED AND NEVER DECLARED PAYS NOTHING, and until now the
+   * only place that said so was the hole's own panel — one hole out of
+   * eighteen, on a screen you have to already be standing on.
+   *
+   * TWO REASONS A HOLE HAS NO PICK, and the note must not confuse them. Nobody
+   * declared, or a declaration was DROPPED as stale — a partner pick naming
+   * this hole's own wolf, which is reachable on a pre-MAI-84 log whose derived
+   * wolf has since moved. Telling that group "no wolf declared" would be a
+   * false statement about something they did do, so the log itself decides
+   * which sentence is true: `picks` still holds the event even when `pick` was
+   * refused.
+   *
+   * `notes` is the round-level channel for exactly this, it renders on both the
+   * standings sheet and the settle screen, and it is NOT money (MAI-40), so the
+   * "No money moved." signal stays honest.
+   *
+   * ONLY ONCE THE ROUND IS OVER, which is the same rule CTP's dead money
+   * follows and for the same reason: `ctx.finalized` goes true the moment the
+   * last score lands, so a hole would report itself dead while the group is
+   * still standing on that tee with the prompt in front of them. A thing is
+   * missing exactly when it can no longer be supplied — and by then the money
+   * is final, the settle screen is what they are looking at, and Reopen is the
+   * answer. Holes nobody played are skipped: they have nothing to lose.
+   *
+   * Plain text — `notes` is one of the channels no screen decodes, so a glyph
+   * here would reach the share card's painter as a literal token.
+   */
+  const missed = ctx.completed
+    ? holeResults.filter((r) => !r.pick && ctx.anyScored(r.hole))
+    : []
+  const holeList = (holes: number[]) =>
+    `${holes.length === 1 ? 'Hole' : 'Holes'} ${holes.join(', ')}`
+  const never = missed.filter((r) => !picks.has(r.hole)).map((r) => r.hole)
+  const dropped = missed.filter((r) => picks.has(r.hole)).map((r) => r.hole)
+  const notes = [
+    ...(never.length > 0
+      ? [`${holeList(never)}: no wolf declared — nothing settled there.`]
+      : []),
+    ...(dropped.length > 0
+      ? [`${holeList(dropped)}: the wolf pick names no valid partner — nothing settled there.`]
+      : []),
+  ]
+
+  return {
+    standings,
+    summary,
+    summaryParts,
+    holeSummary,
+    requiredInputs,
+    settlement,
+    ...(notes.length > 0 && { notes }),
+  }
 }
 
 /** The one name for this game — `meta.name` and every message that has to
@@ -386,6 +614,8 @@ export const wolfEngine: GameEngine<WolfConfig> = {
     'wolf/pick': z.object({
       hole: z.number().int().min(1).max(18),
       choice: z.string(),
+      /** who was the wolf when this was recorded — absent on pre-MAI-84 picks */
+      wolf: z.string().optional(),
     }),
   },
   derive,

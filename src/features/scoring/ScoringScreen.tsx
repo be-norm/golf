@@ -23,6 +23,7 @@ import { AwardGrid } from './AwardGrid'
 import { Sheet } from '../../components/Sheet'
 import { GameSummary, SummaryParts, type SummaryPart } from '../../components/GameSummary'
 import { DetailLines } from '../../components/DetailLines'
+import { GlyphText } from '../../components/GlyphText'
 import { BigButton } from '../../components/BigButton'
 import { enqueuePushRound } from '../../remote/outbox'
 import { LOCAL_USER } from '../../db/ids'
@@ -52,6 +53,14 @@ export function ScoringScreen() {
   const [standingsOpen, setStandingsOpen] = useState(false)
   const [rulesFor, setRulesFor] = useState<string>()
   const [actionsOpen, setActionsOpen] = useState(false)
+  // which answered input has its picker open — `${gameId}:${input.id}`
+  const [adjustingId, setAdjustingId] = useState<string>()
+  // What was last SENT per input, so "this answer is already in effect" steps
+  // from intent rather than from a derivation that lags the write by an append,
+  // a live query and a re-derive. Without it, answering and then reverting
+  // inside that window compares against the OLD answer and drops the revert
+  // silently. Owned by identity and released by event id — see `answerInput`.
+  const sentAnswerRef = useRef<Map<string, { value: string; id: string | undefined }>>(new Map())
   // event ids already sent for retraction — see `giveBack`
   const undoneRef = useRef<Set<string>>(new Set())
   // event key → the id it was written as, or undefined while still in flight.
@@ -93,6 +102,15 @@ export function ScoringScreen() {
         sentPuttsRef.current.delete(key)
       }
     }
+    // Same rule, same reason — and here the alternative was actively wrong:
+    // an answer can land and never come back as `answered` (a pick the engine
+    // then reads as stale), so waiting for the derivation to report it would
+    // strand the entry and make re-declaring that option a silent no-op.
+    for (const [key, sent] of sentAnswerRef.current) {
+      if (sent.id !== undefined && view.events.some((e) => e.id === sent.id)) {
+        sentAnswerRef.current.delete(key)
+      }
+    }
   }, [view])
 
   // Initial hole, captured ONCE when the view first loads: ?hole= deep link
@@ -113,11 +131,15 @@ export function ScoringScreen() {
     }
   }
 
-  const pendingInputs = useMemo(() => {
+  // Every hole decision the games are asking for OR have on record — an
+  // answered one stays in the list carrying `answered` (catalog.ts), so this is
+  // no longer "pending". Anything that wants only the blocking ones filters on
+  // `!answered`, the way `openActions` filters on `!taken` below.
+  const inputs = useMemo(() => {
     if (!view) return []
-    const inputs: InputRequest[] = []
-    for (const d of view.derivations.values()) inputs.push(...d.requiredInputs())
-    return inputs
+    const all: InputRequest[] = []
+    for (const d of view.derivations.values()) all.push(...d.requiredInputs())
+    return all
   }, [view])
 
   // Optional actions (Nassau presses). Surfaced only while the scorekeeper is
@@ -203,7 +225,7 @@ export function ScoringScreen() {
         sideGames.flatMap((g) => derivations.get(g.gameId) ?? []),
       )
     : []
-  const holeInputs = pendingInputs.filter((i) => i.hole === currentHole)
+  const holeInputs = inputs.filter((i) => i.hole === currentHole)
 
   // Deliberately NOT a useMemo: `currentHole` is derived below the early
   // returns, so keying a hook on it would mean moving one or the other. It is a
@@ -233,6 +255,14 @@ export function ScoringScreen() {
   const anyScored = round.players.some((p) =>
     ctx.holesPlayed.some((h) => ctx.gross.get(p.playerId)?.get(h) !== undefined),
   )
+
+  // Walking to another tee puts the picker away. Its key is hole-scoped, so an
+  // Adjust left open on 5 would still be open on the way back to 5 — a stale
+  // expansion over teams the group settled two holes ago.
+  const goToHole = (hole: number) => {
+    setAdjustingId(undefined)
+    setHole(hole)
+  }
 
   const setScore = (playerId: string, gross: number) => {
     void eventStore.append(round.id, [{ type: 'score/set', playerId, hole: currentHole, gross }])
@@ -330,35 +360,30 @@ export function ScoringScreen() {
 
   /**
    * ONE TAP, ONE EVENT — for every control that emits a game event and then
-   * SURVIVES ITS OWN TAP, which is all of them except the actions row (whose
-   * sheet closes underneath it). An award cell, an input chip: both stay
-   * mounted until a re-derive replaces them, so two taps inside one frame both
-   * fire against stale props and append the same event twice. Replay shrugs —
-   * every reducer here is last-write-wins — but the log is append-only and
-   * syncs, so the duplicate outlives the round in every export and archive, and
-   * the first game to COUNT its events rather than treat them as a set would
-   * double-pay on a fumbled tap.
+   * SURVIVES ITS OWN TAP — an award cell and a press row stay mounted until a
+   * re-derive replaces them, so two taps inside one frame both fire against
+   * stale props and append the same event twice. Replay shrugs — every reducer
+   * here is last-write-wins — but the log is append-only and syncs, so the
+   * duplicate outlives the round in every export and archive, and the first
+   * game to COUNT its events rather than treat them as a set would double-pay
+   * on a fumbled tap.
    *
-   * THE KEY IS THE EVENT — the whole payload, not the control that emitted it.
-   * Three review rounds narrowed it to that, each time by finding one more
-   * thing the identity had to include:
+   * THE CALLERS ARE `take` AND `takeAction` — the two `GameEventOffer` channels.
+   * The input channel used to come through here too and no longer does: an
+   * input has ONE answer at a time, so "is this answer already in effect?" is
+   * both the stronger guard and the one that has to be asked anyway, and
+   * `answerInput` owns that. (This guard also has a silent third no-write path
+   * — the early return below — with no rollback behind it, which is what
+   * stranded the intent map when the two were layered.)
    *
-   * - The GAME. `GameEventOffer.id` and `InputRequest.id` are unique only
-   *   WITHIN a game (an engine cannot see its siblings) and a round can hold
-   *   two instances of one game (MAI-44), so two CTPs both mint `ctp-4-p-ann`.
-   * - For an input, the ANSWER. One `InputRequest` renders a row of options and
-   *   they are alternatives, not repeats: a slip-tap on a Wolf partner followed
-   *   at once by the intended Lone Wolf must keep LONE. Deduping is for the
-   *   same answer twice; changing your mind gets through, and replay's
-   *   last-write-wins is what makes that correct.
-   * - And the option's own `data`, which is exactly what a future game will use
-   *   to tell two options apart (BBB's three points, a hammer's multiplier) —
-   *   two options sharing a `value` and differing only there are different
-   *   answers.
+   * THE KEY IS THE EVENT — the whole payload, not the control that emitted it,
+   * which makes two things true by construction rather than by remembered rule:
    *
-   * Keying on the payload makes all three true by construction rather than by
-   * three remembered rules, and there is nothing left for a fourth to miss:
-   * identical payload = the same event = a duplicate.
+   * - The GAME. `GameEventOffer.id` is unique only WITHIN a game (an engine
+   *   cannot see its siblings) and a round can hold two instances of one game
+   *   (MAI-44), so two CTPs both mint `ctp-4-p-ann`.
+   * - And the offer's own `data`, so two offers differing only there stay
+   *   distinct.
    *
    * RELEASED WHEN THE EVENT IS ACTUALLY VISIBLE IN A DERIVATION, which is what
    * the guard is about and is NOT the same as the append resolving. With two
@@ -384,17 +409,69 @@ export function ScoringScreen() {
       .catch(() => takingRef.current.delete(key))
   }
 
-  // An option's own `data` rides UNDER `{ hole, choice }`, never over it: those
-  // two are the channel's contract, and an option disagreeing with the prompt
-  // it was rendered beneath is a bug rather than a feature (MAI-46).
+  /**
+   * ONE ANSWER PER INPUT, and the guard is the ANSWER IN EFFECT rather than the
+   * payload — which is why this channel does its own append instead of going
+   * through `emitOnce`.
+   *
+   * `emitOnce` asks "is this exact event already in flight?". That is the right
+   * question for a cell you can only toggle, and the weaker version of the
+   * question here: an input has ONE answer at a time, so a tap on the option
+   * already in effect must write nothing whether or not anything is in flight.
+   * Asking it this way subsumes the duplicate guard — two taps on Lone Wolf in
+   * one frame are the same answer twice — and drops `emitOnce`'s third silent
+   * no-write path, the synchronous already-in-flight `return`, which had no
+   * rollback and stranded the intent behind it: Bob → Cal → Bob before any
+   * re-derive left the log at Cal while this map said Bob, after which tapping
+   * Bob was a permanent no-op.
+   *
+   * OWNERSHIP IS THE ENTRY OBJECT, released when its event turns up in the log
+   * (`sentPutts`'s rule, same effect). Releasing on "the derivation reports this
+   * answer" instead looks equivalent and is not: an answer can land and never be
+   * reported back. Wolf's own staleness rule does exactly that — a score
+   * correction that reassigns the wolf nulls the pick — and an entry waiting on
+   * a value that will never arrive makes re-declaring that option impossible
+   * while the prompt sits there looking live.
+   *
+   * `value` is the answer's identity because the channel says so:
+   * `InputRequest.answered.value` is "the option in effect", so two options
+   * sharing a value could not be told apart by the engine either.
+   *
+   * An option's own `data` rides UNDER `{ hole, choice }`, never over it: those
+   * two are the channel's contract, and an option disagreeing with the prompt
+   * it was rendered beneath is a bug rather than a feature (MAI-46).
+   */
   const answerInput = (input: InputRequest, option: InputRequest['options'][number]) => {
-    emitOnce({
-      type: 'game/event',
-      gameId: input.gameId,
-      kind: input.eventKind,
-      data: { ...option.data, hole: input.hole, choice: option.value },
-    })
+    const key = `${input.gameId}:${input.id}`
+    const entry: { value: string; id: string | undefined } = {
+      value: option.value,
+      id: undefined,
+    }
+    const owns = () => sentAnswerRef.current.get(key) === entry
+    sentAnswerRef.current.set(key, entry)
+    void eventStore
+      .append(round.id, [
+        {
+          type: 'game/event',
+          gameId: input.gameId,
+          kind: input.eventKind,
+          data: { ...option.data, hole: input.hole, choice: option.value },
+        },
+      ])
+      .then(([event]) => {
+        if (!owns()) return
+        // nothing written means nothing is coming to release this
+        if (event) entry.id = event.id
+        else sentAnswerRef.current.delete(key)
+      })
+      .catch(() => {
+        if (owns()) sentAnswerRef.current.delete(key)
+      })
   }
+
+  /** The answer in effect for this input — what was SENT, else what derived. */
+  const answerFor = (input: InputRequest): string | undefined =>
+    sentAnswerRef.current.get(`${input.gameId}:${input.id}`)?.value ?? input.answered?.value
 
   // The write half both optional channels share (GameEventOffer): take it and
   // one game event lands; give it back and its events are retracted. An award
@@ -478,7 +555,7 @@ export function ScoringScreen() {
         <HoleArrow
           dir="prev"
           disabled={holeIdx <= 0}
-          onClick={() => setHole(ctx.holesPlayed[holeIdx - 1]!)}
+          onClick={() => goToHole(ctx.holesPlayed[holeIdx - 1]!)}
         />
         <AnimatePresence mode="popLayout" initial={false}>
           <motion.div
@@ -509,31 +586,147 @@ export function ScoringScreen() {
         <HoleArrow
           dir="next"
           disabled={holeIdx >= ctx.holesPlayed.length - 1}
-          onClick={() => setHole(ctx.holesPlayed[holeIdx + 1]!)}
+          onClick={() => goToHole(ctx.holesPlayed[holeIdx + 1]!)}
         />
       </section>
 
+      {/* The blocking channel, in both of its states (MAI-84). UNANSWERED is a
+          gold interrupt — the hole cannot settle without it. ANSWERED stays on
+          screen as a quiet statement of what it recorded, because a decision
+          that vanishes is one you can neither read back nor fix: Wolf's teams
+          were invisible the moment they were picked, and a mistapped partner
+          was only reachable while it was still the round's last event.
+
+          Gold is reserved for "act now" throughout the app, so the answered
+          panel is deliberately the neutral card treatment. */}
       {holeInputs.length > 0 && (
         <section className="mb-2 space-y-2.5">
-          {holeInputs.map((input) => (
-            <div key={input.id} className="pixel border-coin-500 bg-coin-500/10 p-3">
-              <p className="mb-2 text-lg text-coin-400">
-                <span className="animate-blink">▶ </span>
-                {input.prompt}
-              </p>
-              <div className="flex flex-wrap gap-2.5">
-                {input.options.map((o) => (
-                  <button
-                    key={o.value}
-                    onClick={() => answerInput(input, o)}
-                    className="pixel-press border-stone-600 bg-stone-800 px-4 py-2.5 text-lg"
+          {holeInputs.map((input) => {
+            // Composed with gameId: an offer's id is unique only WITHIN a game
+            // (catalog.ts), and two Wolfs at different stakes both mint
+            // `wolf-pick-5` — one key would collapse them into one row and one
+            // expanded picker.
+            const key = `${input.gameId}:${input.id}`
+            // A COMPLETED ROUND IS READ-ONLY HERE, answered or not — the same
+            // gate `AwardGrid` takes below, and for a sharper reason than
+            // consistency: nothing re-pushes a round because its log grew.
+            // `finish()` pushes the snapshot it takes at that moment, and the
+            // only other pushes are claim-on-login (`remote/sync.ts`) and the
+            // diagnostics screen — neither of which a scorekeeper walks
+            // through. So an answer recorded after the round is settled changes
+            // the money on this device and can never reach `round_archives`.
+            // The synced copy keeps the old numbers and a reinstatement
+            // restores them. Reopen → record → Finish is the flow that pushes,
+            // which is exactly why the picker must not offer a shortcut past
+            // it. Gating only `Adjust` (the first attempt) left the asymmetry
+            // of a settled round refusing to REVISE a pick while happily
+            // accepting a new one.
+            const open = !roundOver && (!input.answered || adjustingId === key)
+            // Two Wolfs at different stakes put two of these on one hole, and
+            // "Ann rides with…" twice over says nothing about which. Named only
+            // then — a label over the single panel of a one-game round is noise.
+            // Same answer `AwardGrid` reached with its `gameName` prop.
+            const sibling = holeInputs.some((o) => o.gameId !== input.gameId)
+            const label = sibling
+              ? gameLabel(
+                  round.games.find((g) => g.gameId === input.gameId)!,
+                  round.games,
+                )
+              : ''
+            return (
+              <div
+                key={key}
+                className={`pixel p-3 ${
+                  input.answered || roundOver
+                    ? 'border-stone-700 bg-stone-900/70'
+                    : 'border-coin-500 bg-coin-500/10'
+                }`}
+              >
+                {label && (
+                  <h3
+                    className={`font-display mb-1.5 text-[10px] uppercase ${
+                      input.answered || roundOver ? 'text-stone-400' : 'text-coin-500'
+                    }`}
                   >
-                    {o.label}
-                  </button>
-                ))}
+                    {label}
+                  </h3>
+                )}
+                {input.answered ? (
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      {input.answered.lines.map((line, i) => (
+                        <p key={i} className="text-lg leading-snug">
+                          <GlyphText text={line} />
+                        </p>
+                      ))}
+                    </div>
+                    {/* A settled round STATES its teams and does not revise
+                        them — read-only is still pure gain, since before this
+                        they vanished on tap and a finished round showed
+                        nothing at all. */}
+                    {!roundOver && (
+                      <button
+                        onClick={() => setAdjustingId(open ? undefined : key)}
+                        className="pixel-press font-display shrink-0 border-stone-600 bg-stone-800 px-3 py-2 text-[10px] uppercase text-stone-300"
+                      >
+                        Adjust
+                      </button>
+                    )}
+                  </div>
+                ) : roundOver ? (
+                  // Still worth SAYING on a settled round — this hole never got
+                  // its pick, which is why its money reads the way it does. But
+                  // the answer has to arrive through Reopen, or it lands only
+                  // on this device (see `open` above).
+                  <>
+                    <p className="text-lg text-stone-300">
+                      <GlyphText text={input.prompt} />
+                    </p>
+                    <p className="mt-1 text-stone-500">Reopen the round to record it.</p>
+                  </>
+                ) : (
+                  <p className="mb-2 text-lg text-coin-400">
+                    <span className="animate-blink">▶ </span>
+                    <GlyphText text={input.prompt} />
+                  </p>
+                )}
+                {open && (
+                  <div className={`flex flex-wrap gap-2.5 ${input.answered ? 'mt-3' : ''}`}>
+                    {input.options.map((o) => (
+                      <button
+                        key={o.value}
+                        onClick={() => {
+                          // only THIS input's picker — a sibling game's open
+                          // one is not ours to close
+                          setAdjustingId((cur) => (cur === key ? undefined : cur))
+                          // Re-picking what is ALREADY in effect must write
+                          // nothing — inert in replay (last write wins) but
+                          // permanent in an append-only log that syncs and
+                          // exports. Resolved in the HANDLER, from what was
+                          // SENT, because a ref must not be read during render.
+                          if (o.value !== answerFor(input)) answerInput(input, o)
+                        }}
+                        // The highlight reads the DERIVED answer, so it can lag
+                        // the guard above by one re-derive: reopen the picker
+                        // inside that window and the previous option is still
+                        // lit. Deliberate — the write is always right, the
+                        // wrong pixel corrects itself, and mirroring the intent
+                        // into state to fix it would put the answer in two
+                        // places, which is the drift this file keeps out.
+                        className={`pixel-press px-4 py-2.5 text-lg ${
+                          o.value === input.answered?.value
+                            ? 'border-felt-500 bg-felt-900'
+                            : 'border-stone-600 bg-stone-800'
+                        }`}
+                      >
+                        <GlyphText text={o.label} />
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
-            </div>
-          ))}
+            )
+          })}
         </section>
       )}
 
@@ -671,6 +864,21 @@ export function ScoringScreen() {
                     <DetailLines lines={d.detailLines} />
                   </div>
                 )}
+                {/* WHAT JUST HAPPENED, THEN THE TOTALS (MAI-84). This used to
+                    sit under the player cards, so opening the sheet led with
+                    the running money and buried the hole you are standing on.
+                    Universal rather than Wolf-only: `holeSummary` is a per-hole
+                    recap by contract for every game.
+
+                    Still the hole ON SCREEN, not the latest DECIDED one — that
+                    is the pinned bar's job (`latestHoleSummary`). Walking back
+                    to 3 must recap 3. On the frontier, where the sheet is
+                    almost always opened, they are the same hole. */}
+                {d.holeSummary(currentHole).map((s) => (
+                  <p key={s} className="mb-2 text-lg text-stone-400">
+                    <GlyphText text={s} />
+                  </p>
+                ))}
                 {/* Name and money share the top line; the per-bet status gets
                     its own beneath. Squeezing all three into one row wrapped a
                     long name onto two lines and — worse — broke "-$5" between
@@ -706,11 +914,6 @@ export function ScoringScreen() {
                     </motion.li>
                   ))}
                 </ul>
-                {d.holeSummary(currentHole).map((s) => (
-                  <p key={s} className="mt-2 text-lg text-stone-400">
-                    {s}
-                  </p>
-                ))}
                 {/* A pot can die before anyone taps Finish — every hole scored
                     and the last one tied is enough (ctx.finalized). This is the
                     screen the group is looking at while deciding what's still

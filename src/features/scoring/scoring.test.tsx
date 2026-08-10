@@ -1000,8 +1000,9 @@ describe('ScoringScreen — input chips', () => {
     await waitFor(async () => {
       expect(await eventStore.list(round.id)).toHaveLength(1)
     })
-    // settle: a second identical pick would land here if the guard were absent
-    await screen.findByText(/Ann/)
+    // settle: a second identical pick would land here if the guard were absent.
+    // The teams block appearing is what says the answer landed.
+    await screen.findByText('vs.')
     expect(await eventStore.list(round.id)).toHaveLength(1)
   })
 
@@ -1035,10 +1036,300 @@ describe('ScoringScreen — input chips', () => {
       'p-bob',
       'lone',
     ])
-    // and the prompt is gone, so the hole computed on the corrected pick
+    // the picker collapses, so the hole computed on the corrected pick — and
+    // what replaces it states the teams that correction produced
     await waitFor(() => {
       expect(screen.queryByRole('button', { name: /Lone Wolf/ })).not.toBeInTheDocument()
     })
+    expect(screen.getByText(/Ann \(lone\)/)).toBeInTheDocument()
+  })
+
+  /**
+   * MAI-84. The teams used to vanish the instant they were picked: nothing on
+   * the scoring screen said who was partnered with whom, and a mistapped
+   * partner was only reachable while it was still the round's LAST event (the
+   * header undo retracts the tail of the log, whatever it is).
+   */
+  it('states the teams after the pick, with the picker collapsed', async () => {
+    await wolfRound('round-input-teams')
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Bob' }))
+
+    // Ann is the wolf on hole 1 and rides with Bob
+    await screen.findByText('Ann & Bob')
+    expect(screen.getByText('vs.')).toBeInTheDocument()
+    expect(screen.getByText('Cal & Dee')).toBeInTheDocument()
+    // the wolf mark rides EVERY pick, on the player holding the tee — and it is
+    // the plain wolf, since nobody has called blind
+    expect(document.querySelector('[data-glyph="wolf"]')).not.toBeNull()
+    expect(document.querySelector('[data-glyph="wolf-shades"]')).toBeNull()
+    // and the options are put away until asked for
+    expect(screen.queryByRole('button', { name: /Lone Wolf/ })).not.toBeInTheDocument()
+  })
+
+  it('reopens the picker on Adjust, with the current answer engaged', async () => {
+    const round = await wolfRound('round-input-adjust')
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Bob' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Adjust' }))
+
+    const bob = screen.getByRole('button', { name: 'Bob' })
+    expect(bob.className).toContain('border-felt-500')
+    expect(screen.getByRole('button', { name: 'Cal' }).className).not.toContain('border-felt-500')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cal' }))
+
+    await screen.findByText('Ann & Cal')
+    const events = await eventStore.list(round.id)
+    expect(events.map((e) => (e as { data: { choice: string } }).data.choice)).toEqual([
+      'p-bob',
+      'p-cal',
+    ])
+    // the picker closes again behind the corrected teams
+    expect(screen.queryByRole('button', { name: 'Adjust' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Cal' })).not.toBeInTheDocument()
+  })
+
+  /**
+   * `emitOnce` releases its key once the event lands, so a tap on the answer
+   * ALREADY in effect would otherwise append a second identical wolf/pick —
+   * inert in replay (last write wins) but permanent in an append-only log that
+   * syncs and exports.
+   */
+  it('writes nothing when the answer in effect is tapped again', async () => {
+    const round = await wolfRound('round-input-same')
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Bob' }))
+    await screen.findByText('Ann & Bob')
+    fireEvent.click(screen.getByRole('button', { name: 'Adjust' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Bob' }))
+
+    await screen.findByText('Ann & Bob')
+    expect(await eventStore.list(round.id)).toHaveLength(1)
+  })
+
+  /**
+   * BACK TO AN ANSWER ALREADY IN THE LOG, all inside one re-derive.
+   *
+   * The option row stays open until `answered` arrives, so Bob → Cal → Bob at
+   * the tee is ordinary indecision, not a fumble. The third tap's payload is
+   * byte-identical to the first, and while these went through `emitOnce` its
+   * key was still held — so it returned having written nothing, by a path with
+   * no rollback. The log stopped at Cal while the intent map said Bob, and
+   * because that map only released on the derivation REPORTING Bob, tapping Bob
+   * was a permanent silent no-op from then on: the panel kept saying Ann & Cal
+   * and the partner the group meant could not be restored.
+   */
+  it('takes a third tap back to the first answer, all before any re-derive', async () => {
+    const round = await wolfRound('round-input-there-and-back')
+
+    const bob = await screen.findByRole('button', { name: 'Bob' })
+    const cal = screen.getByRole('button', { name: 'Cal' })
+    fireEvent.click(bob)
+    fireEvent.click(cal)
+    fireEvent.click(bob)
+
+    await waitFor(async () => {
+      expect(await eventStore.list(round.id)).toHaveLength(3)
+    })
+    const events = await eventStore.list(round.id)
+    expect(events.map((e) => (e as { data: { choice: string } }).data.choice)).toEqual([
+      'p-bob',
+      'p-cal',
+      'p-bob',
+    ])
+    // last write wins, so the teams are the ones the third tap meant
+    await screen.findByText('Ann & Bob')
+  })
+
+  /**
+   * …and the guard must step from what was SENT, not from the derivation,
+   * which lags the write by an append, a live query and a re-derive. Comparing
+   * against `input.answered` meant that answering and then reverting inside
+   * that window read the OLD answer as "already in effect" and silently
+   * dropped the revert — the same class of bug the putts stepper documents at
+   * length, and the reason this file guards on intent everywhere else.
+   */
+  it('lets a revert through while the previous answer is still in flight', async () => {
+    const round = await wolfRound('round-input-revert')
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Bob' }))
+    await screen.findByText('Ann & Bob')
+    fireEvent.click(screen.getByRole('button', { name: 'Adjust' }))
+    // Cal, then straight back to Bob — no await between, so the panel still
+    // says Bob when the second tap lands
+    fireEvent.click(screen.getByRole('button', { name: 'Cal' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Adjust' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Bob' }))
+
+    await waitFor(async () => {
+      expect(await eventStore.list(round.id)).toHaveLength(3)
+    })
+    const events = await eventStore.list(round.id)
+    expect(events.map((e) => (e as { data: { choice: string } }).data.choice)).toEqual([
+      'p-bob',
+      'p-cal',
+      'p-bob',
+    ])
+    // and the teams the scorekeeper meant are the ones on screen
+    await screen.findByText('Ann & Bob')
+  })
+
+  /**
+   * Two Wolfs at different stakes is a supported round (MAI-44 —
+   * `duplicateInstanceProblems` blocks only IDENTICAL settings), and both mint
+   * `wolf-pick-1`. So the panels must be keyed on `${gameId}:${id}` (or React
+   * collapses them and one Adjust opens both) and they must SAY which stake
+   * they belong to, since "Ann rides with…" twice over names neither.
+   */
+  it('names the game when two of them ask on the same hole', async () => {
+    const round = makeRound({
+      players: makePlayers([{ name: 'Ann' }, { name: 'Bob' }, { name: 'Cal' }, { name: 'Dee' }]),
+      holes: 'front9',
+      games: [
+        { type: 'wolf', config: { pointCents: 100, rotation: ['p-ann', 'p-bob', 'p-cal', 'p-dee'] } },
+        { type: 'wolf', config: { pointCents: 500, rotation: ['p-ann', 'p-bob', 'p-cal', 'p-dee'] } },
+      ],
+    })
+    round.id = 'round-two-wolves'
+    await db.rounds.put(round)
+    render(
+      <RouterProvider
+        router={createMemoryRouter(routes, { initialEntries: [`/round/${round.id}`] })}
+      />,
+    )
+
+    // `gameLabel` earns a discriminator only for a repeated type (MAI-42)
+    expect(await screen.findAllByText('Wolf ($1)')).not.toHaveLength(0)
+    expect(screen.getAllByText('Wolf ($5)')).not.toHaveLength(0)
+    // two separate panels, each with its own options
+    expect(screen.getAllByRole('button', { name: /Lone Wolf/ })).toHaveLength(2)
+
+    // answering one leaves the other still asking
+    fireEvent.click(screen.getAllByRole('button', { name: 'Bob' })[0]!)
+    await screen.findByText('Ann & Bob')
+    expect(screen.getAllByRole('button', { name: /Lone Wolf/ })).toHaveLength(1)
+    expect(screen.getAllByRole('button', { name: 'Adjust' })).toHaveLength(1)
+  })
+
+  /**
+   * A settled round STATES its teams but does not revise them — the money has
+   * been shared and pushed. Same gate as `AwardGrid`, and Reopen is the path.
+   * But only the Adjust button: a pick that was never made is the one thing
+   * still missing from the card, so an unanswered prompt stays live.
+   */
+  it('states the teams on a completed round without offering to change them', async () => {
+    const round = makeRound({
+      players: makePlayers([{ name: 'Ann' }, { name: 'Bob' }, { name: 'Cal' }, { name: 'Dee' }]),
+      holes: 'front9',
+      games: [
+        { type: 'wolf', config: { pointCents: 100, rotation: ['p-ann', 'p-bob', 'p-cal', 'p-dee'] } },
+      ],
+    })
+    round.id = 'round-completed-teams'
+    await db.rounds.put(round)
+    await eventStore.append(round.id, [
+      { type: 'game/event', gameId: round.games[0]!.gameId, kind: 'wolf/pick', data: { hole: 1, choice: 'p-bob', wolf: 'p-ann' } },
+      { type: 'score/set', playerId: 'p-ann', hole: 1, gross: 4 },
+      { type: 'score/set', playerId: 'p-bob', hole: 1, gross: 4 },
+      { type: 'score/set', playerId: 'p-cal', hole: 1, gross: 5 },
+      { type: 'score/set', playerId: 'p-dee', hole: 1, gross: 5 },
+      { type: 'round/completed' },
+    ])
+    render(
+      <RouterProvider
+        router={createMemoryRouter(routes, {
+          initialEntries: [`/round/${round.id}?hole=1`],
+        })}
+      />,
+    )
+
+    // the teams are readable — before this they vanished on tap and a settled
+    // round showed nothing at all
+    await screen.findByText('Ann & Bob')
+    expect(screen.queryByRole('button', { name: 'Adjust' })).not.toBeInTheDocument()
+    // and the picker cannot be reached another way
+    expect(screen.queryByRole('button', { name: /Lone Wolf/ })).not.toBeInTheDocument()
+  })
+
+  /**
+   * An UNANSWERED pick on a settled round is worth saying — it is why that
+   * hole's money reads the way it does — but it must not be answerable here.
+   * `enqueuePushRound` runs in `finish()` and nowhere else, so a pick recorded
+   * now would move the money on this device only: the synced archive keeps the
+   * old numbers, and a reinstatement restores them. Reopen → record → Finish
+   * is the flow that pushes.
+   */
+  it('shows a missing pick on a completed round, but sends you to Reopen', async () => {
+    const round = makeRound({
+      players: makePlayers([{ name: 'Ann' }, { name: 'Bob' }, { name: 'Cal' }, { name: 'Dee' }]),
+      holes: 'front9',
+      games: [
+        { type: 'wolf', config: { pointCents: 100, rotation: ['p-ann', 'p-bob', 'p-cal', 'p-dee'] } },
+      ],
+    })
+    round.id = 'round-completed-unpicked'
+    await db.rounds.put(round)
+    // hole 1 scored, never picked, then the group walks in
+    await eventStore.append(round.id, [
+      { type: 'score/set', playerId: 'p-ann', hole: 1, gross: 4 },
+      { type: 'score/set', playerId: 'p-bob', hole: 1, gross: 4 },
+      { type: 'score/set', playerId: 'p-cal', hole: 1, gross: 5 },
+      { type: 'score/set', playerId: 'p-dee', hole: 1, gross: 5 },
+      { type: 'round/completed' },
+    ])
+    render(
+      <RouterProvider
+        router={createMemoryRouter(routes, { initialEntries: [`/round/${round.id}?hole=1`] })}
+      />,
+    )
+
+    expect(await screen.findByText(/Ann rides with/)).toBeInTheDocument()
+    expect(screen.getByText('Reopen the round to record it.')).toBeInTheDocument()
+    // no way to answer it from here — that would move money the archive can
+    // never learn about
+    expect(screen.queryByRole('button', { name: /Lone Wolf/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Bob' })).not.toBeInTheDocument()
+    expect(await eventStore.list(round.id)).toHaveLength(5)
+  })
+
+  /** The picture never carries the meaning alone (engine/core/glyphs.ts). */
+  it('draws the wolf in shades for a blind pick, beside the word', async () => {
+    await wolfRound('round-input-blind')
+
+    fireEvent.click(await screen.findByRole('button', { name: /Blind Wolf/ }))
+
+    await screen.findByText(/Ann \(blind\)/)
+    expect(document.querySelector('[data-glyph="wolf-shades"]')).not.toBeNull()
+  })
+
+  /**
+   * MAI-84. Opening the sheet used to lead with the running money and bury
+   * what had just happened underneath it. Universal rather than Wolf-only:
+   * `holeSummary` is a per-hole recap by contract for every game.
+   *
+   * Still the hole ON SCREEN, not the latest DECIDED one — recapping the hole
+   * you walked back to is the sheet's job; the latest decided hole is the
+   * pinned bar's.
+   */
+  it('leads the standings sheet with the hole recap, then the player cards', async () => {
+    const round = await wolfRound('round-sheet-order')
+    fireEvent.click(await screen.findByRole('button', { name: 'Bob' }))
+    await eventStore.append(round.id, [
+      { type: 'score/set', playerId: 'p-ann', hole: 1, gross: 4 },
+      { type: 'score/set', playerId: 'p-bob', hole: 1, gross: 5 },
+      { type: 'score/set', playerId: 'p-cal', hole: 1, gross: 5 },
+      { type: 'score/set', playerId: 'p-dee', hole: 1, gross: 5 },
+    ])
+
+    await userEvent.click(await screen.findByText(/Ann & Bob \+1/))
+
+    const recap = await screen.findByText(/win with Ann's/)
+    const firstCard = screen.getAllByText('+$1')[0]!
+    // the recap precedes the first player card in document order
+    expect(
+      recap.compareDocumentPosition(firstCard) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
   })
 })
 

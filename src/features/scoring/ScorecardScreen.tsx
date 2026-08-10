@@ -5,6 +5,7 @@ import { gameLabel } from '../../engine/label'
 import { formatCentsSigned } from '../../engine/core/money'
 import { primaryGame } from '../../lib/gameRoles'
 import { GameSummary } from '../../components/GameSummary'
+import { GlyphText } from '../../components/GlyphText'
 import { useRound } from './useRound'
 import { holeLoop, ordinal } from './holeLoop'
 
@@ -187,7 +188,7 @@ export function ScorecardScreen() {
                   <div className="min-w-0 flex-1">
                     {impact.summary.map((s) => (
                       <p key={s} className="text-lg leading-snug text-stone-200">
-                        {s}
+                        <GlyphText text={s} />
                       </p>
                     ))}
                     {impact.deltas.length > 0 && (
@@ -203,7 +204,7 @@ export function ScorecardScreen() {
                           ))}
                         </p>
                         <p className="mt-0.5 text-sm text-stone-500">
-                          now:{' '}
+                          TOTAL:{' '}
                           {round.players
                             .filter((p) => (impact.runningCents[p.playerId] ?? 0) !== 0)
                             .map(
