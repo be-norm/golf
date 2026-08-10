@@ -38,6 +38,16 @@ function configChips(engine: GameEngine, config: Record<string, unknown>): strin
     else if (f.kind === 'select') {
       const opt = f.options.find((o) => o.value === v)
       if (opt) chips.push(`${f.label}: ${opt.label}`)
+    } else if (f.kind === 'holes') {
+      // The full list, not `label.ts`'s chip-sized "4 holes": this card has the
+      // room, and it is the one place a group can check the bet is on the holes
+      // they meant before anybody tees off.
+      if (typeof v === 'string') {
+        const preset = f.presets.find((p) => p.value === v)
+        if (preset) chips.push(`${f.label}: ${preset.label}`)
+      } else if (Array.isArray(v) && v.length > 0) {
+        chips.push(`${f.label}: ${v.join(', ')}`)
+      }
     }
   }
   return chips

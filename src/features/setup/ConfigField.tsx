@@ -22,12 +22,23 @@ export function ConfigField({
   field,
   value,
   players,
+  holes,
   gameName,
   onChange,
 }: {
   field: ConfigFieldSpec
   value: unknown
   players: FieldPlayer[]
+  /**
+   * The holes this round will play, IN PLAY ORDER — `holesForRound`'s answer,
+   * which is the same function the engine uses at tee-off, so the grid cannot
+   * offer a hole the round won't walk. Only the `holes` field reads it.
+   *
+   * Always populated in practice: the wizard's games step comes after the
+   * course and the range (`STEP`), so a field never renders before there is a
+   * card to derive it from.
+   */
+  holes?: readonly number[]
   /**
    * `gameLabel` for the game this field belongs to. Two instances of one game
    * can sit in the same section — that is what this screen was rebuilt for —
@@ -102,6 +113,81 @@ export function ConfigField({
           </div>
         </div>
       )
+    case 'holes': {
+      // A preset's own `value`, or an explicit list of hole numbers. The two
+      // are one field because the spec has no conditional visibility — see the
+      // kind's note in catalog.ts.
+      const picked = Array.isArray(value) ? (value as number[]) : []
+      const custom = Array.isArray(value)
+      const offered = holes ?? []
+      const toggle = (hole: number) => {
+        const next = picked.includes(hole)
+          ? picked.filter((h) => h !== hole)
+          : // KEEP PLAY ORDER, not tap order: the list is read back as prose
+            // ("Holes 3, 8") and settled hole by hole, and a set that
+            // remembered which chip was tapped first would read as a jumble.
+            offered.filter((h) => picked.includes(h) || h === hole)
+        onChange(next)
+      }
+      return (
+        <div>
+          <p className="mb-2 font-medium">{field.label}</p>
+          {field.hint && <p className="mb-2 text-xs text-stone-400">{field.hint}</p>}
+          <div className="flex flex-wrap gap-2">
+            {field.presets.map((p) => (
+              <button
+                key={p.value}
+                onClick={() => onChange(p.value)}
+                className={`px-3.5 py-2 text-lg ${
+                  value === p.value
+                    ? 'pixel border-felt-300 bg-felt-700'
+                    : 'border-2 border-stone-700 bg-stone-800'
+                }`}
+              >
+                {p.label}
+              </button>
+            ))}
+            <button
+              // Entering custom mode with NOTHING selected, deliberately: a
+              // preset silently expanded into the holes it happens to mean
+              // would look like the group had chosen each of them, and the
+              // empty state is what `validateSetup` refuses out loud.
+              onClick={() => onChange(custom ? picked : [])}
+              className={`px-3.5 py-2 text-lg ${
+                custom
+                  ? 'pixel border-felt-300 bg-felt-700'
+                  : 'border-2 border-stone-700 bg-stone-800'
+              }`}
+            >
+              {field.customLabel}
+            </button>
+          </div>
+          {custom && (
+            <div
+              role="group"
+              aria-label={gameName ? `${field.label} — ${gameName}` : field.label}
+              className="mt-2.5 flex flex-wrap gap-1.5"
+            >
+              {offered.map((hole) => (
+                <button
+                  key={hole}
+                  aria-pressed={picked.includes(hole)}
+                  aria-label={`hole ${hole}`}
+                  onClick={() => toggle(hole)}
+                  className={`pixel-press size-11 text-lg ${
+                    picked.includes(hole)
+                      ? 'border-felt-500 bg-felt-900/60 text-felt-300'
+                      : 'border-stone-600 bg-stone-800 text-stone-300'
+                  }`}
+                >
+                  {hole}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )
+    }
     case 'teams': {
       // 2v2 assignment: value = { a: [draftId, draftId], b: [draftId, draftId] }
       const teams = (value ?? { a: [], b: [] }) as { a: string[]; b: string[] }

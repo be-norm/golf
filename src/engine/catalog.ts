@@ -186,6 +186,35 @@ export type ConfigFieldSpec =
   | { key: string; kind: 'select'; label: string; options: { value: string; label: string }[] }
   | { key: string; kind: 'teams'; label: string }
   | { key: string; kind: 'rotation'; label: string }
+  /**
+   * WHICH HOLES a bet runs on — a named rule, or a list the group picked at the
+   * tee. The value is a preset's `value` (a string) OR an explicit `number[]`.
+   *
+   * ONE FIELD RATHER THAN A SELECT PLUS A CONDITIONAL LIST, because
+   * `ConfigFieldSpec` has no conditional-visibility mechanism and adding one
+   * (`showWhen`) is the bigger change: every renderer of these specs would have
+   * to honour it, and one that didn't would silently draw a dead control. One
+   * key, one value keeps the spec declarative.
+   *
+   * THE PRESETS ARE THE ENGINE'S, so golf semantics never land inside a field
+   * kind — "par 5s" is Long Drive's rule, not this control's, and Rabbit's
+   * "9 and 18" will be its own. The editor only knows "a named rule, or these
+   * numbers", which is why the next game to want holes needs no UI work.
+   *
+   * The offered numbers are THE ROUND'S, in play order (`holesForRound`), so a
+   * round teeing off on 10 offers 10…18, 1…9 — position is what sequences a
+   * round, not the number painted on the marker (invariant #9).
+   */
+  | {
+      key: string
+      kind: 'holes'
+      label: string
+      hint?: string
+      /** named alternatives to an explicit list, in the engine's own words */
+      presets: { value: string; label: string }[]
+      /** the chip that reveals the grid, e.g. "Pick them" */
+      customLabel: string
+    }
 
 /**
  * Whether a game can be the round's main event, a side bet alongside one, or

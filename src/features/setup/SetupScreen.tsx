@@ -798,6 +798,7 @@ export function SetupScreen() {
                       engine={engine}
                       label={gameLabel(draft, draftGames)}
                       players={players}
+                      holes={willPlay}
                       draft={draft}
                       problems={problemsByGame.get(draft.gameId) ?? []}
                       open={!collapsed.has(draft.gameId)}
@@ -829,6 +830,7 @@ export function SetupScreen() {
                   engine={engine}
                   label={gameLabel(draft, draftGames)}
                   players={players}
+                  holes={willPlay}
                   draft={draft}
                   problems={problemsByGame.get(draft.gameId) ?? []}
                   open={!collapsed.has(draft.gameId)}

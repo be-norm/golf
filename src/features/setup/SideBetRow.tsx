@@ -17,6 +17,8 @@ interface Props {
   /** `gameLabel(draft, allDrafts)` — see GameConfigCard's `label`. */
   label: string
   players: FieldPlayer[]
+  /** the holes this round will play, in play order — for the `holes` field */
+  holes: readonly number[]
   draft: GameDraft
   /** This game's own `validateSetup` problems — see GameConfigCard's `problems`. */
   problems: string[]
@@ -51,6 +53,7 @@ export function SideBetRow({
   engine,
   label,
   players,
+  holes,
   draft,
   problems,
   open,
@@ -114,6 +117,7 @@ export function SideBetRow({
               field={field}
               value={config[field.key]}
               players={players}
+              holes={holes}
               gameName={label}
               onChange={(v) => setConfigValue(field.key, v)}
             />

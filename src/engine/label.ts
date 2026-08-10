@@ -194,6 +194,21 @@ function fieldPhrase(field: ConfigFieldSpec, value: unknown): string | undefined
       return value ? field.label.toLowerCase() : `no ${field.label.toLowerCase()}`
     case 'select':
       return field.options.find((o) => o.value === value)?.label
+    case 'holes': {
+      // A preset names itself. An UNRECOGNISED one gets no phrase, exactly as
+      // `select` gives none to a value outside its options: `discriminator`
+      // requires every sibling to GET a phrase, so a config carrying a preset
+      // this build no longer declares must skip the field rather than be
+      // labelled with the raw value.
+      if (typeof value === 'string') return field.presets.find((p) => p.value === value)?.label
+      if (!Array.isArray(value) || value.length === 0) return undefined
+      const holes = value.filter((h): h is number => typeof h === 'number')
+      if (holes.length !== value.length) return undefined
+      // Short enough for a chip. Beyond two, the count says more than the list
+      // would fit — and two different four-hole sets then phrase identically,
+      // which `separates` correctly rejects, moving on to the next candidate.
+      return holes.length <= 2 ? `H${holes.join(',')}` : `${holes.length} holes`
+    }
     // teams and rotation are player assignments — no short phrase names them,
     // and two games differing only in who is on which side need the index
     case 'teams':
