@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router'
 import '../../engine/games'
 import { getEngine, type GameEngine } from '../../engine/catalog'
 import { gameLabel } from '../../engine/label'
+import { teedOffAway } from '../../engine/core/holes'
 import { formatCents } from '../../engine/core/money'
 import type { GameConfig, HandicapSettings } from '../../engine/core/types'
 import { roundRepo } from '../../db/repos'
@@ -156,15 +157,9 @@ export function RoundStartScreen() {
         <p className="mt-1 text-sm text-stone-400">
           {tee ? `${tee.name} ${tee.rating}/${tee.slope} · ` : ''}
           {HOLES_LABEL[round.holes] ?? round.holes}
-          {/* The hole the round DERIVES, not the one it stores — `holesForRound`
-              falls back for a start hole the card hasn't got, so an imported
-              round carrying hole 40 plays 1–18 and must not claim otherwise.
-              Shown only when it isn't where the range already starts, so a
-              Back 9 isn't redundantly told it begins on 10. */}
-          {round.startHole !== undefined &&
-            ctx.holesPlayed[0] !== undefined &&
-            ctx.holesPlayed[0] !== (round.holes === 'back9' ? 10 : 1) &&
-            ` from ${ctx.holesPlayed[0]}`}
+          {/* One shared rule with the scorecard and the share card: the hole
+              actually derived, and only when the range doesn't already say it */}
+          {teedOffAway(round) !== undefined && ` from ${teedOffAway(round)}`}
           {/* a nine played twice around — say so before anyone wonders what
               "hole 14" means on a 9-hole course */}
           {round.courseSnapshot.holes.some((h) => h.loop && h.loop.nth > 1) &&

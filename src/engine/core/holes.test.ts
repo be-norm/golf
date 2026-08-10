@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { holeRangeLabel, holesForRound } from './holes'
+import { holeRangeLabel, holesForRound, teedOffAway } from './holes'
 import { doubleNine } from './tees'
 import { makeCourse } from '../test/harness'
 import type { Course, Round, RoundHoles } from './types'
@@ -65,13 +65,25 @@ describe('holesForRound', () => {
   })
 
   /**
-   * Preserved deliberately from before this existed: a range naming holes the
+   * Preserved deliberately from before this existed: a range whose START the
    * card doesn't have plays NOTHING rather than silently sliding to hole 1.
    * Match Play documents an empty span as "a match with no holes" and settles
    * it as a push — a behaviour that only reads correctly if this stays empty.
    */
-  it('plays nothing when the range names holes the card has not got', () => {
+  it('plays nothing when the range starts on a hole the card has not got', () => {
     expect(holesForRound(range('back9', undefined, NINE))).toEqual([])
+  })
+
+  /**
+   * …and the limit of that. It is the EFFECTIVE start that has to be missing:
+   * a stored start hole the card DOES have is honoured, and the range's own
+   * default is never consulted. So a 'back9' import carrying `startHole: 3` on
+   * a nine plays a wrapped nine rather than nothing — reachable only by hand-
+   * editing an export, and pinned here because the empty-span reading Match
+   * Play leans on does not cover it.
+   */
+  it('honours an in-card start hole even where the range alone would play nothing', () => {
+    expect(holesForRound(range('back9', 3, NINE))).toEqual([3, 4, 5, 6, 7, 8, 9, 1, 2])
   })
 
   it('caps a full 18 on a nine-hole card at the holes that exist', () => {
@@ -86,6 +98,35 @@ describe('holesForRound', () => {
    */
   it('treats a doubled nine as the ordinary eighteen it is numbered as', () => {
     expect(holesForRound(range('full18', undefined, doubleNine(NINE)))).toEqual(seq(1, 18))
+  })
+})
+
+/**
+ * The one rule three surfaces state — first-tee screen, scorecard, share card.
+ * They each had their own version and disagreed: one asked whether `startHole`
+ * was set, one compared against 1, one against the range default, so an
+ * imported `back9` carrying `startHole: 10` read "Back 9" on one screen and
+ * "9 holes from 10" on another.
+ */
+describe('teedOffAway', () => {
+  it('says nothing when the round starts where its range already says', () => {
+    expect(teedOffAway(range('full18'))).toBeUndefined()
+    expect(teedOffAway(range('front9'))).toBeUndefined()
+    expect(teedOffAway(range('back9'))).toBeUndefined()
+    // the case the three separate rules disagreed on
+    expect(teedOffAway(range('back9', 10))).toBeUndefined()
+    expect(teedOffAway(range('full18', 1))).toBeUndefined()
+  })
+
+  it('names the hole when the round teed off somewhere else', () => {
+    expect(teedOffAway(range('full18', 10))).toBe(10)
+    expect(teedOffAway(range('front9', 14))).toBe(14)
+  })
+
+  /** the derived hole, never the stored one — else it announces a hole nobody played */
+  it('says nothing for a start hole the card has not got', () => {
+    expect(teedOffAway(range('full18', 40))).toBeUndefined()
+    expect(teedOffAway(range('back9', undefined, NINE))).toBeUndefined()
   })
 })
 

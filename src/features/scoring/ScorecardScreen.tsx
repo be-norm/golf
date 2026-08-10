@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
 import { buildHoleLedger } from '../../engine/ledger'
 import { gameLabel } from '../../engine/label'
+import { teedOffAway } from '../../engine/core/holes'
 import { formatCentsSigned } from '../../engine/core/money'
 import { primaryGame } from '../../lib/gameRoles'
 import { GameSummary } from '../../components/GameSummary'
@@ -143,13 +144,16 @@ export function ScorecardScreen() {
 
       {front.length > 0 && half(front)}
       {back.length > 0 && half(back)}
-      {/* The tables are in WALK order, so on a round that teed off elsewhere the
-          top one starts at hole 10 and the second at hole 1. Say why: `loopOf`
-          only titles a doubled nine, which would otherwise leave this the one
-          surface that reorders silently — the share card states it too. */}
-      {ctx.holesPlayed[0] !== undefined && ctx.holesPlayed[0] !== 1 && back.length > 0 && (
+      {/* The tables are in WALK order, so a round that teed off elsewhere puts
+          hole 10 at the top left — or, for a wrapped NINE, runs 14…18,1…4
+          across one table. Either way this is the surface that would otherwise
+          reorder silently; `loopOf` only titles a doubled nine. Gated on the
+          WRAP, not on there being two tables, and the tail only applies when
+          there are (`teedOffAway`, shared with the first tee and share card). */}
+      {teedOffAway(round) !== undefined && (
         <p className="text-center text-sm text-felt-300">
-          Teed off on {ctx.holesPlayed[0]} — top nine first
+          Teed off on {teedOffAway(round)}
+          {back.length > 0 && ' — top nine first'}
         </p>
       )}
       <p className="text-center text-sm text-stone-500">

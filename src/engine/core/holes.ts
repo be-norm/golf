@@ -24,14 +24,17 @@ type HoleRange = Pick<Round, 'holes' | 'startHole' | 'courseSnapshot'>
  * without validating either field, so an archive can carry anything, and a
  * round the user can still open must not white-screen over it.
  *
- * A range whose FIRST hole the card hasn't got returns EMPTY (a back nine on a
+ * A range whose start hole the card hasn't got returns EMPTY (a back nine on a
  * 9-hole card), preserved from before start holes existed — Match Play
  * documents and depends on that reading: an empty span is a match with no
- * holes, which settles nothing, rather than a crash. A card that holds the
- * start but runs out before the count does now WRAPS where the old snapshot
- * filter truncated (a 'back9' on a hypothetical 14-hole card was 5 holes and is
- * now 9). Only reachable through a hand-edited export — every course-building
- * path mints 9 or 18 — but it is a change, not a preservation.
+ * holes, which settles nothing, rather than a crash. Two limits on how far that
+ * preservation goes, both reachable only through a hand-edited export:
+ *   - it is the EFFECTIVE start that must be missing. A stored `startHole` the
+ *     card DOES have is honoured and the fallback never runs, so 'back9' plus
+ *     `startHole: 3` on a 9-hole card plays 3…9,1,2 rather than nothing.
+ *   - a card that holds the start but runs out before the count does now WRAPS
+ *     where the old snapshot filter truncated ('back9' on a 14-hole card was 5
+ *     holes and is now 9).
  *
  * REVERT SAFETY, and why setup only offers a start hole on an 18-hole round:
  * `startHole` is stored only when it differs from the default, so it can only
@@ -55,6 +58,26 @@ export function holesForRound(round: HoleRange): number[] {
     { length: Math.min(count, card.length) },
     (_, i) => card[(start + i) % card.length]!,
   )
+}
+
+/**
+ * The hole this round teed off on WHEN THAT IS WORTH SAYING — i.e. when it
+ * isn't where the range already starts. Undefined otherwise.
+ *
+ * One rule, because three surfaces state this (the first-tee screen, the
+ * scorecard, the painted share card) and they were each deciding it
+ * separately: one asked "is `startHole` set", one compared against 1, one
+ * against the range default. An imported `back9` carrying `startHole: 10`
+ * therefore got "Back 9" on one screen and "9 holes from 10" on another,
+ * announcing the hole the range already implies.
+ *
+ * Reads the DERIVED first hole, never the stored field, so a start hole the
+ * card hasn't got says nothing rather than announcing a hole nobody played.
+ */
+export function teedOffAway(round: HoleRange): number | undefined {
+  const first = holesForRound(round)[0]
+  if (first === undefined) return undefined
+  return first === (round.holes === 'back9' ? 10 : 1) ? undefined : first
 }
 
 /**

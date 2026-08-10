@@ -19,6 +19,9 @@ import type {
  * modules per file — which is a config default, not a guarantee.
  */
 export const GUARD_ENGINE_TYPE = 'broken'
+/** the engine replay.guard.test.ts registers to prove the ROTATION property is
+ *  wired — it reads hole numbers where it means positions (MAI-41) */
+export const ROTATION_GUARD_ENGINE_TYPE = 'numberly'
 /** the engine label.test.ts registers to prove an unpaintable label is refused */
 export const LABEL_PROBE_ENGINE_TYPE = 'fancy'
 /** the stand-in for Snake that roundFacts.test.ts registers, so the round-fact
@@ -26,6 +29,7 @@ export const LABEL_PROBE_ENGINE_TYPE = 'fancy'
 export const PUTTS_PROBE_ENGINE_TYPE = 'putty'
 export const TEST_ONLY_ENGINE_TYPES: readonly string[] = [
   GUARD_ENGINE_TYPE,
+  ROTATION_GUARD_ENGINE_TYPE,
   LABEL_PROBE_ENGINE_TYPE,
   PUTTS_PROBE_ENGINE_TYPE,
 ]
