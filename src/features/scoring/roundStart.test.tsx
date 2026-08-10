@@ -262,14 +262,18 @@ describe('RoundStartScreen', () => {
     it('says nothing extra when the round starts where its range says', async () => {
       await seed('start-plain', {})
       expect(await screen.findByText(/18 holes/)).toBeInTheDocument()
-      expect(screen.queryByText(/from/)).not.toBeInTheDocument()
+      // anchored to the range line's own shape. A bare /from/ matches any copy
+      // on the screen — Skins' own rules say "collects the skin value from
+      // every other player" — so the day the explainer renders, an unanchored
+      // query goes ambiguous and fails for a reason unrelated to start holes.
+      expect(screen.queryByText(/\d+ holes from/)).not.toBeInTheDocument()
     })
 
     /** a Back 9 already says it begins on 10 — announcing it again is noise */
     it('does not tell a Back 9 that it begins on 10', async () => {
       await seed('start-back9', { holes: 'back9', startHole: 10 })
       expect(await screen.findByText(/Back 9/)).toBeInTheDocument()
-      expect(screen.queryByText(/from 10/)).not.toBeInTheDocument()
+      expect(screen.queryByText(/\d+ holes from|Back 9 from/)).not.toBeInTheDocument()
     })
 
     /**
@@ -280,7 +284,7 @@ describe('RoundStartScreen', () => {
     it('says nothing for a start hole the card has not got', async () => {
       await seed('start-bogus', { startHole: 40 })
       expect(await screen.findByText(/18 holes/)).toBeInTheDocument()
-      expect(screen.queryByText(/from 40/)).not.toBeInTheDocument()
+      expect(screen.queryByText(/\d+ holes from/)).not.toBeInTheDocument()
     })
   })
 })

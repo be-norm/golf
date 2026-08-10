@@ -288,8 +288,8 @@ describe('buildHoleLedger', () => {
     })
     const log = new EventLog()
     log.scoreByHole(round, { A: Array(18).fill(4), B: Array(18).fill(4) })
-    // hole 4 is the par 3 on the harness card ([4,4,5,3,…]), so CTP is live
-    // there; this lands after every score, as a late-entered award does
+    // hole 4 is a par 3 on the harness card, so CTP is live there; this lands
+    // after every score, as a late-entered award does
     log.append({
       type: 'game/event',
       gameId: 'game-1',

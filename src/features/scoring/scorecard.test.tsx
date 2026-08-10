@@ -118,11 +118,34 @@ describe('ScorecardScreen — a round that teed off elsewhere', () => {
       .getAllByRole('columnheader')
       .map((th) => th.textContent)
 
+  /**
+   * A player's cells in the nth table: `[name, …one per hole…, total]`, so
+   * index i+1 is the cell sitting under `holeRow(n)[i+1]`.
+   *
+   * Asserting the header alone proves nothing about placement — the columns
+   * could be labelled 10…18 while the scores under them came from 1…9, which
+   * is precisely the silent reorder the "Teed off on" note exists to warn
+   * about. This is the scorecard's version of summaryCard's "pars follow their
+   * holes, not their position".
+   */
+  const cellsFor = (n: number, name: string) =>
+    Array.from(
+      within(screen.getAllByRole('table')[n]!)
+        .getByText(name)
+        .closest('tr')!
+        .querySelectorAll('td'),
+    ).map((td) => td.textContent)
+
   it('puts the nine it walked first on top, and says so', async () => {
     await renderCard('card-from-10', 10)
     expect(await screen.findByText('Teed off on 10 — top nine first')).toBeInTheDocument()
     expect(holeRow(0)).toEqual(['Hole', '10', '11', '12', '13', '14', '15', '16', '17', '18', '—'])
     expect(holeRow(1)).toEqual(['Hole', '1', '2', '3', '4', '5', '6', '7', '8', '9', '—'])
+
+    // …and the only score posted — Ann's 4 on hole 10 — sits under hole 10,
+    // which is the FIRST column of the top table and nowhere else on the card
+    expect(cellsFor(0, 'Ann')).toEqual(['Ann', '4', '·', '·', '·', '·', '·', '·', '·', '·', '4'])
+    expect(cellsFor(1, 'Ann')).toEqual(['Ann', '·', '·', '·', '·', '·', '·', '·', '·', '·', ''])
   })
 
   /**
@@ -137,5 +160,8 @@ describe('ScorecardScreen — a round that teed off elsewhere', () => {
     expect(screen.queryByText(/Teed off on/)).not.toBeInTheDocument()
     expect(holeRow(0)).toEqual(['Hole', '1', '2', '3', '4', '5', '6', '7', '8', '9', '—'])
     expect(holeRow(1)).toEqual(['Hole', '10', '11', '12', '13', '14', '15', '16', '17', '18', '—'])
+    // hole 1's score under hole 1 — the same placement check, on the shape
+    // where the positional slice has to agree with the old number filter
+    expect(cellsFor(0, 'Ann')).toEqual(['Ann', '4', '·', '·', '·', '·', '·', '·', '·', '·', '4'])
   })
 })
