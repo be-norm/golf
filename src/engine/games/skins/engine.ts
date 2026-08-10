@@ -94,11 +94,11 @@ function derive(
   const carryDied = carry > 0 && ctx.holesPlayed.every((h) => ctx.finalized(h)) ? carry : 0
   const deadSkins = carryDied > 0 ? `${carryDied} skin${carryDied === 1 ? '' : 's'}` : ''
   // Where the death gets narrated: the last hole anybody actually played, since
-  // that is the hole the group is looking at when it happens. Undefined unless
-  // something actually died — this scans every player's scores, and `derive`
-  // runs once per hole in the ledger's prefix replay.
-  const diedAt =
-    carryDied > 0 ? [...ctx.holesPlayed].reverse().find((h) => ctx.anyScored(h)) : undefined
+  // that is the hole the group is looking at when it happens. `ctx` owns that
+  // definition — the ledger places a completed round's money by the same one,
+  // and a private copy here is how a sentence ends up on a different row from
+  // the money it explains (MAI-58).
+  const diedAt = carryDied > 0 ? ctx.lastPlayedHole : undefined
 
   // A dead pile is something to SAY, not money that moved, so it rides the
   // narration channel rather than a zero-cent settlement line. `settlement.lines`
