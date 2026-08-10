@@ -469,8 +469,9 @@ describe('SetupScreen — choosing games', () => {
   /**
    * A game strokes cannot decide offers no handicap control at all — closest to
    * the pin, long drive and the snake are contests of one shot, and a toggle
-   * that changes nothing is worse than no toggle. Hidden rather than disabled,
-   * with one line saying why so its absence does not read as a bug.
+   * that changes nothing is worse than no toggle. Nothing takes its place
+   * either: a line explaining the absence is one more thing to read on a screen
+   * whose job is the settings you DO have.
    */
   it('offers no handicap control to a game strokes cannot decide', async () => {
     await toStepTwo()
@@ -482,7 +483,10 @@ describe('SetupScreen — choosing games', () => {
     // ladder exists for
     expect(within(skins!).getByText('Handicaps')).toBeInTheDocument()
     expect(within(ctp!).queryByText('Handicaps')).toBeNull()
-    expect(within(ctp!).getByText(/Handicaps don’t apply/)).toBeInTheDocument()
+    // …and nothing in its place. Anchored on CTP's own field, so this cannot
+    // pass by the card simply being folded shut.
+    expect(within(ctp!).getByRole('button', { name: /^increase Per par 3/ })).toBeInTheDocument()
+    expect(within(ctp!).queryByText(/handicap/i)).toBeNull()
   })
 
   it('folds one card away without touching its neighbour', async () => {
