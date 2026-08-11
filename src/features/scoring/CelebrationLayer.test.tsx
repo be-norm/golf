@@ -240,19 +240,69 @@ describe('CelebrationLayer', () => {
   })
 
   /**
-   * Round completion finalizes every hole at once, which is precisely when a
-   * naive layer throws its biggest burst. `eventHole` answers null for it, so
-   * the cap has nothing to prefer and the append is not about any one hole.
+   * ROUND COMPLETION DECIDES HOLES, which is precisely when a naive layer
+   * throws its biggest burst — and this is reachable today, not a hypothetical
+   * for some future engine.
+   *
+   * Somebody picks up and never posts a score. That hole stays pending all
+   * round; "Finish round early" then settles it among the scores that WERE
+   * posted, so the completion append hands back a freshly-won hole. `eventHole`
+   * answers null for `round/completed` because it belongs to no hole, and the
+   * layer declines on that basis.
+   *
+   * The partial hole is the whole point of the fixture: a fully-scored card
+   * decides nothing new at completion, so it passes with or without the guard.
    */
-  it('says nothing when the round completes', () => {
+  it('says nothing when finishing the round is what decides a hole', () => {
     const round = skinsRound()
     const log = new EventLog()
-    tieHole(log, round, 1)
-    winHole(log, round, 2)
-    const { container, rerender } = render(<CelebrationLayer view={viewOf(round, log.events)} />)
+    const idOf = new Map(round.players.map((p) => [p.name, p.playerId]))
+    winHole(log, round, 1, 'A')
+    // hole 2: C and D never post — nothing is decided while the round is live
+    log.append({ type: 'score/set', playerId: idOf.get('A')!, hole: 2, gross: 5 })
+    log.append({ type: 'score/set', playerId: idOf.get('B')!, hole: 2, gross: 3 })
+    const live = viewOf(round, log.events)
+    expect(live.derivations.get('game-1')!.celebration!(2)).toBeNull()
+
+    const { container, rerender } = render(<CelebrationLayer view={live} />)
     log.append({ type: 'round/completed' })
-    rerender(<CelebrationLayer view={viewOf(round, log.events)} />)
+    const finished = viewOf(round, log.events)
+    // completion really did hand back a new celebration — otherwise this test
+    // passes by having nothing to suppress
+    expect(finished.derivations.get('game-1')!.celebration!(2)).toMatchObject({
+      playerIds: [idOf.get('B')],
+    })
+
+    rerender(<CelebrationLayer view={finished} />)
     expect(coins(container)).toBe(0)
+  })
+
+  /**
+   * A CORRECTION THAT HANDS THE HOLE TO SOMEONE ELSE IS NEWS. The money moves
+   * from one player to another, so staying silent is the opposite of quiet.
+   *
+   * This is why the key carries the winner. It is also the line between the two
+   * things the key has to tell apart: a carry re-pricing a settled hole (same
+   * winner, different count — silent) and a hole changing hands (different
+   * winner — announced).
+   */
+  it('fires again when a correction hands a won hole to a different player', () => {
+    const round = skinsRound()
+    const log = new EventLog()
+    const idOf = new Map(round.players.map((p) => [p.name, p.playerId]))
+    winHole(log, round, 1, 'A')
+    const { container, rerender } = render(<CelebrationLayer view={viewOf(round, log.events)} />)
+    expect(coins(container)).toBe(0)
+
+    // B was actually a 2 — hole 1 is B's now, and A's skin is gone
+    log.append({ type: 'score/set', playerId: idOf.get('B')!, hole: 1, gross: 2 })
+    const after = viewOf(round, log.events)
+    expect(after.derivations.get('game-1')!.celebration!(1)).toMatchObject({
+      playerIds: [idOf.get('B')],
+    })
+    rerender(<CelebrationLayer view={after} />)
+    expect(coins(container)).toBe(1)
+    expect(container.textContent).toContain('B wins 1 skin')
   })
 
   /**

@@ -427,10 +427,14 @@ change, use a 6-digit code (`{{ .Token }}` + `verifyOtp`) rather than a link.
   HAS a view** (seeding on mount records nothing, because `useRound` returns
   undefined while Dexie loads, and then replays every decided hole of a resumed
   round). It skips a `meta/retract` — undoing a CORRECTION restores an earlier
-  score and hands back a win nobody just made — and fires **one per append**,
-  structurally, one slot and not a queue, because two games decide the same hole
-  off the same scores. The carry cascade is absorbed by the key, which excludes
-  the count: a hole re-priced from 3 skins to 2 updates without shouting.
+  score and hands back a win nobody just made — and it declines any append that
+  is about no hole at all (`eventHole` → null), which is how finishing a round
+  early avoids throwing coins for the holes that finishing just decided.
+  It fires **one per append**, structurally, one slot and not a queue, because
+  two games decide the same hole off the same scores.
+  **The key is (game, hole, sprite, WINNER) and pointedly not `count`** — that
+  pair of choices is what separates a carry re-pricing a settled hole (silent)
+  from a correction handing it to somebody else (announced).
 - **Motion is stepped, and reduced motion is honoured in two halves.**
   `stepped(n)` (`src/lib/motion.ts`) quantises easing so movement snaps to a
   grid — the same reason both CSS keyframes use `steps()`. Sprites animate by
@@ -438,7 +442,12 @@ change, use a 6-digit code (`{{ .Token }}` + `verifyOtp`) rather than a link.
   `size-*` is rem-based against a 19px root, so `size-16` is 76px, not 64).
   `<MotionConfig reducedMotion="user">` covers everything Motion drives; the
   `prefers-reduced-motion` block in `index.css` covers the keyframes it cannot
-  see. Both are required — neither is sufficient.
+  see. Both are required — neither is sufficient. **The CSS half selects
+  `[data-sprite]`, which is why that attribute sits on the animated `<svg>` and
+  not on `PixelSprite`'s wrapper**: `animation` does not inherit, so an
+  attribute one element up matches a node with nothing to stop and every sprite
+  keeps playing while the rule, the comment and this line all read as though it
+  were handled. `PixelSprite.test.tsx` pins the two to the same element.
 - **The share card is painted, not screenshotted.** `Share` on the settle screen
   produces a PNG drawn by hand onto a canvas (`paintSummaryCard.ts`), never a
   DOM capture — rasterising the live screen means `foreignObject`, and so means

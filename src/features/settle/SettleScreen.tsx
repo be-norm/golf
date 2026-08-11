@@ -281,6 +281,17 @@ export function SettleScreen() {
 function Confetti() {
   const pieces = Array.from({ length: 28 }, (_, i) => i)
   const colors = ['#22c55e', '#7dff66', '#ff4444', '#fafaf9', '#ffd23e']
+  // ONE BURST MEANS IT ENDS. The pieces reach `opacity: 0` after ~2.4s, but the
+  // coins spin on a looping CSS animation, so leaving them mounted means seven
+  // invisible sprites animating for as long as somebody reads the settlement or
+  // fiddles with the share sheet. Unmounting is what makes the burst finite —
+  // trimming the count only made the leak smaller.
+  const [done, setDone] = useState(false)
+  useEffect(() => {
+    const t = setTimeout(() => setDone(true), 2600)
+    return () => clearTimeout(t)
+  }, [])
+  if (done) return null
   return (
     <div className="pointer-events-none fixed inset-x-0 top-0 z-50 h-0">
       {pieces.map((i) => {

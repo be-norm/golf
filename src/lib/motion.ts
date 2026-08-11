@@ -19,10 +19,10 @@ export const stepped =
     Math.ceil(t * n) / n
 
 /**
- * Frame counts for the sprite strips (`PixelSprite`) — a sprite animates by
- * translating a horizontal strip one cell at a time under `steps(frames)`, so
- * the step count and the frame count are THE SAME NUMBER. Naming it once keeps
- * a strip from being drawn with four frames and animated with three, which
- * shows up as a permanently missing pose rather than as an error.
+ * How long one sprite frame holds (`PixelSprite`). ~11fps — deliberately far
+ * below the display's rate, because a sprite that updates every frame stops
+ * reading as pixel art and starts reading as a video. The whole strip's
+ * duration is this times its step count, so a longer animation comes from
+ * drawing more frames rather than from slowing these down.
  */
 export const FRAME_MS = 90

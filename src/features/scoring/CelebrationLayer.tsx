@@ -50,9 +50,10 @@ import type { RoundView } from './useRound'
  * silently re-prices instead of re-firing, and only the corrected hole is new.
  * Widen the key to include the count and every carry correction becomes news.
  *
- * `eventHole` returning null for `round/completed` and `round/reopened` falls
- * out of rule 3 for free — both finalize many holes at once, and neither should
- * throw coins.
+ * And a fourth that is really rule 3's premise: THE APPEND MUST BE ABOUT A
+ * HOLE. `eventHole` answers null for `round/completed` and `round/reopened`,
+ * both of which finalize many holes at once. That is guarded explicitly rather
+ * than left to a `find` missing and the fallback firing anyway.
  */
 
 /** Enough coins to read as "a lot", few enough to stay a garnish. */
@@ -72,7 +73,22 @@ interface Playing {
   to: { x: number; y: number }
 }
 
-const keyOf = (gameId: string, c: Celebration) => `${gameId}:${c.hole}:${c.sprite}`
+/**
+ * WHAT COUNTS AS THE SAME CELEBRATION. Game, hole, sprite and WHOSE it was —
+ * and pointedly not `count`.
+ *
+ * The winner is in because a correction can hand a decided hole to someone
+ * else: enter A 3 / B 5, then fix B to a 2, and the money moves from A to B. A
+ * key without the players calls that the same event and stays silent on the
+ * hole changing hands, which is the opposite of quiet.
+ *
+ * `count` is out because Skins' carry flows forward, so re-deciding an early
+ * hole re-prices every later one — hole 3 slipping from 3 skins to 2 is
+ * arithmetic, not news. Put `count` in the key and every carry correction
+ * shouts about holes nobody is standing on.
+ */
+const keyOf = (gameId: string, c: Celebration) =>
+  `${gameId}:${c.hole}:${c.sprite}:${[...c.playerIds].join(',')}`
 
 /** Every celebration the round currently reports, keyed. Cheap: each engine's
  *  implementation is a lookup in results it already computed. */
@@ -139,8 +155,22 @@ export function CelebrationLayer({ view }: { view: RoundView | undefined | null 
     // (2) an undo is not a win
     if (newest?.type === 'meta/retract') return
 
-    // (3) exactly one — the hole this append was about, else the latest played
+    // (3) THIS APPEND MUST BE ABOUT A HOLE. `eventHole` answers null for the
+    // round-level events — `round/completed` and `round/reopened` — and both
+    // finalize many holes at once, which is exactly when a naive layer throws
+    // its biggest burst. Skins cannot reach it today (Finish is gated on a full
+    // card, so completion decides nothing new), but Snake settles ON completion
+    // and the award pot's unclaimed rule is defined by `ctx.completed`, so the
+    // second engine on this channel would have found it. An explicit guard,
+    // rather than the accident of a `find` missing and a fallback firing anyway.
     const about = newest ? eventHole(newest) : null
+    if (about === null) return
+
+    // exactly one — the hole this append was about, else the latest PLAYED.
+    // Position, never hole number: a round can tee off anywhere and wrap, so
+    // `12 > 3` says nothing about which came first (invariant #9). The fallback
+    // is for an engine that attributes a celebration to a different hole from
+    // the one just scored — Nassau pays a closed bet on `finalizedAt`.
     const positionOf = new Map(view.ctx.holesPlayed.map((h, i) => [h, i]))
     const pick =
       fresh.find(([, v]) => v.c.hole === about) ??
@@ -155,33 +185,41 @@ export function CelebrationLayer({ view }: { view: RoundView | undefined | null 
     setPlaying({ nonce: nonceRef.current, celebration, from, to: to ?? { ...from, y: from.y - 60 } })
   }, [view])
 
+  /**
+   * THE BURST HAS TO END, and the teardown belongs here rather than inside it.
+   * Hung off a callback prop it depended on a closure rebuilt on every render
+   * of this component — i.e. every score tap — so the timer cleared and
+   * restarted forever and the burst never unmounted. Invisible, since the coins
+   * are at `opacity: 0` by then, and not harmless: each stranded burst leaves up
+   * to five looping CSS animations running on a phone that has been recording
+   * scores for four hours.
+   *
+   * `playing` changes only when a new celebration starts, so this timer is per
+   * burst, which is what the old one was trying to be.
+   */
+  useEffect(() => {
+    if (!playing) return
+    const t = setTimeout(() => setPlaying((p) => (p?.nonce === playing.nonce ? null : p)), 1100)
+    return () => clearTimeout(t)
+  }, [playing])
+
   // The layer is decorative and must never eat a tap: scoring stays live for the
   // whole animation, which is the entire point of anchoring instead of taking
   // over the screen.
   return (
     <div aria-hidden className="pointer-events-none fixed inset-0 z-[60] overflow-hidden">
       <AnimatePresence>
-        {playing && (
-          <Burst
-            key={playing.nonce}
-            playing={playing}
-            onDone={() => setPlaying((p) => (p?.nonce === playing.nonce ? null : p))}
-          />
-        )}
+        {playing && <Burst key={playing.nonce} playing={playing} />}
       </AnimatePresence>
     </div>
   )
 }
 
-function Burst({ playing, onDone }: { playing: Playing; onDone: () => void }) {
+function Burst({ playing }: { playing: Playing }) {
   const { celebration, from, to } = playing
   const n = Math.min(Math.max(1, celebration.count), MAX_SPRITES)
   const coins = Array.from({ length: n }, (_, i) => i)
 
-  useEffect(() => {
-    const t = setTimeout(onDone, 1100)
-    return () => clearTimeout(t)
-  }, [onDone])
 
   return (
     <>
@@ -216,7 +254,17 @@ function Burst({ playing, onDone }: { playing: Playing; onDone: () => void }) {
         style={{ left: 0, top: 0 }}
         initial={{ x: to.x - 70, y: to.y - 4, opacity: 0 }}
         animate={{ y: [to.y - 4, to.y - 30], opacity: [0, 1, 1, 0] }}
-        transition={{ duration: 0.95, delay: 0.3, ease: stepped(5), times: [0, 1] }}
+        // `times` belongs to the property whose keyframes it describes. Shared
+        // at the top level it was applied to a 2-keyframe `y` AND a 4-keyframe
+        // `opacity`, and the extra offsets resolve to 1 — so the label faded in
+        // across the whole beat and blinked out at the last instant instead of
+        // snapping in, holding and fading.
+        transition={{
+          duration: 0.95,
+          delay: 0.3,
+          ease: stepped(5),
+          opacity: { times: [0, 0.2, 0.75, 1], duration: 0.95, delay: 0.3 },
+        }}
       >
         <span className="inline-block w-[140px] text-center">
           <GlyphText text={celebration.text} />

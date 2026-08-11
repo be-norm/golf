@@ -286,12 +286,19 @@ const SCAN_FRAMES: readonly ReactElement[] = [2, 4, 6, 8, 10, 12, 14].map((y) =>
   </>
 ))
 
+/**
+ * No labels live here: every sprite in the app today rides beside words that
+ * already say the thing — "Reading scorecard…", "★ First tee ★", the
+ * celebration's own text — so they are decorative, and a caller that needs an
+ * announced one passes `label`. A label per sprite read as thorough and was
+ * simply never used, which is worse than none.
+ */
 const SPRITES = {
-  coin: { frames: COIN_FRAMES, label: 'a coin' },
-  logo: { frames: LOGO_FRAMES, label: 'a golf flag on the green' },
-  'flag-plant': { frames: FLAG_PLANT_FRAMES, label: 'a flag going into the green' },
-  scan: { frames: SCAN_FRAMES, label: 'reading a scorecard' },
-} as const satisfies Record<string, { frames: readonly ReactElement[]; label: string }>
+  coin: COIN_FRAMES,
+  logo: LOGO_FRAMES,
+  'flag-plant': FLAG_PLANT_FRAMES,
+  scan: SCAN_FRAMES,
+} as const satisfies Record<string, readonly ReactElement[]>
 
 export type SpriteName = keyof typeof SPRITES
 
@@ -331,7 +338,7 @@ export function PixelSprite({
   frameMs = FRAME_MS,
   label,
 }: PixelSpriteProps) {
-  const { frames } = SPRITES[name]
+  const frames = SPRITES[name]
   const n = frames.length
   const cell = 16 * scale
 
@@ -344,14 +351,18 @@ export function PixelSprite({
   const travel = -cell * steps
 
   return (
-    <div
-      data-sprite={name}
+    <span
       role={label ? 'img' : undefined}
       aria-label={label}
       aria-hidden={label ? undefined : true}
       style={{ width: cell, height: cell, overflow: 'hidden', display: 'inline-block' }}
     >
       <svg
+        // ON THE ANIMATED ELEMENT, not the wrapper — `animation` does not
+        // inherit, so the reduced-motion rule in `index.css` selects this and a
+        // `data-sprite` one element up would silently match nothing while
+        // looking exactly right. Same placement as `PixelGlyph`'s `data-glyph`.
+        data-sprite={name}
         viewBox={`0 0 ${16 * n} 16`}
         shapeRendering="crispEdges"
         focusable="false"
@@ -373,6 +384,6 @@ export function PixelSprite({
           </g>
         ))}
       </svg>
-    </div>
+    </span>
   )
 }
