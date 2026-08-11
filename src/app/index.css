@@ -121,6 +121,48 @@ body {
   }
 }
 
+/**
+ * SPRITE STRIP — how every piece of animated pixel art in the app moves.
+ *
+ * The art is one wide SVG of N side-by-side 16-unit frames inside a
+ * one-frame-wide `overflow:hidden` box; animating `translateX` under `steps(N)`
+ * swaps whole frames with nothing in between. That is the entire technique, and
+ * it is why the motion reads as 8-bit rather than as a tween of a picture.
+ *
+ * Distance and step count are set INLINE by `PixelSprite`, because they are
+ * derived from the frame count and differ per sprite — and because `steps()`
+ * fed from a CSS custom property is parsed inconsistently, while a plain length
+ * in `translateX` is not.
+ */
+@keyframes sprite-strip {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(var(--sprite-travel, 0));
+  }
+}
+
+/**
+ * REDUCED MOTION — the CSS half. `<MotionConfig reducedMotion="user">` in
+ * AppLayout covers everything Motion drives; these are the animations CSS owns,
+ * which it cannot see.
+ *
+ * Sprites are NOT hidden — `animation: none` leaves the strip at frame 0, so
+ * every picture is still there, simply still. The blinking cursor settles to
+ * visible rather than vanishing, since it marks the thing you're meant to press.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .animate-blink,
+  .animate-stamp,
+  [data-sprite] {
+    animation: none !important;
+  }
+  .animate-blink {
+    opacity: 1 !important;
+  }
+}
+
 /* subtle CRT scanlines — must stay faint for sunlight readability */
 @utility scanlines {
   background-image: repeating-linear-gradient(

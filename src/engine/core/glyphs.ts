@@ -12,12 +12,21 @@
  *
  * TWO RULES, both enforced rather than remembered:
  *
- * 1. TOKENS ONLY IN CHANNELS THAT DECODE THEM — `holeSummary` and
- *    `requiredInputs`. The pinned bar renders `summary` / `summaryParts` raw,
- *    and the share card is a PAINTED PNG built from `settlement.lines`,
- *    `detailLines` and `notes` — a token there would be rasterised as a literal
- *    `:wolf:` into an image people send each other. `glyphs.test.ts` derives
- *    every registered engine and fails on a token found anywhere else.
+ * 1. TOKENS ONLY IN CHANNELS THAT DECODE THEM — `holeSummary`,
+ *    `requiredInputs` and `celebration`'s `text`. The pinned bar renders
+ *    `summary` / `summaryParts` raw, and the share card is a PAINTED PNG built
+ *    from `settlement.lines`, `detailLines` and `notes` — a token there would be
+ *    rasterised as a literal `:wolf:` into an image people send each other.
+ *    `glyphs.test.ts` derives every registered engine and fails on a token
+ *    found anywhere else.
+ *
+ *    THE TEST IS THE RULE, and it works by enumerating the UNDECODED channels —
+ *    so a new channel is safe by omission and decoded by omission alike, and
+ *    those are the same silence. Any channel added to `GameDerivation` has to
+ *    be classified here and in that list on the day it lands, or it is
+ *    unguarded while looking guarded. `celebration.text` decodes: it is
+ *    transient DOM (`GlyphText`), and unlike every banned channel it never
+ *    reaches `paintSummaryCard`.
  * 2. THE WORD GOES WITH THE PICTURE. A 16px graphic cannot teach that blind
  *    wolf means "called before anyone hit, so the hole triples", so every
  *    string using a glyph also says it in words. That is why the artwork is

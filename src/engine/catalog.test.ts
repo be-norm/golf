@@ -11,6 +11,7 @@ import {
 } from './catalog'
 import { EventLog, makePlayers, makeRound, TEST_ONLY_ENGINE_TYPES } from './test/harness'
 import type { GameConfig } from './core/types'
+import { CELEBRATION_SPRITES, type CelebrationSprite } from './core/celebration'
 import { isPaintable } from './label'
 
 // `satisfies` alone only checks each element is a MEMBER — it does not check
@@ -28,17 +29,20 @@ const FAMILIES = ['match', 'stroke', 'points', 'pot', 'award', 'wager'] as const
 const CATEGORIES = ['main', 'side', 'either'] as const satisfies readonly GameCategory[]
 const SHAPES = ['solo', 'headToHead', 'teams', 'partners'] as const satisfies readonly GameShape[]
 const FACTS = ['putts'] as const satisfies readonly RoundFact[]
+const SPRITES = ['coin'] as const satisfies readonly CelebrationSprite[]
 
 type _FamiliesCovered = Covers<GameFamily, typeof FAMILIES>
 type _CategoriesCovered = Covers<GameCategory, typeof CATEGORIES>
 type _ShapesCovered = Covers<GameShape, typeof SHAPES>
 type _FactsCovered = Covers<RoundFact, typeof FACTS>
+type _SpritesCovered = Covers<CelebrationSprite, typeof SPRITES>
 const _exhaustive: [
   _FamiliesCovered,
   _CategoriesCovered,
   _ShapesCovered,
   _FactsCovered,
-] = [FAMILIES, CATEGORIES, SHAPES, FACTS]
+  _SpritesCovered,
+] = [FAMILIES, CATEGORIES, SHAPES, FACTS, SPRITES]
 void _exhaustive
 
 /** the registry minus anything a sibling test file registered for its own use */
@@ -207,6 +211,64 @@ describe('engine registry invariants', () => {
         expect(maxPlayers, `${engine.type} head-to-head needs to accept 2`).toBeGreaterThanOrEqual(2)
       }
     }
+  })
+
+  /**
+   * THE CELEBRATION CONTRACT (MAI-36). `CelebrationLayer` fires at most one
+   * celebration per append and CHOOSES it by hole — so a celebration whose
+   * `hole` disagreed with the hole it was asked about would animate for the
+   * wrong hole or, matching nothing, be silently dropped. Same class of bug as
+   * a `GameEventOffer` omitting `hole`, and invisible to every money test.
+   *
+   * `playerIds` is checked against the roster for the reason `addLine` checks
+   * its own: an id that names nobody anchors the animation to no row and
+   * degrades to a burst at the bar, which reads as "the layer is broken"
+   * rather than "this engine named a stranger".
+   *
+   * Scored so the sweep has decided holes in it — an all-pending card would
+   * pass by having no celebrations to check.
+   */
+  it('every celebration names the hole it was asked about, and real players', () => {
+    const players = makePlayers([{ name: 'A' }, { name: 'B' }, { name: 'C' }, { name: 'D' }])
+    const HOLES = [1, 2, 3, 4, 5, 6, 7, 8, 9]
+    const CARD: Record<string, number[]> = {
+      A: [4, 5, 3, 4, 6, 4, 3, 5, 4],
+      B: [5, 4, 4, 4, 5, 5, 3, 4, 5],
+      C: [4, 6, 4, 3, 5, 4, 4, 6, 4],
+      D: [6, 4, 5, 4, 4, 3, 5, 5, 3],
+    }
+    let checked = 0
+    for (const engine of shippedEngines()) {
+      const seated = players.slice(0, Math.max(engine.meta.minPlayers, 2))
+      const roster = new Set(seated.map((p) => p.playerId))
+      const round = makeRound({
+        players: seated,
+        holes: 'front9',
+        games: [{ type: engine.type, config: engine.defaultConfig(seated) }],
+      })
+      const log = new EventLog()
+      log.scoreByHole(
+        round,
+        Object.fromEntries(seated.map((p) => [p.name, CARD[p.name]!])),
+      )
+      const d = deriveRound(round, log.events).derivations.get('game-1')!
+      if (!d.celebration) continue
+      for (const hole of HOLES) {
+        const c = d.celebration(hole)
+        if (!c) continue
+        checked += 1
+        expect(c.hole, `${engine.type} celebration for hole ${hole}`).toBe(hole)
+        expect(CELEBRATION_SPRITES, `${engine.type} sprite`).toContain(c.sprite)
+        expect(c.count, `${engine.type} celebration count`).toBeGreaterThanOrEqual(1)
+        expect(c.text.length, `${engine.type} celebration text`).toBeGreaterThan(0)
+        for (const id of c.playerIds) {
+          expect(roster.has(id), `${engine.type} celebrates non-player ${id}`).toBe(true)
+        }
+      }
+    }
+    // The loop above is vacuous the day no shipped engine implements the
+    // channel — which is exactly how a contract test rots into decoration.
+    expect(checked, 'no engine produced a celebration on this card').toBeGreaterThan(0)
   })
 })
 

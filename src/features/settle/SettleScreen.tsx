@@ -8,6 +8,7 @@ import { roundRepo } from '../../db/repos'
 import { LOCAL_USER } from '../../db/ids'
 import { enqueueDeleteRound } from '../../remote/outbox'
 import { useRound } from '../scoring/useRound'
+import { stepped } from '../../lib/motion'
 import { BigButton } from '../../components/BigButton'
 import { DetailLines } from '../../components/DetailLines'
 import { buildSummaryCard, NETS_TO_NOTHING } from './summaryCard'
@@ -78,7 +79,7 @@ export function SettleScreen() {
               key={s.playerId}
               initial={{ opacity: 0, x: -12 }}
               animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: i * 0.15, duration: 0.12, ease: (t: number) => Math.ceil(t * 3) / 3 }}
+              transition={{ delay: i * 0.15, duration: 0.12, ease: stepped(3) }}
               className="flex items-center justify-between gap-3"
             >
               <span className="min-w-0 truncate text-xl font-semibold">
@@ -245,8 +246,6 @@ export function SettleScreen() {
 function Confetti() {
   const pieces = Array.from({ length: 28 }, (_, i) => i)
   const colors = ['#22c55e', '#7dff66', '#ff4444', '#fafaf9', '#ffd23e']
-  // chunky steps easing: pixels fall on a grid, not a curve
-  const stepped = (n: number) => (t: number) => Math.ceil(t * n) / n
   return (
     <div className="pointer-events-none fixed inset-x-0 top-0 z-50 h-0">
       {pieces.map((i) => {
