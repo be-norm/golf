@@ -444,11 +444,18 @@ change, use a 6-digit code (`{{ .Token }}` + `verifyOtp`) rather than a link.
   SOLO hole celebrates whichever way it lands and a partnered one never does.
   Halves stay silent for Skins' reason: nothing was won. The rule is enforced
   rather than stated — `wolf.test.ts` pins a partnered wolf win to null.
-  `count` is the hole MULTIPLIER (2 lone, 3 blind), not the swing: 6 and 9 both
-  clamp to `MAX_SPRITES` and would leave the two holes looking identical. The
-  wolf's two sprites share their names with the GLYPHS of the same animal, and
-  one drawing serves both (`components/wolfArt.tsx`) — the still wolf in the
-  ledger line and the moving one on the celebration must not drift apart.
+  **`count` is a claim about the ART, not about the money.** Skins throws a coin
+  per skin because a coin is a countable object; Wolf's sprite is a SCENE (he
+  swings, the ball comes at you) and a scene does not multiply — two of them is
+  two wolves, overlapping, each caught mid-swing at a different frame. So Wolf
+  returns 1 and says the hole's size where it can be read: the shades, and the
+  text. A new engine picks its count from what its sprite IS.
+  The wolf's two sprites share their names with the GLYPHS of the same animal
+  and are drawn beside them (`components/wolfArt.tsx`) off one palette — the
+  still wolf in the ledger line and the moving one on the celebration must not
+  read as different animals. That file's swing frames are authored as CHARACTER
+  MAPS rather than rect tuples: past a certain amount of picture, coordinates
+  stop being reviewable.
 - **Motion is stepped, and reduced motion is honoured in two halves.**
   `stepped(n)` (`src/lib/motion.ts`) quantises easing so movement snaps to a
   grid — the same reason both CSS keyframes use `steps()`. Sprites animate by

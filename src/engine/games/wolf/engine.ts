@@ -363,9 +363,14 @@ function derive(
    * shades in its ledger line and its pick prompt, so a blind hole throwing
    * plain wolves would contradict the label sitting beside it.
    *
-   * COUNT IS THE MULTIPLIER — the hole doubles or triples, literally — and
-   * pointedly not the swing: 6 and 9 both clamp to `MAX_SPRITES` upstairs,
-   * which would erase the only thing the number was carrying.
+   * COUNT IS ONE, AND THAT IS A STATEMENT ABOUT THE ART. Skins throws a coin
+   * per skin because a coin is a countable object: three of them is a bigger
+   * pile. Wolf's sprite is a SCENE — the wolf turns on it and the ball comes at
+   * you — and a scene does not multiply. Two of them is not a bigger moment,
+   * it is two wolves, overlapping, each caught at a different frame of the same
+   * swing (the layer staggers them). The hole's size is said where it can
+   * actually be read: the shades, which are the whole difference between the
+   * two sprites, and the text, which says +6 or +3.
    *
    * NOTHING HERE ASKS ABOUT MONEY. It is not a settlement diff, which is the
    * whole reason the channel exists rather than being derived from one: a
@@ -381,7 +386,7 @@ function derive(
     return {
       sprite: r.pick.kind === 'blind' ? 'wolf-shades' : 'wolf',
       playerIds: winners,
-      count: HOLE_UNITS[r.pick.kind],
+      count: 1,
       text: recap(hole) ?? '',
       hole,
     }

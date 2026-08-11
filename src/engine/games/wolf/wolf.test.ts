@@ -709,27 +709,31 @@ describe('wolf — celebrations', () => {
   }
 
   /**
-   * BOTH WAYS A SOLO HOLE CAN LAND, and the count is the multiplier rather than
-   * the swing: a lone win moves six stakes and a blind loss nine, and both of
-   * those clamp to the renderer's cap — which would leave the two holes looking
-   * identical while the hole's actual price, 2× and 3×, went unsaid.
+   * BOTH WAYS A SOLO HOLE CAN LAND. The SPRITE is the declaration — plain wolf
+   * for lone, shades for blind — because that is the difference the group is
+   * reacting to, and the same hole is already wearing the matching glyph in its
+   * ledger line.
+   *
+   * COUNT IS ONE EITHER WAY, and it is pinned here because it is a decision
+   * rather than a default. Skins' count is a pile of coins; Wolf's sprite is a
+   * scene, and a second copy of it is not a bigger moment. Anything that makes
+   * this the multiplier (2/3) or the swing (6/3) fails.
    */
   it('celebrates the holes somebody went it alone on', () => {
     const d = fixture()
-    // the wolf pulled it off alone: his sprite, his row, the doubled hole
+    // the wolf pulled it off alone: his sprite, his row
     expect(d.celebration!(2)).toEqual({
       sprite: 'wolf',
       playerIds: ['p-b'],
-      count: 2,
+      count: 1,
       text: 'B lone +6',
       hole: 2,
     })
-    // and the pack ran a blind wolf down — the same declaration's sprite, the
-    // three who beat him, the tripled hole
+    // and the pack ran a blind wolf down — the shades, and the three who beat him
     expect(d.celebration!(4)).toEqual({
       sprite: 'wolf-shades',
       playerIds: ['p-a', 'p-b', 'p-c'],
-      count: 3,
+      count: 1,
       text: 'A & B & C +3 · blind lost',
       hole: 4,
     })
