@@ -57,6 +57,12 @@ import type { RoundView } from './useRound'
 
 /** Enough coins to read as "a lot", few enough to stay a garnish. */
 const MAX_SPRITES = 5
+/** Integer, like every sprite scale — 4 renders on the 16px grid at 64px. */
+const SPRITE_SCALE = 4
+const HALF = (16 * SPRITE_SCALE) / 2
+/** How far apart the coins sit at rest; they leave the bar already spread by
+ *  half this, because two coins launched from one point read as one coin. */
+const FAN = 22
 
 interface Playing {
   /** re-keys AnimatePresence so the same hole celebrated twice replays */
@@ -179,28 +185,32 @@ function Burst({ playing, onDone }: { playing: Playing; onDone: () => void }) {
 
   return (
     <>
-      {coins.map((i) => (
-        <motion.div
-          key={i}
-          className="absolute"
-          style={{ left: 0, top: 0 }}
-          initial={{ x: from.x - 24, y: from.y - 24, opacity: 0 }}
-          animate={{
-            // fan out a little so a three-skin win reads as three things
-            x: to.x - 24 + (i - (n - 1) / 2) * 18,
-            y: to.y - 24,
-            opacity: [0, 1, 1, 0],
-          }}
-          transition={{
-            duration: 0.62,
-            delay: i * 0.07,
-            ease: stepped(7),
-            opacity: { times: [0, 0.15, 0.8, 1], duration: 0.62, delay: i * 0.07 },
-          }}
-        >
-          <PixelSprite name={celebration.sprite} scale={3} loop />
-        </motion.div>
-      ))}
+      {coins.map((i) => {
+        // centred on the group, so three coins straddle the row rather than
+        // trailing off to one side of it
+        const spread = (i - (n - 1) / 2) * FAN
+        return (
+          <motion.div
+            key={i}
+            className="absolute"
+            style={{ left: 0, top: 0 }}
+            initial={{ x: from.x - HALF + spread / 2, y: from.y - HALF, opacity: 0 }}
+            animate={{
+              x: to.x - HALF + spread,
+              y: to.y - HALF,
+              opacity: [0, 1, 1, 0],
+            }}
+            transition={{
+              duration: 0.62,
+              delay: i * 0.07,
+              ease: stepped(7),
+              opacity: { times: [0, 0.15, 0.8, 1], duration: 0.62, delay: i * 0.07 },
+            }}
+          >
+            <PixelSprite name={celebration.sprite} scale={SPRITE_SCALE} loop />
+          </motion.div>
+        )
+      })}
       <motion.p
         className="font-display absolute text-[10px] uppercase text-coin-400 [text-shadow:2px_2px_0_rgb(0_0_0/0.8)]"
         style={{ left: 0, top: 0 }}

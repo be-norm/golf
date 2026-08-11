@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router'
+import { useEffect, useMemo, useState } from 'react'
+import { Link, useLocation, useNavigate, useParams } from 'react-router'
 import { motion } from 'motion/react'
 import '../../engine/games'
 import { formatCents, formatCentsSigned } from '../../engine/core/money'
@@ -10,6 +10,7 @@ import { enqueueDeleteRound } from '../../remote/outbox'
 import { useRound } from '../scoring/useRound'
 import { stepped } from '../../lib/motion'
 import { BigButton } from '../../components/BigButton'
+import { PixelSprite } from '../../components/PixelSprite'
 import { DetailLines } from '../../components/DetailLines'
 import { buildSummaryCard, NETS_TO_NOTHING } from './summaryCard'
 import { ShareSheet } from './ShareSheet'
@@ -17,9 +18,34 @@ import { ShareSheet } from './ShareSheet'
 export function SettleScreen() {
   const { roundId } = useParams<{ roundId: string }>()
   const navigate = useNavigate()
+  const location = useLocation()
   const view = useRound(roundId)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [shareOpen, setShareOpen] = useState(false)
+
+  /**
+   * CONFETTI IS FOR FINISHING, NOT FOR VISITING. It used to fire on mount, so
+   * it also fired every time somebody opened a finished round from Home's
+   * recent list — a celebration for scrolling back through last month's golf.
+   *
+   * `finish()` is the only thing that says so, via navigation state, because
+   * the round itself cannot: `round/completed` is just as present in the log on
+   * the fiftieth visit as on the first.
+   *
+   * CAPTURED ON MOUNT, then spent — in that order and not the other. Reading it
+   * live and clearing it in an effect flips it false on the very next render
+   * and tears the confetti down a frame after it starts, which looks exactly
+   * like a rendering bug and is one. Spending it matters because history state
+   * survives a reload, and a reload is a visit like any other.
+   */
+  const [justFinished] = useState(
+    () => (location.state as { justFinished?: boolean } | null)?.justFinished === true,
+  )
+  useEffect(() => {
+    if (justFinished) navigate('.', { replace: true, state: null })
+    // once: the point is to spend the flag. Re-running on any other `location`
+    // change would replace history entries this screen never navigated to.
+  }, [justFinished, navigate])
   // One derivation, two renderers: this screen and the shareable image paint
   // the same model, so their numbers cannot drift apart. Memoised because the
   // share sheet repaints whenever this object changes identity.
@@ -58,7 +84,7 @@ export function SettleScreen() {
 
   return (
     <main className="flex min-h-dvh flex-col gap-5 py-6">
-      <Confetti />
+      {justFinished && <Confetti />}
       <header className="flex items-center justify-between">
         <Link to="/" className="text-stone-400">
           ⌂ Home
@@ -242,7 +268,16 @@ export function SettleScreen() {
   )
 }
 
-/** One 8-bit confetti burst, then done — the whole celebration budget. */
+/**
+ * One 8-bit burst when the round ends — the biggest moment the app has, and
+ * still one burst.
+ *
+ * Every fourth piece is a spinning coin rather than a square, because the thing
+ * being celebrated is a settled card: the money is the point. Kept sparse on
+ * purpose — 28 sprites all animating their own strips is a lot of work for a
+ * phone that has been recording scores for four hours, and the squares carry
+ * the shape of the thing anyway.
+ */
 function Confetti() {
   const pieces = Array.from({ length: 28 }, (_, i) => i)
   const colors = ['#22c55e', '#7dff66', '#ff4444', '#fafaf9', '#ffd23e']
@@ -251,6 +286,7 @@ function Confetti() {
       {pieces.map((i) => {
         const x = (i / pieces.length) * 100 + (i % 3) * 2
         const size = 6 + (i % 3) * 4
+        const isCoin = i % 4 === 0
         return (
           <motion.div
             key={i}
@@ -262,8 +298,14 @@ function Confetti() {
             }}
             transition={{ duration: 1.4 + (i % 5) * 0.25, ease: stepped(9 + (i % 4)) }}
             className="absolute"
-            style={{ left: `${x}%`, width: size, height: size, backgroundColor: colors[i % colors.length] }}
-          />
+            style={
+              isCoin
+                ? { left: `${x}%` }
+                : { left: `${x}%`, width: size, height: size, backgroundColor: colors[i % colors.length] }
+            }
+          >
+            {isCoin && <PixelSprite name="coin" scale={1} loop />}
+          </motion.div>
         )
       })}
     </div>

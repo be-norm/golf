@@ -259,3 +259,55 @@ describe('export/import round-trip', () => {
     expect(events).toHaveLength(log.events.length)
   })
 })
+
+/**
+ * CONFETTI IS FOR FINISHING, NOT FOR VISITING (MAI-36).
+ *
+ * It used to render unconditionally on mount, so opening a finished round from
+ * Home's recent list threw a burst for last month's golf. Only `finish()` knows
+ * the difference — the completed round looks identical on the fiftieth open —
+ * so it says so in navigation state.
+ */
+describe('SettleScreen — the burst', () => {
+  const completedRound = async (id: string) => {
+    const round = makeRound({
+      players: makePlayers([{ name: 'Ben' }, { name: 'Alice' }]),
+      holes: 'front9',
+      games: [{ type: 'skins', config: { stakeCents: 100, carryover: true } }],
+    })
+    round.id = id
+    round.status = 'completed'
+    const log = new EventLog(round.id)
+    log.scoreByHole(round, { Ben: [3, 4], Alice: [4, 4] }, [1, 2])
+    log.append({ type: 'round/completed' })
+    await db.rounds.put(round)
+    await db.round_events.bulkAdd(log.events)
+    return round
+  }
+
+  it('does not fire when an old round is opened from the recent list', async () => {
+    const round = await completedRound('round-revisit')
+    const router = createMemoryRouter(routes, {
+      initialEntries: [`/round/${round.id}/settle`],
+    })
+    const { container } = render(<RouterProvider router={router} />)
+    expect(await screen.findByText('Settle up')).toBeInTheDocument()
+    expect(container.querySelectorAll('[data-sprite="coin"]').length).toBe(0)
+  })
+
+  it('fires when arriving straight from finishing the round', async () => {
+    const round = await completedRound('round-just-finished')
+    const router = createMemoryRouter(routes, {
+      initialEntries: [{ pathname: `/round/${round.id}/settle`, state: { justFinished: true } }],
+    })
+    const { container } = render(<RouterProvider router={router} />)
+    expect(await screen.findByText('Settle up')).toBeInTheDocument()
+    // …and it SURVIVES the navigation that spends the flag: reading the state
+    // live and clearing it in an effect tore the burst down a frame in.
+    await waitFor(() =>
+      expect(container.querySelectorAll('[data-sprite="coin"]').length).toBeGreaterThan(0),
+    )
+    expect(router.state.location.state).toBeNull()
+    expect(container.querySelectorAll('[data-sprite="coin"]').length).toBeGreaterThan(0)
+  })
+})

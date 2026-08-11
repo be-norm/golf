@@ -533,7 +533,10 @@ export function ScoringScreen() {
     const stored = await roundRepo.get(round.id)
     const owner = stored?.userId ?? LOCAL_USER
     if (stored && owner !== LOCAL_USER) void enqueuePushRound(owner, stored)
-    navigate(`/round/${round.id}/settle`)
+    // The settle screen cannot tell finishing from visiting on its own — the
+    // completed round looks identical on the fiftieth open — so the one moment
+    // that knows says so (MAI-36).
+    navigate(`/round/${round.id}/settle`, { state: { justFinished: true } })
   }
 
   return (

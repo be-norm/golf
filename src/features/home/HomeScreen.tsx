@@ -4,6 +4,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { roundRepo } from '../../db/repos'
 import { holesForRound } from '../../engine/core/holes'
 import { InstallHint } from '../../pwa/InstallHint'
+import { PixelSprite } from '../../components/PixelSprite'
 import { useAuth } from '../../auth/AuthProvider'
 import { AuthSheet } from '../auth/AuthSheet'
 
@@ -20,8 +21,14 @@ export function HomeScreen() {
 
   return (
     <main className="flex min-h-dvh flex-col gap-6 py-8">
+      {/* The mark, animated once on arrival: the ball finds the cup. It plays
+          over the top of nothing and gates nothing — the boot splash is what
+          the launch actually waits on, and holding THAT for an animation would
+          tax every cold start on the first tee (MAI-36). */}
       <header className="pt-6 text-center">
-        <img src={`${import.meta.env.BASE_URL}pwa-192x192.png`} alt="" className="mx-auto size-16 [image-rendering:pixelated]" />
+        <span className="mx-auto block w-fit">
+          <PixelSprite name="logo" scale={4} />
+        </span>
         <h1 className="font-display mt-3 text-3xl uppercase text-felt-300 [text-shadow:4px_4px_0_rgb(0_0_0/0.6)]">
           Golf
         </h1>
