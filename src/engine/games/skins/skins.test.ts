@@ -299,3 +299,112 @@ describe('skins — golden fixtures (hand-verified)', () => {
     expect(skins.summaryParts).toEqual([{ label: 'H2', value: 'A wins 1 skin' }])
   })
 })
+
+/**
+ * THE CELEBRATION CHANNEL (MAI-36). Same F1 card as above, so the hand
+ * derivation in that fixture's comment is the derivation here too:
+ * H1 A wins 1 · H2–H3 tie · H4 C wins 3 · H5–H6 tie · H7 A wins 3 ·
+ * H8 B wins 1 · H9 tie and dies.
+ */
+describe('skins — celebrations', () => {
+  const f1 = () => {
+    const players = makePlayers([{ name: 'A' }, { name: 'B' }, { name: 'C' }, { name: 'D' }])
+    const round = makeRound({
+      players,
+      holes: 'front9',
+      games: [{ type: 'skins', config: { stakeCents: 100, carryover: true } }],
+    })
+    const log = new EventLog()
+    log.scoreByHole(round, {
+      A: [4, 4, 5, 6, 4, 5, 3, 5, 4],
+      B: [5, 4, 4, 5, 4, 5, 4, 4, 4],
+      C: [5, 5, 4, 4, 4, 5, 4, 5, 4],
+      D: [5, 6, 5, 5, 4, 5, 4, 5, 4],
+    })
+    return { round, log }
+  }
+
+  it('marks a won hole, and counts the pile it banked', () => {
+    const { round, log } = f1()
+    const skins = skinsOf(round, log)
+
+    expect(skins.celebration!(1)).toEqual({
+      sprite: 'coin',
+      playerIds: ['p-a'],
+      count: 1,
+      text: 'A wins 1 skin',
+      hole: 1,
+    })
+    // H4 banks the two that carried through H2 and H3 — the whole reason the
+    // count is the engine's to state rather than something the screen assumes.
+    expect(skins.celebration!(4)).toEqual({
+      sprite: 'coin',
+      playerIds: ['p-c'],
+      count: 3,
+      text: 'C wins 3 skins',
+      hole: 4,
+    })
+  })
+
+  /**
+   * Ties are the commonest outcome in skins, and a celebration on each one is
+   * an animation on most holes — the distracting failure the channel exists to
+   * avoid. Includes H9, the tie where the pot DIES: it is the most eventful
+   * non-win on the card and still not a celebration, because nobody won it.
+   */
+  it('says nothing on ties, pending and dead holes', () => {
+    const { round, log } = f1()
+    const skins = skinsOf(round, log)
+    for (const hole of [2, 3, 5, 6, 9]) {
+      expect(skins.celebration!(hole), `hole ${hole}`).toBeNull()
+    }
+  })
+
+  it('says nothing about a hole nobody has played', () => {
+    const players = makePlayers([{ name: 'A' }, { name: 'B' }])
+    const round = makeRound({
+      players,
+      holes: 'front9',
+      games: [{ type: 'skins', config: { stakeCents: 100, carryover: true } }],
+    })
+    const log = new EventLog()
+    log.scoreByHole(round, { A: [4], B: [5] }, [1])
+    const skins = skinsOf(round, log)
+    expect(skins.celebration!(1)).toMatchObject({ count: 1, playerIds: ['p-a'] })
+    for (const hole of [2, 3, 4, 5, 6, 7, 8, 9]) {
+      expect(skins.celebration!(hole), `hole ${hole}`).toBeNull()
+    }
+  })
+
+  /**
+   * ONE SENTENCE, NOT TWO THAT AGREE. The bar's recap and the celebration's
+   * text are the same `recap(hole)`, so this pins them together — reword one
+   * without the other and this fails, which is the only thing that stops the
+   * coins from eventually saying something the bar contradicts.
+   */
+  it('says exactly what the bar says about the same hole', () => {
+    const players = makePlayers([{ name: 'A' }, { name: 'B' }, { name: 'C' }, { name: 'D' }])
+    const round = makeRound({
+      players,
+      holes: 'front9',
+      games: [{ type: 'skins', config: { stakeCents: 100, carryover: true } }],
+    })
+    const log = new EventLog()
+    // The F1 card stopped one hole short, so the last DECIDED hole is H8's win
+    // rather than H9's dead tie — which is what puts the same hole in front of
+    // both channels at once.
+    log.scoreByHole(
+      round,
+      {
+        A: [4, 4, 5, 6, 4, 5, 3, 5],
+        B: [5, 4, 4, 5, 4, 5, 4, 4],
+        C: [5, 5, 4, 4, 4, 5, 4, 5],
+        D: [5, 6, 5, 5, 4, 5, 4, 5],
+      },
+      [1, 2, 3, 4, 5, 6, 7, 8],
+    )
+    const skins = skinsOf(round, log)
+    expect(skins.summaryParts).toEqual([{ label: 'H8', value: 'B wins 1 skin' }])
+    expect(skins.celebration!(8)!.text).toBe('B wins 1 skin')
+  })
+})

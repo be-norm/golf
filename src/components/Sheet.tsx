@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
+import { stepped } from '../lib/motion'
 
 interface SheetProps {
   open: boolean
@@ -24,7 +25,7 @@ export function Sheet({ open, onClose, children }: SheetProps) {
             initial={{ y: '100%' }}
             animate={{ y: 0 }}
             exit={{ y: '100%' }}
-            transition={{ duration: 0.22, ease: (t: number) => Math.ceil(t * 5) / 5 }}
+            transition={{ duration: 0.22, ease: stepped(5) }}
           >
             <div className="mx-auto mb-4 h-1.5 w-12 bg-felt-500" />
             {children}

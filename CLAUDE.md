@@ -1,9 +1,11 @@
 # Golf — game tracker for golf money games between friends
 
 Installable offline-first PWA. One scorekeeper phone per group enters hole-by-hole scores;
-the app computes all game standings/payouts. Seven games ship today — Skins, Nassau, Match
-Play, Wolf, Vegas, Six Point and Closest to the Pin; `docs/games-catalog.md` holds those plus
-every game still to come, with implementation-grade scoring math.
+the app computes all game standings/payouts. Nine games ship today — Skins, Nassau, Match
+Play, Wolf, Vegas, Six Point, Closest to the Pin, Long Drive and Snake; `docs/games-catalog.md`
+holds those plus every game still to come, with implementation-grade scoring math.
+(`src/engine/games/index.ts` is the registry and the count of record — this line has been
+stale before.)
 
 **The architecture of record is the invariants below** — there is no separate plan history to
 consult, and this line used to promise one. `docs/` carries exactly two standing design notes
@@ -406,6 +408,46 @@ change, use a 6-digit code (`{{ .Token }}` + `verifyOtp`) rather than a link.
   the scores posted) fires the moment one player picks up on the par 3, while
   the round is live and the cell is still lit. An award game also skips any hole
   `ctx.anyScored` says nobody played (MAI-38).
+- **Celebrations are the FOURTH channel, and they are read-only** (MAI-36).
+  `celebration?(hole)` lets an engine mark a hole worth a small noise and name
+  the sprite that plays; `CelebrationLayer` flies it from the pinned bar to the
+  winner's row. Optional like `awards` — implement it and the screen animates,
+  leave it off and nothing changes. It is the only one of the four channels that
+  never writes an event, so it needs no `GameEventOffer` half.
+  **The engine names a TOKEN, never a picture** (`CELEBRATION_SPRITES`,
+  `core/celebration.ts`), for `glyphs.ts`'s reason — engines are pure TS — and
+  `PixelSprite`'s exhaustive record makes a token with no art a type error.
+  That indirection is the whole reason each game can have its OWN animation
+  while the app layer keeps zero per-game branching. `text` DECODES glyph
+  tokens, unlike the bar: it is transient DOM and never reaches the canvas.
+  **Newness is the app's problem, not the engine's**, and it is where the bugs
+  are. `deriveRound` recomputes wholesale, so `celebration(3)` answers the same
+  on the tap that decided hole 3 as on every render after it. `CelebrationLayer`
+  keeps a seen-set of `(game, hole, sprite)`, **seeded on the first render that
+  HAS a view** (seeding on mount records nothing, because `useRound` returns
+  undefined while Dexie loads, and then replays every decided hole of a resumed
+  round). It skips a `meta/retract` — undoing a CORRECTION restores an earlier
+  score and hands back a win nobody just made — and it declines any append that
+  is about no hole at all (`eventHole` → null), which is how finishing a round
+  early avoids throwing coins for the holes that finishing just decided.
+  It fires **one per append**, structurally, one slot and not a queue, because
+  two games decide the same hole off the same scores.
+  **The key is (game, hole, sprite, WINNER) and pointedly not `count`** — that
+  pair of choices is what separates a carry re-pricing a settled hole (silent)
+  from a correction handing it to somebody else (announced).
+- **Motion is stepped, and reduced motion is honoured in two halves.**
+  `stepped(n)` (`src/lib/motion.ts`) quantises easing so movement snaps to a
+  grid — the same reason both CSS keyframes use `steps()`. Sprites animate by
+  translating a frame strip, at INTEGER scale only (`PixelSprite`; note Tailwind
+  `size-*` is rem-based against a 19px root, so `size-16` is 76px, not 64).
+  `<MotionConfig reducedMotion="user">` covers everything Motion drives; the
+  `prefers-reduced-motion` block in `index.css` covers the keyframes it cannot
+  see. Both are required — neither is sufficient. **The CSS half selects
+  `[data-sprite]`, which is why that attribute sits on the animated `<svg>` and
+  not on `PixelSprite`'s wrapper**: `animation` does not inherit, so an
+  attribute one element up matches a node with nothing to stop and every sprite
+  keeps playing while the rule, the comment and this line all read as though it
+  were handled. `PixelSprite.test.tsx` pins the two to the same element.
 - **The share card is painted, not screenshotted.** `Share` on the settle screen
   produces a PNG drawn by hand onto a canvas (`paintSummaryCard.ts`), never a
   DOM capture — rasterising the live screen means `foreignObject`, and so means

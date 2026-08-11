@@ -1,4 +1,5 @@
 import { Outlet } from 'react-router'
+import { MotionConfig } from 'motion/react'
 import { UpdateToast } from '../pwa/UpdateToast'
 import { AuthProvider, useAuth } from '../auth/AuthProvider'
 import { ClaimPrompt } from '../features/auth/ClaimPrompt'
@@ -34,16 +35,29 @@ function BootSplash() {
   )
 }
 
+/**
+ * `reducedMotion="user"` is the ONE line that covers every Motion call site in
+ * the app at once — the sheet slide, the hole-number crossfade, the score-tile
+ * tap, the settle confetti and every celebration. Motion drops transform and
+ * layout animations and keeps opacity, which is exactly the right trade: the
+ * information still arrives, the movement doesn't.
+ *
+ * It does NOT reach the CSS keyframes (`animate-blink`, `animate-stamp`, the
+ * sprite strips) — those are handled by the `prefers-reduced-motion` block in
+ * `index.css`. Both halves are required; neither is sufficient.
+ */
 export function AppLayout() {
   return (
-    <AuthProvider>
-      <div className="min-h-dvh bg-felt-950 text-stone-100 antialiased">
-        <RoutedColumn />
-        {/* CRT scanline overlay — purely decorative, faint */}
-        <div aria-hidden className="scanlines pointer-events-none fixed inset-0 z-[70] opacity-[0.13]" />
-        <UpdateToast />
-        <ClaimPrompt />
-      </div>
-    </AuthProvider>
+    <MotionConfig reducedMotion="user">
+      <AuthProvider>
+        <div className="min-h-dvh bg-felt-950 text-stone-100 antialiased">
+          <RoutedColumn />
+          {/* CRT scanline overlay — purely decorative, faint */}
+          <div aria-hidden className="scanlines pointer-events-none fixed inset-0 z-[70] opacity-[0.13]" />
+          <UpdateToast />
+          <ClaimPrompt />
+        </div>
+      </AuthProvider>
+    </MotionConfig>
   )
 }

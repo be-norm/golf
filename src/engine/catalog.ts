@@ -2,6 +2,7 @@ import type { z } from 'zod'
 import type { GameScopedEvent, RoundEvent } from './core/events'
 import { buildRoundContext, type RoundContext } from './core/context'
 import { effectiveEvents, gameEventsFor } from './core/replay'
+import type { Celebration } from './core/celebration'
 import type { Settlement } from './core/money'
 import type {
   Award,
@@ -19,6 +20,9 @@ import type {
 // upward from the catalog), re-exported here because engines reach for them
 // alongside GameDerivation.
 export type { StandingLine, GameEventOffer, Award }
+// Same reason, one directory over: `core/celebration.ts` owns the token list
+// and the shape, engines reach for it beside GameDerivation.
+export type { Celebration }
 
 /** A blocking prompt the scoring UI renders as a generic chip — no game-specific screens. */
 export interface InputRequest {
@@ -167,6 +171,20 @@ export interface GameDerivation {
    * `buildHoleLedger`'s prefix replay.
    */
   awards?(hole: number): Award[]
+  /**
+   * A hole worth a small noise — the celebration channel (MAI-36). Implement it
+   * and the scoring screen animates this game's own sprite when the hole
+   * decides; leave it off and nothing changes, exactly like `awards`.
+   *
+   * Takes the hole and returns at most one, for the same reason `awards` takes
+   * one hole: `deriveRound` runs on every tap and once per hole inside
+   * `buildHoleLedger`'s prefix replay, so nothing here may allocate per-round.
+   *
+   * RETURN NULL GENEROUSLY. The screen fires at most one of these per append,
+   * but that cap is a backstop against carry cascades — it is not permission to
+   * mark every hole. See `core/celebration.ts` for what earns one.
+   */
+  celebration?(hole: number): Celebration | null
   settlement: Settlement
   /**
    * Things the game has to SAY that are not money movements — "3 skins died

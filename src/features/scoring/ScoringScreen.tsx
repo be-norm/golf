@@ -31,6 +31,7 @@ import { RulesSheet } from '../games/RulesSheet'
 import { useRound } from './useRound'
 import { holeLoop, ordinal } from './holeLoop'
 import { MAX_PUTTS, ScoreRow } from './ScoreRow'
+import { CelebrationLayer } from './CelebrationLayer'
 
 /**
  * Used only when no single game owns the affordance — several games offering
@@ -532,7 +533,10 @@ export function ScoringScreen() {
     const stored = await roundRepo.get(round.id)
     const owner = stored?.userId ?? LOCAL_USER
     if (stored && owner !== LOCAL_USER) void enqueuePushRound(owner, stored)
-    navigate(`/round/${round.id}/settle`)
+    // The settle screen cannot tell finishing from visiting on its own — the
+    // completed round looks identical on the fiftieth open — so the one moment
+    // that knows says so (MAI-36).
+    navigate(`/round/${round.id}/settle`, { state: { justFinished: true } })
   }
 
   return (
@@ -767,6 +771,7 @@ export function ScoringScreen() {
         {round.players.map((p) => (
           <ScoreRow
             key={p.playerId}
+            playerId={p.playerId}
             name={p.name}
             par={ctx.par(currentHole)}
             gross={ctx.gross.get(p.playerId)?.get(currentHole)}
@@ -789,7 +794,12 @@ export function ScoringScreen() {
         onUndo={giveBack}
       />
 
-      <div className="fixed inset-x-0 bottom-0 z-30 border-t-4 border-felt-600 bg-stone-950/95 px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 backdrop-blur">
+      {/* Celebrations launch from the bar, because the bar is where the result
+          is stated — the coins carry the eye from the sentence to the player. */}
+      <div
+        data-summary-bar
+        className="fixed inset-x-0 bottom-0 z-30 border-t-4 border-felt-600 bg-stone-950/95 px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 backdrop-blur"
+      >
         <div className="mx-auto max-w-md">
           {allScored ? (
             <BigButton className="mb-1 w-full" onClick={() => void finish()}>
@@ -984,6 +994,8 @@ export function ScoringScreen() {
       />
 
       <RulesSheet type={rulesFor} onClose={() => setRulesFor(undefined)} />
+
+      <CelebrationLayer view={view} />
     </main>
   )
 }

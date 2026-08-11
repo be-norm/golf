@@ -7,6 +7,7 @@ import { newId } from '../../db/ids'
 import { isStrokeIndexPermutation, looksLikeEighteenHoleRating } from '../../engine/core/tees'
 import { useAuth } from '../../auth/AuthProvider'
 import { BigButton } from '../../components/BigButton'
+import { PixelSprite } from '../../components/PixelSprite'
 import { selectOnFocus } from '../../components/inputs'
 
 /** A rating is for the holes the card covers, so a nine's is about half an 18's —
@@ -180,6 +181,18 @@ export function CourseEditorScreen() {
         <h1 className="font-display text-xs uppercase text-felt-300">{isNew ? 'New course' : 'Edit course'}</h1>
         <span className="w-14" />
       </header>
+
+      {/* The scan landed. Says what came back and — with `animate-stamp` — that
+          it just arrived, because the editor otherwise looks identical whether
+          you scanned a card or tapped "New course" and typed nothing. */}
+      {scannedDraft && (
+        <p className="animate-stamp pixel flex items-center justify-center gap-3 border-felt-500 bg-felt-900/60 px-4 py-3">
+          <PixelSprite name="scan" scale={2} />
+          <span className="font-display text-[10px] uppercase text-felt-200">
+            Scorecard read · {scannedDraft.holes.length} holes · check it over
+          </span>
+        </p>
+      )}
 
       <section className="space-y-3">
         <input

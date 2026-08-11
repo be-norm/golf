@@ -8,6 +8,7 @@ import { formatCents } from '../../engine/core/money'
 import type { GameConfig, HandicapSettings } from '../../engine/core/types'
 import { roundRepo } from '../../db/repos'
 import { BigButton } from '../../components/BigButton'
+import { PixelSprite } from '../../components/PixelSprite'
 import { selectOnFocus } from '../../components/inputs'
 import { RulesSheet } from '../games/RulesSheet'
 import { useRound } from './useRound'
@@ -162,6 +163,15 @@ export function RoundStartScreen() {
       </header>
 
       <div className="text-center">
+        {/* The flag goes in — once, on arrival, and only for a round that has
+            not started. Coming BACK to this screen mid-round (the header link
+            is live all the way until the first event) is not a first tee, and
+            replaying the ceremony would say it was. */}
+        {!logStarted && (
+          <span className="mx-auto mb-3 block w-fit">
+            <PixelSprite name="flag-plant" scale={4} />
+          </span>
+        )}
         <h1 className="font-display text-sm uppercase text-coin-400">★ First tee ★</h1>
         <p className="mt-2 text-xl font-bold">{round.courseSnapshot.name}</p>
         <p className="mt-1 text-sm text-stone-400">

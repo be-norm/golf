@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import type { GameEngine, GameDerivation } from '../../catalog'
+import type { Celebration, GameEngine, GameDerivation } from '../../catalog'
 import type { RoundContext } from '../../core/context'
 import type { GameScopedEvent } from '../../core/events'
 import { addLine, emptySettlement, type Settlement } from '../../core/money'
@@ -115,22 +115,49 @@ function derive(
     return `${won} skin${won === 1 ? '' : 's'}`
   })
 
-  // Bar recaps the latest decided hole — "H4 · Rob wins 2 skins".
-  const summaryParts = latestHoleSummary(
-    ctx.holesPlayed,
-    (hole) => {
-      const r = holeResults.find((h) => h.hole === hole)
-      if (r?.kind === 'won')
-        return `${nameOf.get(r.winnerId)} wins ${r.skins} skin${r.skins > 1 ? 's' : ''}`
-      if (r?.kind === 'tied') {
-        // "carried" promises the pile rolls onto a hole that no longer exists
-        if (hole === diedAt) return `tied · ${deadSkins} died unwon`
-        return r.carryAfter > 0 ? `tied · ${r.carryAfter} carried` : 'tied — no skin'
-      }
-      return null
-    },
-    'no skins yet',
-  )
+  /**
+   * ONE SENTENCE, TWO CHANNELS. The pinned bar recaps the latest decided hole
+   * ("H4 · Rob wins 2 skins") and a celebration says the same thing beside its
+   * coins — so they are the same function, not two literals that agree today.
+   * Written out as a separate `const` for exactly that reason: inlined into
+   * `latestHoleSummary` it invited the celebration to grow a second copy, and
+   * the first rewording would have split them.
+   */
+  const recap = (hole: number): string | null => {
+    const r = holeResults.find((h) => h.hole === hole)
+    if (r?.kind === 'won')
+      return `${nameOf.get(r.winnerId)} wins ${r.skins} skin${r.skins > 1 ? 's' : ''}`
+    if (r?.kind === 'tied') {
+      // "carried" promises the pile rolls onto a hole that no longer exists
+      if (hole === diedAt) return `tied · ${deadSkins} died unwon`
+      return r.carryAfter > 0 ? `tied · ${r.carryAfter} carried` : 'tied — no skin'
+    }
+    return null
+  }
+
+  const summaryParts = latestHoleSummary(ctx.holesPlayed, recap, 'no skins yet')
+
+  /**
+   * A WON HOLE ONLY, and the count is the pile it banked (MAI-36).
+   *
+   * Ties are deliberately silent. They are the commonest outcome in this game —
+   * a celebration on every tie is an animation on most holes, which is the
+   * distracting failure the channel is meant to avoid, and it would spend the
+   * carry's drama on the holes where nothing is actually won. The carry still
+   * reads: it is the NUMBER OF COINS thrown on the hole that finally banks it,
+   * which is the moment worth marking.
+   */
+  const celebration = (hole: number): Celebration | null => {
+    const r = holeResults.find((h) => h.hole === hole)
+    if (r?.kind !== 'won') return null
+    return {
+      sprite: 'coin',
+      playerIds: [r.winnerId],
+      count: r.skins,
+      text: recap(hole) ?? '',
+      hole,
+    }
+  }
 
   const holeSummary = (hole: number): string[] => {
     const r = holeResults.find((h) => h.hole === hole)
@@ -158,6 +185,7 @@ function derive(
     summaryParts,
     holeSummary,
     requiredInputs: () => [],
+    celebration,
     settlement,
     notes,
     holeResults,

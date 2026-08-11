@@ -1,6 +1,12 @@
 import { motion } from 'motion/react'
 
 interface ScoreRowProps {
+  /**
+   * Whose row this is — the anchor a celebration flies to (`CelebrationLayer`
+   * finds it by `data-player-row`). Presentation only; the row itself never
+   * reads it.
+   */
+  playerId: string
   name: string
   par: number
   gross: number | undefined
@@ -32,6 +38,7 @@ export const MAX_PUTTS = 10
  * immediately (the event log absorbs corrections). ~4–6 taps per hole for four.
  */
 export function ScoreRow({
+  playerId,
   name,
   par,
   gross,
@@ -44,7 +51,10 @@ export function ScoreRow({
   const diff = gross !== undefined ? gross - par : 0
 
   return (
-    <div className="pixel flex items-center justify-between border-stone-700 bg-stone-900/80 py-2.5 pl-4 pr-2.5">
+    <div
+      data-player-row={playerId}
+      className="pixel flex items-center justify-between border-stone-700 bg-stone-900/80 py-2.5 pl-4 pr-2.5"
+    >
       <div className="min-w-0">
         <p className="truncate text-xl font-semibold">{name}</p>
         {strokes !== 0 && (
