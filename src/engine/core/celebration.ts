@@ -37,9 +37,15 @@ export interface Celebration {
   /** which art plays; the app owns the drawing, the engine owns the choice */
   sprite: CelebrationSprite
   /**
-   * WHOSE HOLE THIS WAS — the animation anchors to these players' score rows.
-   * Empty is legal (a hole that decided nothing for anyone in particular) and
-   * simply plays at the bar.
+   * WHOSE HOLE THIS WAS. Empty is legal (a hole that decided nothing for anyone
+   * in particular) and simply plays at the bar.
+   *
+   * NAMING SEVERAL IS NOT ANIMATING SEVERAL. The burst has one anchor:
+   * `CelebrationLayer.anchorFor` takes the FIRST of these whose score row is
+   * mounted. List everyone the hole belonged to anyway — Wolf's pack wins do —
+   * because this list is also what the layer's seen-key is built from, so it is
+   * what makes a correction that moves somebody between the sides read as a new
+   * event rather than the same one.
    */
   playerIds: readonly Uuid[]
   /**

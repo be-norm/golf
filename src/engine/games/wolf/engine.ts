@@ -340,8 +340,18 @@ function derive(
    * the whole game is built on (see HOLE_UNITS), they are rare in a round
    * priced to make declining usually right, and they are what the group reacts
    * to. So a solo hole celebrates whichever way it lands — a lone wolf run down
-   * by the pack is the loudest moment at the table, and the coins go to the
-   * three who ran him down while the text says what happened.
+   * by the pack is the loudest moment at the table, and it is named as the
+   * pack's while the text says which way it went.
+   *
+   * NAMING THREE PLAYERS IS NOT THROWING SPRITES AT THREE ROWS, and this is the
+   * first celebration in the app to name more than one (Skins always had a
+   * single winner). `CelebrationLayer.anchorFor` flies the whole burst to the
+   * FIRST of these ids whose row is mounted. That is accepted rather than
+   * worked around: the money went to all three, the text names all three, and
+   * the id list is also what the layer's seen-key is built from — so a
+   * correction that moves a player between the sides is recognised as a new
+   * event rather than the same one. Widening the burst across rows is a change
+   * to the layer, not to this list.
    *
    * Partnered holes are silent (all ±1, three quarters of the round, nothing to
    * tell apart) and so are halves, for Skins' reason: nothing was won. A round
