@@ -23,7 +23,13 @@ import type { Uuid } from './types'
  * constantly stops meaning anything, and the ticket's own constraint is
  * "short / non-distracting".
  */
-export const CELEBRATION_SPRITES = ['coin'] as const
+/**
+ * The wolf tokens deliberately share their names with the GLYPHS of the same
+ * animal (`glyphs.ts`), because they are the same animal: a Wolf hole shows the
+ * still wolf in its ledger line and throws the moving one when it decides. Two
+ * token namespaces, one drawing (`components/wolfArt.tsx`).
+ */
+export const CELEBRATION_SPRITES = ['coin', 'wolf', 'wolf-shades'] as const
 
 export type CelebrationSprite = (typeof CELEBRATION_SPRITES)[number]
 

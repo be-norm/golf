@@ -435,6 +435,20 @@ change, use a 6-digit code (`{{ .Token }}` + `verifyOtp`) rather than a link.
   **The key is (game, hole, sprite, WINNER) and pointedly not `count`** — that
   pair of choices is what separates a carry re-pricing a settled hole (silent)
   from a correction handing it to somebody else (announced).
+  **What earns one is the DECLARATION, not the win** (MAI-94, Wolf, the second
+  engine on the channel). Wolf's obvious rule — celebrate `outcome === 'wolfWin'`
+  — picks the wrong axis: every decided hole here has a winning side, so it
+  marks half the round while asserting that the wolf side taking a hole is
+  remarkable and the pack taking one isn't. What is remarkable is somebody going
+  lone or blind, which is rare and is the decision the game is built on, so a
+  SOLO hole celebrates whichever way it lands and a partnered one never does.
+  Halves stay silent for Skins' reason: nothing was won. The rule is enforced
+  rather than stated — `wolf.test.ts` pins a partnered wolf win to null.
+  `count` is the hole MULTIPLIER (2 lone, 3 blind), not the swing: 6 and 9 both
+  clamp to `MAX_SPRITES` and would leave the two holes looking identical. The
+  wolf's two sprites share their names with the GLYPHS of the same animal, and
+  one drawing serves both (`components/wolfArt.tsx`) — the still wolf in the
+  ledger line and the moving one on the celebration must not drift apart.
 - **Motion is stepped, and reduced motion is honoured in two halves.**
   `stepped(n)` (`src/lib/motion.ts`) quantises easing so movement snaps to a
   grid — the same reason both CSS keyframes use `steps()`. Sprites animate by

@@ -1,6 +1,7 @@
 import type { ReactElement } from 'react'
 import type { CelebrationSprite } from '../engine/core/celebration'
 import { FRAME_MS } from '../lib/motion'
+import { EYE, FUR, INK, shadesEyes, WOLF_EYES, wolfHead } from './wolfArt'
 
 /**
  * ANIMATED 16×16 pixel art — the moving counterpart to `PixelGlyph`, in the
@@ -129,6 +130,69 @@ const COIN_FRAMES: readonly ReactElement[] = [
       'h2l',
     )}
   </>,
+]
+
+/* ── the wolf, howling ───────────────────────────────────── */
+/**
+ * THE SAME ANIMAL `PixelGlyph` DRAWS STILL (`wolfArt.tsx`) — a Wolf hole shows
+ * the glyph in its ledger line and its pick prompt, so the celebration has to be
+ * recognisably that wolf and not a second one.
+ *
+ * The jaw is PAINTED OVER the chin rather than parameterised into the head: SVG
+ * paints in document order, so a frame is `wolfHead(...)` followed by two runs,
+ * and nothing here can move the still glyph. `open` doubles as the mouth's
+ * height in pixels, which is why it also names the frame.
+ *
+ * One howl per cycle — shut, cracked, open, cracked — so it loops without a
+ * seam for the length of the flight, the way the coin spins. The head lifts a
+ * single pixel on the open frame, which is the whole headroom the drawing has:
+ * the ear tips already sit at y=1.
+ */
+function jaw(open: 0 | 1 | 2): ReactElement | null {
+  if (open === 0) return null
+  return (
+    <>
+      <rect x="6" y="13" width="4" height={open} fill={INK} />
+      <rect x="6" y={13 + open} width="4" height="1" fill={FUR} />
+    </>
+  )
+}
+
+function howl(eyes: ReactElement, open: 0 | 1 | 2, lift = 0): ReactElement {
+  return (
+    <g transform={`translate(0, ${-lift})`}>
+      {wolfHead(eyes)}
+      {jaw(open)}
+    </g>
+  )
+}
+
+/** Mid-howl the eyes narrow to a slit — the one frame the wolf isn't watching. */
+const WOLF_SQUINT: ReactElement = (
+  <>
+    <rect x="4" y="7" width="2" height="1" fill={EYE} />
+    <rect x="10" y="7" width="2" height="1" fill={EYE} />
+  </>
+)
+
+const WOLF_FRAMES: readonly ReactElement[] = [
+  howl(WOLF_EYES, 0),
+  howl(WOLF_EYES, 1),
+  howl(WOLF_SQUINT, 2, 1),
+  howl(WOLF_EYES, 1),
+]
+
+/**
+ * BLIND WOLF wears the shades, and they catch the light instead of blinking —
+ * the glint slides across both lenses as the head comes up. Same silhouette and
+ * the same cycle as the plain wolf, because it is the same wolf: only the
+ * declaration changed.
+ */
+const WOLF_SHADES_FRAMES: readonly ReactElement[] = [
+  howl(shadesEyes(0), 0),
+  howl(shadesEyes(1), 1),
+  howl(shadesEyes(2), 2, 1),
+  howl(shadesEyes(1), 1),
 ]
 
 /* ── the course, as `public/icon.svg` draws it ───────────── */
@@ -295,6 +359,8 @@ const SCAN_FRAMES: readonly ReactElement[] = [2, 4, 6, 8, 10, 12, 14].map((y) =>
  */
 const SPRITES = {
   coin: COIN_FRAMES,
+  wolf: WOLF_FRAMES,
+  'wolf-shades': WOLF_SHADES_FRAMES,
   logo: LOGO_FRAMES,
   'flag-plant': FLAG_PLANT_FRAMES,
   scan: SCAN_FRAMES,

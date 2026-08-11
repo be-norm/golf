@@ -29,7 +29,7 @@ const FAMILIES = ['match', 'stroke', 'points', 'pot', 'award', 'wager'] as const
 const CATEGORIES = ['main', 'side', 'either'] as const satisfies readonly GameCategory[]
 const SHAPES = ['solo', 'headToHead', 'teams', 'partners'] as const satisfies readonly GameShape[]
 const FACTS = ['putts'] as const satisfies readonly RoundFact[]
-const SPRITES = ['coin'] as const satisfies readonly CelebrationSprite[]
+const SPRITES = ['coin', 'wolf', 'wolf-shades'] as const satisfies readonly CelebrationSprite[]
 
 type _FamiliesCovered = Covers<GameFamily, typeof FAMILIES>
 type _CategoriesCovered = Covers<GameCategory, typeof CATEGORIES>
