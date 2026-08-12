@@ -7,17 +7,16 @@ import type { ReactElement } from 'react'
  * share one palette: the fur, the gold eye and the black lens have to match, or
  * the mark in the ledger and the wolf on the coins read as different wolves.
  *
- * Both are 16×16 `shape-rendering="crispEdges"` rects on the integer grid, in
- * the idiom `public/icon.svg` set.
- *
- * THE SWING IS AUTHORED AS A PICTURE, not as a list of rects. Seven frames of a
- * wolf, a club and a ball is more art than a wall of coordinates can hold in a
- * reader's head — the first version of this file was tuples, and re-shaping an
- * ear meant counting. `pixels()` takes character maps and collapses horizontal
- * runs into the same rects everything else emits, so the source stays something
- * you can look at and the output is unchanged.
+ * THE TWO ARE DRAWN AT DIFFERENT RESOLUTIONS ON PURPOSE. The glyph is 16×16
+ * because it sits inline in a sentence at 16 CSS pixels, where one art pixel is
+ * one screen pixel and detail would just be mud. The swing is 32×32 because it
+ * plays centre screen at five times that, where 16×16 reads as flat and cheap —
+ * the SNES-era answer to exactly this problem, and the reason for the three fur
+ * tones and the one-pixel dark outline below rather than the flat two-tone
+ * silhouette this started as.
  */
 
+/* ── palette ─────────────────────────────────────────────── */
 export const FUR = '#a8a29e'
 export const FUR_DARK = '#57534e'
 export const MUZZLE = '#d6d3d1'
@@ -25,10 +24,26 @@ export const INK = '#1c1917'
 export const EYE = '#ffd23e'
 export const LENS = '#0c0a09'
 export const GLINT = '#f5f5f4'
-/** club shaft and ball, borrowed from the icon's own palette */
-const STICK = '#e7e5e4'
-const BALL = '#fafaf9'
-const BALL_LIT = '#ffffff'
+
+/**
+ * The swing's extra tones. Shadows shift COOL rather than simply darkening,
+ * which is the difference between fur and grey paint.
+ */
+const OUTLINE = '#100c14'
+const FUR_HI = '#e8e2dc'
+const FUR_SH = '#6a6470'
+const GLOVE = '#fafafa'
+const CLUB = '#d4d4d8'
+const CLUB_HEAD = '#a1a1aa'
+/**
+ * THE BALL IS COOL AND THE WOLF IS WARM, which is the only reason a white ball
+ * reads against grey fur at all. Matched in value they vanish into each other
+ * the moment they overlap — and they overlap for four frames out of seven,
+ * which is the whole second half of the animation.
+ */
+const BALL = '#eef1f7'
+const BALL_HI = '#ffffff'
+const BALL_SH = '#9aa3b8'
 const SPARK = '#7dff66' // felt-300, the same green the logo's putt bursts with
 
 /* ── the still head, for the glyph ───────────────────────── */
@@ -89,96 +104,346 @@ export const SHADES_EYES = (
   </>
 )
 
-/* ── the swing, for the sprite ───────────────────────────── */
+/* ── the swing ───────────────────────────────────────────── */
+
+export const SWING_SIZE = 32
 
 /**
- * WHAT WINNING A HOLE ALONE LOOKS LIKE: the wolf turns on it and the ball comes
- * straight at you, growing until it fills the frame.
+ * THE WOLF IN PROFILE, ADDRESSING THE BALL. Silhouette only — the tones are
+ * applied below, because edge-shading a shape is mechanical work and doing it
+ * by hand across a figure this size is how a highlight ends up one pixel out on
+ * one row and nowhere else.
  *
- * The whole animal, not the head mark — a swing needs somebody to make it, and
- * a floating club under a portrait reads as nothing at all (that was the first
- * attempt). Seven frames is one swing at the house frame rate, which is very
- * nearly the length of the flight the celebration layer gives it, so it plays
- * through about once on the way to the winner's row.
- *
- * THE HEAD IS SIZED BY THE SHADES. Blind Wolf is the difference between this
- * sprite and its twin, so the eye band has to survive at 16px: seven pixels of
- * skull gives a five-pixel bar, which is twenty screen pixels at the scale the
- * layer renders. Shrink the wolf any further and the two celebrations become
- * the same picture.
- *
- * THE BALL IS PAINTED LAST because it is the nearest thing to the camera, and
- * it is allowed to swallow the wolf: by the last frame only his ears and feet
- * are left. That is the point of the shot.
+ * `e` is the eye, `n` the nose, `i` the inside of an ear. Everything else is
+ * body. Drawn inside a one-pixel margin so the outline pass has somewhere to go.
  */
-const WOLF_BODY = [
-  '................',
-  '.F.....F........',
-  '.FD...DF........',
-  '.FFFFFFF........',
-  '.FeeseeF........',
-  '.FFFFFFFM.......',
-  'F.FFFFF.........',
-  'FFFFFFF.........',
-  'F.FFFFFF........',
-  '..FFFFFF........',
-  '..FFFFF.........',
-  '..FF.FF.........',
-  '..FF.FF.........',
-  '..F...F.........',
-  '.FFF.FFF........',
-  '................',
+const WOLF_FIGURE = [
+  '                                ',
+  '                                ',
+  '   #      ##                    ',
+  '   ##    #ii#                   ',
+  '  #ii#  #iii#                   ',
+  '  ###########                   ',
+  '  ##ee########                  ',
+  '  ###############               ',
+  '   ################n            ',
+  '    ##############              ',
+  '     ##########                 ',
+  '      ########                  ',
+  '     #########                  ',
+  '  #  #########                  ',
+  ' ### ##########                 ',
+  ' ###############                ',
+  '  ##############                ',
+  '  #############                 ',
+  '  #############                 ',
+  '  #############                 ',
+  '   ############                 ',
+  '   ###########                  ',
+  '   ####  ######                 ',
+  '   ####  ######                 ',
+  '   ####   #####                 ',
+  '  #####   #####                 ',
+  '  ####    #####                 ',
+  '  ####    #####                 ',
+  ' ######  #######                ',
+  ' ######  #######                ',
+  '                                ',
+  '                                ',
 ] as const
 
+/** where the shades sit in profile: one bar across the eye, back to the ear */
+const SHADES_BAR: readonly (readonly [x: number, y: number])[] = [
+  [4, 6],
+  [5, 6],
+  [6, 6],
+  [7, 6],
+  [8, 6],
+  [9, 6],
+  [3, 5],
+]
+const SHADES_GLINT: readonly [x: number, y: number] = [8, 6]
+
+/**
+ * THE SWING, AS A LEVER. The shoulder is a pivot, the club head travels an arc
+ * around it, and the hands sit part-way out — so the arms and the shaft are
+ * DRAWN, not authored, and both arms reach the same grip by construction.
+ *
+ * That is not a shortcut, it is the fix for the bug: hand-drawn, the wolf ended
+ * up swinging one-handed, because a second arm is easy to forget in one frame
+ * out of seven and impossible to notice afterwards. Geometry cannot forget.
+ *
+ * `GRIP_ALONG` is where the hands sit on the lever. Two thirds out, because the
+ * arms are longer than the club is — put the hands halfway and they end up
+ * inside the wolf's own chest on every frame.
+ */
+const PIVOT: readonly [x: number, y: number] = [15, 14]
+/**
+ * NEAR AND FAR SHOULDER, pulled deliberately apart. Anatomically they sit
+ * almost on top of each other in profile, and drawn that way the two arms
+ * converge into a single limb about four pixels along — which is a one-armed
+ * golfer again, by a different route. Spreading them is the standard sprite
+ * cheat: the far arm emerges high and behind, the near one low and forward,
+ * and the internal edge between them is what makes the pair legible.
+ */
+const NEAR_SHOULDER: readonly [x: number, y: number] = [15, 17]
+const FAR_SHOULDER: readonly [x: number, y: number] = [11, 12]
+const GRIP_ALONG = 0.62
+
 interface SwingFrame {
-  /** weight transfer: the wolf steps a pixel into the ball at contact */
-  lean: number
-  /** the reaching arm, drawn as fur so it joins the body to the grip */
-  arm: readonly (readonly [x: number, y: number])[]
-  shaft: readonly (readonly [x: number, y: number])[]
-  /** top-left of the 2×2 club head, or null once the ball has swallowed it */
-  club: readonly [x: number, y: number] | null
-  /** top-left and diameter; anything 4 wide or more is masked to a circle */
+  /** where the club head is, in art pixels */
+  club: readonly [x: number, y: number]
+  /** top-left and diameter of the ball, masked to a circle */
   ball: readonly [x: number, y: number, size: number]
   spark: readonly (readonly [x: number, y: number])[]
 }
 
+/**
+ * ADDRESS, TOP, IMPACT, then four frames of the ball on its way to you — the
+ * order every golf game since the 8-bit ones has used, because it is the fewest
+ * poses that still read as a swing.
+ *
+ * Address FIRST rather than starting at the top of the backswing, for two
+ * reasons. It is the pose that says "a wolf is about to hit a golf ball" with no
+ * motion at all, and frame 0 is exactly what a reduced-motion viewer is left
+ * looking at. And a backswing opening frame put the hands behind the head on the
+ * very first thing you see, which is the one pose in the swing where the arms
+ * are least legible.
+ *
+ * The club head keeps roughly the same distance from the pivot throughout — it
+ * is one lever swinging, and a shaft that grows and shrinks reads as elastic.
+ */
 const SWING: readonly SwingFrame[] = [
-  // top of the backswing — club up and behind, ball waiting on the deck
-  { lean: 0, arm: [[8, 8]], shaft: [[9, 7], [10, 6], [11, 5]], club: [12, 3], ball: [11, 13, 2], spark: [] },
-  // coming down
-  { lean: 0, arm: [[8, 8]], shaft: [[9, 8], [10, 9], [11, 10]], club: [12, 11], ball: [11, 13, 2], spark: [] },
-  // contact: he steps into it and the turf goes with it
-  { lean: 1, arm: [[8, 9]], shaft: [[9, 10], [10, 11]], club: [11, 12], ball: [11, 13, 2], spark: [[13, 12], [14, 14]] },
-  // gone — and from here every frame is the ball getting closer
-  { lean: 1, arm: [[8, 10]], shaft: [[11, 11], [12, 10]], club: [13, 8], ball: [9, 10, 3], spark: [[13, 13], [14, 15]] },
-  { lean: 1, arm: [[8, 11]], shaft: [[12, 9], [13, 8]], club: [14, 6], ball: [7, 8, 5], spark: [] },
-  { lean: 1, arm: [], shaft: [], club: [14, 5], ball: [5, 6, 8], spark: [] },
-  { lean: 1, arm: [], shaft: [], club: null, ball: [2, 3, 12], spark: [] },
+  { club: [21, 28], ball: [22, 28, 2], spark: [] },
+  { club: [3, 3], ball: [22, 28, 2], spark: [] },
+  { club: [21, 28], ball: [22, 28, 2], spark: [[25, 26], [26, 29], [25, 31]] },
+  { club: [27, 21], ball: [20, 24, 4], spark: [[25, 27], [28, 30]] },
+  { club: [28, 8], ball: [16, 18, 8], spark: [] },
+  { club: [20, 1], ball: [8, 11, 14], spark: [] },
+  { club: [12, 1], ball: [5, 9, 20], spark: [] },
 ]
 
+type Grid = string[][]
+
+const blank = (): Grid =>
+  Array.from({ length: SWING_SIZE }, () => Array<string>(SWING_SIZE).fill(' '))
+
+const inside = (x: number, y: number) =>
+  x >= 0 && x < SWING_SIZE && y >= 0 && y < SWING_SIZE
+
+function put(g: Grid, x: number, y: number, ch: string) {
+  const px = Math.round(x)
+  const py = Math.round(y)
+  if (inside(px, py)) g[py]![px] = ch
+}
+
+/** Bresenham, optionally widened — a limb is thicker than a hairline. */
+function stroke(
+  g: Grid,
+  [x0, y0]: readonly [number, number],
+  [x1, y1]: readonly [number, number],
+  ch: string,
+  width = 1,
+) {
+  let x = Math.round(x0)
+  let y = Math.round(y0)
+  const ex = Math.round(x1)
+  const ey = Math.round(y1)
+  const dx = Math.abs(ex - x)
+  const dy = Math.abs(ey - y)
+  const sx = x < ex ? 1 : -1
+  const sy = y < ey ? 1 : -1
+  let err = dx - dy
+  for (;;) {
+    put(g, x, y, ch)
+    if (width > 1) put(g, x + 1, y, ch)
+    if (width > 2) put(g, x, y + 1, ch)
+    if (x === ex && y === ey) break
+    const e2 = 2 * err
+    if (e2 > -dy) {
+      err -= dy
+      x += sx
+    }
+    if (e2 < dx) {
+      err += dx
+      y += sy
+    }
+  }
+}
+
+function disc(g: Grid, cx: number, cy: number, r: number, ch: string) {
+  for (let y = Math.floor(cy - r); y <= cy + r; y++) {
+    for (let x = Math.floor(cx - r); x <= cx + r; x++) {
+      if (Math.hypot(x - cx, y - cy) <= r + 0.35) put(g, x, y, ch)
+    }
+  }
+}
+
+/**
+ * A ONE-PIXEL DARK EDGE, which is the single largest difference between a
+ * sprite that reads and one that doesn't. Two passes exist for a reason:
+ *
+ * `edge` runs against EMPTY SPACE and gives the whole figure its silhouette.
+ * `edgeAgainst` runs a layer against WHATEVER IS UNDER IT, which is how the
+ * arms stay legible where they cross the wolf's own chest — at the top of the
+ * backswing the hands really are behind the head, and without an internal edge
+ * the limbs dissolve into the body exactly when the pose is hardest to read.
+ */
+function edge(g: Grid, ch: string): Grid {
+  const out = g.map((row) => [...row])
+  for (let y = 0; y < SWING_SIZE; y++) {
+    for (let x = 0; x < SWING_SIZE; x++) {
+      if (g[y]![x] !== ' ') continue
+      const touching = ([[1, 0], [-1, 0], [0, 1], [0, -1]] as const).some(([dx, dy]) => {
+        const a = x + dx
+        const b = y + dy
+        return inside(a, b) && g[b]![a] !== ' ' && g[b]![a] !== ch
+      })
+      if (touching) out[y]![x] = ch
+    }
+  }
+  return out
+}
+
+/** Stamp `layer` onto `base`, drawing a dark edge wherever it overlaps. */
+function stampWithEdge(base: Grid, layer: Grid, ch: string) {
+  for (let y = 0; y < SWING_SIZE; y++) {
+    for (let x = 0; x < SWING_SIZE; x++) {
+      if (layer[y]![x] !== ' ') continue
+      const touching = ([[1, 0], [-1, 0], [0, 1], [0, -1]] as const).some(([dx, dy]) => {
+        const a = x + dx
+        const b = y + dy
+        return inside(a, b) && layer[b]![a] !== ' '
+      })
+      if (touching) base[y]![x] = ch
+    }
+  }
+  for (let y = 0; y < SWING_SIZE; y++) {
+    for (let x = 0; x < SWING_SIZE; x++) {
+      const ch2 = layer[y]![x]!
+      if (ch2 !== ' ') base[y]![x] = ch2
+    }
+  }
+}
+
+/**
+ * ROUNDING THE FIGURE OFF: light along the top edge, cool shadow along the
+ * bottom. Derived from the silhouette rather than painted by hand, so it can't
+ * drift out of register with the shape it is shading.
+ */
+function shade(g: Grid) {
+  const solid = g.map((row) => row.map((ch) => ch === 'F'))
+  for (let y = 0; y < SWING_SIZE; y++) {
+    for (let x = 0; x < SWING_SIZE; x++) {
+      if (!solid[y]![x]) continue
+      const above = y > 0 && solid[y - 1]![x]
+      const below = y < SWING_SIZE - 1 && solid[y + 1]![x]
+      if (!above) g[y]![x] = 'H'
+      else if (!below) g[y]![x] = 'S'
+    }
+  }
+}
+
+function swingFrame(f: SwingFrame, blind: boolean): Grid {
+  const g = blank()
+
+  WOLF_FIGURE.forEach((row, y) => {
+    for (let x = 0; x < SWING_SIZE; x++) {
+      const ch = row[x]!
+      if (ch === '#') put(g, x, y, 'F')
+      else if (ch === 'i') put(g, x, y, 'D')
+      else if (ch === 'n') put(g, x, y, 'N')
+      else if (ch === 'e') put(g, x, y, blind ? ' ' : 'E')
+    }
+  })
+  shade(g)
+  // the eye and the ear linings survive shading; re-stamp them
+  WOLF_FIGURE.forEach((row, y) => {
+    for (let x = 0; x < SWING_SIZE; x++) {
+      const ch = row[x]!
+      if (ch === 'i') put(g, x, y, 'D')
+      else if (ch === 'n') put(g, x, y, 'N')
+      else if (ch === 'e' && !blind) put(g, x, y, 'E')
+    }
+  })
+  if (blind) {
+    for (const [x, y] of SHADES_BAR) put(g, x, y, 'L')
+    put(g, SHADES_GLINT[0], SHADES_GLINT[1], 'G')
+  }
+
+  // arms, hands and club go on their own layer so they can be edged against
+  // the body they cross
+  //
+  // FOUR LAYERS, BACK TO FRONT, each edged as it lands: far arm, club, near arm
+  // with the hands, then the ball. One layer for all of them was the first
+  // attempt and it put the near arm straight on top of the far one — two arms
+  // drawn, one arm visible, which is the exact complaint this redraw is for.
+  const grip = [
+    PIVOT[0] + GRIP_ALONG * (f.club[0] - PIVOT[0]),
+    PIVOT[1] + GRIP_ALONG * (f.club[1] - PIVOT[1]),
+  ] as const
+
+  const farArm = blank()
+  stroke(farArm, FAR_SHOULDER, grip, 'S', 2)
+  stampWithEdge(g, farArm, '#')
+
+  const club = blank()
+  stroke(club, grip, f.club, 'C', 2)
+  disc(club, f.club[0], f.club[1], 1.6, 'K')
+  stampWithEdge(g, club, '#')
+
+  const nearArm = blank()
+  stroke(nearArm, NEAR_SHOULDER, grip, 'H', 3)
+  // both hands, together on the grip — the thing that says this is a golf swing
+  disc(nearArm, grip[0], grip[1], 1.4, 'W')
+  stampWithEdge(g, nearArm, '#')
+
+  for (const [x, y] of f.spark) put(g, x, y, '*')
+
+  const [bx, by, n] = f.ball
+  const r = (n - 1) / 2
+  const ball = blank()
+  disc(ball, bx + r, by + r, r, 'B')
+  if (n >= 4) {
+    disc(ball, bx + r * 0.6, by + r * 0.6, r * 0.4, 'b') // lit shoulder
+    disc(ball, bx + r * 1.45, by + r * 1.45, r * 0.34, 's') // shaded underside
+    put(ball, bx + Math.round(r * 1.3), by + Math.round(r * 0.55), 's')
+    put(ball, bx + Math.round(r * 0.55), by + Math.round(r * 1.35), 's')
+  } else {
+    put(ball, bx, by, 'b')
+  }
+  stampWithEdge(g, ball, '#')
+
+  return edge(g, '#')
+}
+
 const LEGEND: Record<string, string> = {
+  '#': OUTLINE,
+  H: FUR_HI,
   F: FUR,
+  S: FUR_SH,
   D: FUR_DARK,
-  M: MUZZLE,
+  N: INK,
   E: EYE,
   L: LENS,
   G: GLINT,
-  C: STICK,
+  W: GLOVE,
+  C: CLUB,
+  K: CLUB_HEAD,
   B: BALL,
-  W: BALL_LIT,
-  S: MUZZLE, // the ball's shaded side and its dimples
+  b: BALL_HI,
+  s: BALL_SH,
   '*': SPARK,
 }
 
 /**
- * A character map to rects, collapsing horizontal runs. One rect per run keeps
+ * A character grid to rects, collapsing horizontal runs. One rect per run keeps
  * the output the same shape as the hand-written art elsewhere in the house
  * idiom, and every value is on the integer grid by construction.
  */
-function pixels(rows: readonly string[], key: string): ReactElement {
+function pixels(g: Grid, key: string): ReactElement {
   const out: ReactElement[] = []
-  rows.forEach((row, y) => {
+  g.forEach((row, y) => {
     let x = 0
     while (x < row.length) {
       const ch = row[x]!
@@ -196,61 +461,9 @@ function pixels(rows: readonly string[], key: string): ReactElement {
   return <>{out}</>
 }
 
-function swingFrame(f: SwingFrame, blind: boolean, key: string): ReactElement {
-  const g: string[][] = Array.from({ length: 16 }, () => Array<string>(16).fill('.'))
-  const put = (x: number, y: number, ch: string) => {
-    if (x >= 0 && x < 16 && y >= 0 && y < 16) g[y]![x] = ch
-  }
-
-  // the wolf, leaned — `e` is the eye and `s` the bridge between the two, so
-  // one drawing gives both sprites: gold eyes with fur between them, or one
-  // unbroken lens across all five pixels
-  WOLF_BODY.forEach((row, y) => {
-    for (let x = 0; x < 16; x++) {
-      const ch = row[x]!
-      if (ch === '.') continue
-      put(x + f.lean, y, ch === 'e' ? (blind ? 'L' : 'E') : ch === 's' ? (blind ? 'L' : 'F') : ch)
-    }
-  })
-  if (blind) put(2 + f.lean, 4, 'G')
-
-  for (const [x, y] of f.arm) put(x, y, 'F')
-  for (const [x, y] of f.shaft) put(x, y, 'C')
-  if (f.club) {
-    const [cx, cy] = f.club
-    for (let j = 0; j < 2; j++) for (let i = 0; i < 2; i++) put(cx + i, cy + j, 'C')
-  }
-  for (const [x, y] of f.spark) put(x, y, '*')
-
-  const [bx, by, n] = f.ball
-  const r = (n - 1) / 2
-  for (let j = 0; j < n; j++) {
-    for (let i = 0; i < n; i++) {
-      // masked to a circle from 4px up; below that a square IS the circle
-      if (n >= 4 && Math.hypot(i - r, j - r) > r + 0.35) continue
-      put(bx + i, by + j, 'B')
-    }
-  }
-  if (n >= 4) {
-    put(bx + 1, by + 1, 'W')
-    put(bx + 2, by + 1, 'W')
-    put(bx + 1, by + 2, 'W')
-    put(bx + n - 2, by + n - 2, 'S')
-    put(bx + n - 3, by + n - 2, 'S')
-    put(bx + n - 2, by + n - 3, 'S')
-    // two dimples, so it reads as a golf ball rather than a moon
-    put(bx + n - 3, by + 2, 'S')
-    put(bx + 2, by + n - 3, 'S')
-  } else {
-    put(bx, by, 'W')
-  }
-
-  return pixels(g.map((row) => row.join('')), key)
-}
-
 export const WOLF_SWING_FRAMES: readonly ReactElement[] = SWING.map((f, i) =>
-  swingFrame(f, false, `w${i}`),
+  pixels(swingFrame(f, false), `w${i}`),
 )
 export const WOLF_SHADES_SWING_FRAMES: readonly ReactElement[] = SWING.map((f, i) =>
-  swingFrame(f, true, `b${i}`),
+  pixels(swingFrame(f, true), `b${i}`),
 )

@@ -86,7 +86,13 @@ const FAN = 22
  * club distinguishable from a ball at arm's length.
  */
 const SCENE_FRAME_MS = 170
-const SCENE_SCALE = 8
+/**
+ * Five, not eight, because the wolf is drawn on the 32 grid rather than the
+ * house 16 — the number to keep constant is the SIZE ON SCREEN (160px), and a
+ * scale that ignores the sprite's own grid doubles it the day an engine ships
+ * higher-fidelity art. Integer only, as everywhere.
+ */
+const SCENE_SCALE = 5
 /** Long enough to play through once (6 steps) and hold the last frame. */
 const SCENE_MS = 1500
 

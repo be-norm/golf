@@ -381,6 +381,6 @@ describe('CelebrationLayer', () => {
     // flight; and it is drawn at the scene scale, which is what makes a club
     // distinguishable from a ball at arm's length.
     expect(sprite!.style.animationIterationCount).toBe('1')
-    expect(sprite!.parentElement!.style.width).toBe('128px')
+    expect(sprite!.parentElement!.style.width).toBe('160px')
   })
 })
