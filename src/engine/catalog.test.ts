@@ -11,7 +11,12 @@ import {
 } from './catalog'
 import { EventLog, makePlayers, makeRound, TEST_ONLY_ENGINE_TYPES } from './test/harness'
 import type { GameConfig } from './core/types'
-import { CELEBRATION_SPRITES, type CelebrationSprite } from './core/celebration'
+import {
+  CELEBRATION_SPRITES,
+  CELEBRATION_STYLES,
+  type CelebrationSprite,
+  type CelebrationStyle,
+} from './core/celebration'
 import { isPaintable } from './label'
 
 // `satisfies` alone only checks each element is a MEMBER — it does not check
@@ -30,19 +35,22 @@ const CATEGORIES = ['main', 'side', 'either'] as const satisfies readonly GameCa
 const SHAPES = ['solo', 'headToHead', 'teams', 'partners'] as const satisfies readonly GameShape[]
 const FACTS = ['putts'] as const satisfies readonly RoundFact[]
 const SPRITES = ['coin', 'wolf', 'wolf-shades'] as const satisfies readonly CelebrationSprite[]
+const STYLES = ['toss', 'scene'] as const satisfies readonly CelebrationStyle[]
 
 type _FamiliesCovered = Covers<GameFamily, typeof FAMILIES>
 type _CategoriesCovered = Covers<GameCategory, typeof CATEGORIES>
 type _ShapesCovered = Covers<GameShape, typeof SHAPES>
 type _FactsCovered = Covers<RoundFact, typeof FACTS>
 type _SpritesCovered = Covers<CelebrationSprite, typeof SPRITES>
+type _StylesCovered = Covers<CelebrationStyle, typeof STYLES>
 const _exhaustive: [
   _FamiliesCovered,
   _CategoriesCovered,
   _ShapesCovered,
   _FactsCovered,
   _SpritesCovered,
-] = [FAMILIES, CATEGORIES, SHAPES, FACTS, SPRITES]
+  _StylesCovered,
+] = [FAMILIES, CATEGORIES, SHAPES, FACTS, SPRITES, STYLES]
 void _exhaustive
 
 /** the registry minus anything a sibling test file registered for its own use */
@@ -259,7 +267,11 @@ describe('engine registry invariants', () => {
         checked += 1
         expect(c.hole, `${engine.type} celebration for hole ${hole}`).toBe(hole)
         expect(CELEBRATION_SPRITES, `${engine.type} sprite`).toContain(c.sprite)
-        expect(c.count, `${engine.type} celebration count`).toBeGreaterThanOrEqual(1)
+        expect(CELEBRATION_STYLES, `${engine.type} style`).toContain(c.style)
+        // a count is a TOSS idea — a scene is one picture and carries none
+        if (c.style === 'toss') {
+          expect(c.count, `${engine.type} celebration count`).toBeGreaterThanOrEqual(1)
+        }
         expect(c.text.length, `${engine.type} celebration text`).toBeGreaterThan(0)
         for (const id of c.playerIds) {
           expect(roster.has(id), `${engine.type} celebrates non-player ${id}`).toBe(true)

@@ -714,26 +714,27 @@ describe('wolf — celebrations', () => {
    * reacting to, and the same hole is already wearing the matching glyph in its
    * ledger line.
    *
-   * COUNT IS ONE EITHER WAY, and it is pinned here because it is a decision
-   * rather than a default. Skins' count is a pile of coins; Wolf's sprite is a
-   * scene, and a second copy of it is not a bigger moment. Anything that makes
-   * this the multiplier (2/3) or the swing (6/3) fails.
+   * THE STYLE IS PINNED because it is a decision rather than a default. Skins
+   * tosses a pile of coins at a row; Wolf's sprite is a little film, and a
+   * second copy of it is not a bigger moment — so it declares `scene`, plays
+   * centre screen, and carries no count at all. Anything that makes this a toss
+   * fails here, and would also have to invent the count the type refuses it.
    */
   it('celebrates the holes somebody went it alone on', () => {
     const d = fixture()
     // the wolf pulled it off alone: his sprite, his row
     expect(d.celebration!(2)).toEqual({
+      style: 'scene',
       sprite: 'wolf',
       playerIds: ['p-b'],
-      count: 1,
       text: 'B lone +6',
       hole: 2,
     })
     // and the pack ran a blind wolf down — the shades, and the three who beat him
     expect(d.celebration!(4)).toEqual({
+      style: 'scene',
       sprite: 'wolf-shades',
       playerIds: ['p-a', 'p-b', 'p-c'],
-      count: 1,
       text: 'A & B & C +3 · blind lost',
       hole: 4,
     })

@@ -384,9 +384,9 @@ function derive(
     // it takes a positive share and every member of the other pays one.
     const winners = r.outcome === 'wolfWin' ? r.sides!.wolf : r.sides!.pack
     return {
+      style: 'scene',
       sprite: r.pick.kind === 'blind' ? 'wolf-shades' : 'wolf',
       playerIds: winners,
-      count: 1,
       text: recap(hole) ?? '',
       hole,
     }

@@ -444,12 +444,19 @@ change, use a 6-digit code (`{{ .Token }}` + `verifyOtp`) rather than a link.
   SOLO hole celebrates whichever way it lands and a partnered one never does.
   Halves stay silent for Skins' reason: nothing was won. The rule is enforced
   rather than stated — `wolf.test.ts` pins a partnered wolf win to null.
-  **`count` is a claim about the ART, not about the money.** Skins throws a coin
-  per skin because a coin is a countable object; Wolf's sprite is a SCENE (he
-  swings, the ball comes at you) and a scene does not multiply — two of them is
-  two wolves, overlapping, each caught mid-swing at a different frame. So Wolf
-  returns 1 and says the hole's size where it can be read: the shades, and the
-  text. A new engine picks its count from what its sprite IS.
+  **`style` says HOW it is shown, and the engine declares it** (MAI-94). A
+  `toss` is N countable things thrown from the bar to a player's row — a garnish
+  read in peripheral vision, and `count` IS the magnitude (Skins' coins). A
+  `scene` is one picture, centre screen, still, played slow enough to watch and
+  ONCE so it rests on its final frame; it carries no `count` at all, which the
+  discriminated union enforces rather than documents. Wolf is a scene because
+  its sprite is a little film — the wolf clubs a ball at the camera — and two of
+  a film is not a bigger moment, it is two wolves overlapping mid-swing. Run at
+  the toss's speed and size it was an unreadable smear, which is what shipped
+  first. **The layer branches on `style`, never on the game** (invariant #7);
+  `count === 1` was the free inference and is wrong twice over — a one-skin hole
+  is still a toss, and presentation would change the day the arithmetic did.
+  Same rule as `GamePanel.kind`: carry the intent, don't overload a field.
   The wolf's two sprites share their names with the GLYPHS of the same animal
   and are drawn beside them (`components/wolfArt.tsx`) off one palette — the
   still wolf in the ledger line and the moving one on the celebration must not

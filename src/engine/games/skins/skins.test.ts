@@ -329,6 +329,7 @@ describe('skins — celebrations', () => {
     const skins = skinsOf(round, log)
 
     expect(skins.celebration!(1)).toEqual({
+      style: 'toss',
       sprite: 'coin',
       playerIds: ['p-a'],
       count: 1,
@@ -338,6 +339,7 @@ describe('skins — celebrations', () => {
     // H4 banks the two that carried through H2 and H3 — the whole reason the
     // count is the engine's to state rather than something the screen assumes.
     expect(skins.celebration!(4)).toEqual({
+      style: 'toss',
       sprite: 'coin',
       playerIds: ['p-c'],
       count: 3,

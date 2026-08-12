@@ -329,4 +329,58 @@ describe('CelebrationLayer', () => {
     rerender(<CelebrationLayer view={viewOf(round, log.events)} />)
     expect(coins(container)).toBe(2)
   })
+
+  /**
+   * THE OTHER SHAPE (MAI-94). Wolf declares `style: 'scene'`, and the layer has
+   * to honour it without knowing what Wolf is: one sprite, centre screen, no
+   * row measured and no bar to leave from.
+   *
+   * Worth its own test because the shared contract sweep in `catalog.test.ts`
+   * derives every engine with no game events, so Wolf's every hole is pending
+   * there and it contributes nothing — this is the only place the second engine
+   * on this channel is shown actually reaching the screen.
+   */
+  it('plays a scene in place instead of throwing it at a row', () => {
+    const players = makePlayers(P.map((name) => ({ name })))
+    const round = makeRound({
+      players,
+      holes: 'front9',
+      games: [
+        {
+          type: 'wolf',
+          config: { pointCents: 100, rotation: players.map((p) => p.playerId) },
+        },
+      ],
+    })
+    const idOf = new Map(round.players.map((p) => [p.name, p.playerId]))
+    const log = new EventLog()
+    log.append({
+      type: 'game/event',
+      gameId: 'game-1',
+      kind: 'wolf/pick',
+      data: { hole: 1, choice: 'lone' },
+    })
+    const { container, rerender } = render(<CelebrationLayer view={viewOf(round, log.events)} />)
+    expect(container.querySelectorAll('[data-sprite]').length).toBe(0)
+
+    // A goes alone and beats all three
+    for (const name of P) {
+      log.append({ type: 'score/set', playerId: idOf.get(name)!, hole: 1, gross: name === 'A' ? 3 : 5 })
+    }
+    rerender(<CelebrationLayer view={viewOf(round, log.events)} />)
+
+    // ONE of it, whatever the hole was worth — a scene does not multiply
+    const sprite = container.querySelector<HTMLElement>('[data-sprite="wolf"]')
+    expect(container.querySelectorAll('[data-sprite]').length).toBe(1)
+    expect(container.textContent).toContain('A lone +6')
+
+    // A COUNT OF SPRITES CANNOT TELL THE TWO SHAPES APART — a one-skin toss
+    // mounts exactly one as well, so the assertions that matter are the ones
+    // the shape actually changes. It plays ONCE and rests on its final frame
+    // (for Wolf, the ball filling the box) where a toss loops for the whole
+    // flight; and it is drawn at the scene scale, which is what makes a club
+    // distinguishable from a ball at arm's length.
+    expect(sprite!.style.animationIterationCount).toBe('1')
+    expect(sprite!.parentElement!.style.width).toBe('128px')
+  })
 })
