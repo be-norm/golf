@@ -21,7 +21,14 @@ export const FUR = '#a8a29e'
 export const FUR_DARK = '#57534e'
 export const MUZZLE = '#d6d3d1'
 export const INK = '#1c1917'
-export const EYE = '#ffd23e'
+/**
+ * AMBER, NOT COIN GOLD. It was `coin-400` — the same value the money is painted
+ * in — and at two pixels square on a small grey head that reads as headlights
+ * rather than eyes. A wolf's eye is not made of the same stuff as a coin, and
+ * the palette should not pretend otherwise; this is a step down in intensity,
+ * not in warmth.
+ */
+export const EYE = '#e0b03a'
 export const LENS = '#0c0a09'
 export const GLINT = '#f5f5f4'
 
