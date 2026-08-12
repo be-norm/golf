@@ -1,6 +1,7 @@
 import type { ReactElement } from 'react'
 import type { CelebrationSprite } from '../engine/core/celebration'
 import { FRAME_MS } from '../lib/motion'
+import { once } from '../lib/once'
 import {
   BANNER_H,
   BANNER_W,
@@ -149,9 +150,7 @@ function coinPixels(g: CoinGrid, key: string): ReactElement {
   return <>{out}</>
 }
 
-const COIN_FRAMES: readonly ReactElement[] = [0, 1, 2, 3].map((i) =>
-  coinPixels(coinFrame(i), `coin${i}`),
-)
+const COIN_FRAMES = once(() => [0, 1, 2, 3].map((i) => coinPixels(coinFrame(i), `coin${i}`)))
 
 /**
  * THE SAME COIN AT 16, and a second drawing rather than a scaled one — which is
@@ -165,7 +164,13 @@ const COIN_FRAMES: readonly ReactElement[] = [0, 1, 2, 3].map((i) =>
  * gold reads as dirt.
  */
 const SMALL: Record<string, string> = { G: GOLD, M: GOLD_MID, D: GOLD_DEEP, L: GOLD_LIT }
-const SMALL_WIDTHS = [7, 4, 1, 4] as const
+/**
+ * SEMI-axes, like `coinFrame`'s. They were read as full widths against a
+ * vertical semi-axis of 7, which made the coin half as wide as it was tall — a
+ * gold capsule rather than a disc, and a three-quarter pose narrower than the
+ * old edge-on frame.
+ */
+const SMALL_RX = [5.5, 3, 0.5, 3] as const
 /**
  * WHICH END IS LIT, and it swaps as the face turns away and comes back — the
  * same cue the big coin gets from `COIN_LIT_LEFT`. Without it frames 1 and 3
@@ -174,14 +179,14 @@ const SMALL_WIDTHS = [7, 4, 1, 4] as const
 const SMALL_LIT_TOP = [true, true, false, false] as const
 
 function smallCoin(i: number, key: string): ReactElement {
-  const rx = SMALL_WIDTHS[i]!
+  const rx = SMALL_RX[i]!
   const litTop = SMALL_LIT_TOP[i]!
   const out: ReactElement[] = []
   for (let y = 0; y < 16; y++) {
-    const dy = (y - 7.5) / 7
+    const dy = (y - 7.5) / 5.5
     const span = 1 - dy * dy
     if (span <= 0) continue
-    const w = Math.max(1, Math.round(rx * Math.sqrt(span)))
+    const w = Math.max(1, Math.round(2 * rx * Math.sqrt(span)))
     // centred on the same axis whatever the parity — rounding a half-pixel
     // centre made even and odd widths sit on different columns, so one edge
     // stepped in while the other stepped out
@@ -194,9 +199,7 @@ function smallCoin(i: number, key: string): ReactElement {
   return <>{out}</>
 }
 
-const COIN_SMALL_FRAMES: readonly ReactElement[] = [0, 1, 2, 3].map((i) =>
-  smallCoin(i, `cs${i}`),
-)
+const COIN_SMALL_FRAMES = once(() => [0, 1, 2, 3].map((i) => smallCoin(i, `cs${i}`)))
 
 /* ── reading a scorecard ─────────────────────────────────── */
 /**
@@ -291,8 +294,8 @@ function scanPixels(g: string[][], key: string): ReactElement {
   return <>{out}</>
 }
 
-const SCAN_FRAMES: readonly ReactElement[] = [4, 8, 12, 16, 20, 24, 27].map((y, i) =>
-  scanPixels(scanFrame(y), `scan${i}`),
+const SCAN_FRAMES = once(() =>
+  [4, 8, 12, 16, 20, 24, 27].map((y, i) => scanPixels(scanFrame(y), `scan${i}`)),
 )
 
 /**
@@ -303,14 +306,14 @@ const SCAN_FRAMES: readonly ReactElement[] = [4, 8, 12, 16, 20, 24, 27].map((y, 
  * simply never used, which is worse than none.
  */
 const SPRITES = {
-  coin: { frames: () => COIN_FRAMES, w: 32, h: 32 },
-  'coin-small': { frames: () => COIN_SMALL_FRAMES, w: 16, h: 16 },
-  wolf: { frames: () => WOLF_SWING_FRAMES, w: SWING_SIZE, h: SWING_SIZE },
-  'wolf-shades': { frames: () => WOLF_SHADES_SWING_FRAMES, w: SWING_SIZE, h: SWING_SIZE },
+  coin: { frames: COIN_FRAMES, w: 32, h: 32 },
+  'coin-small': { frames: COIN_SMALL_FRAMES, w: 16, h: 16 },
+  wolf: { frames: WOLF_SWING_FRAMES, w: SWING_SIZE, h: SWING_SIZE },
+  'wolf-shades': { frames: WOLF_SHADES_SWING_FRAMES, w: SWING_SIZE, h: SWING_SIZE },
   logo: { frames: COURSE_LOGO_FRAMES, w: BANNER_W, h: BANNER_H },
   'logo-idle': { frames: COURSE_IDLE_FRAMES, w: BANNER_W, h: BANNER_H },
   'flag-plant': { frames: COURSE_FLAG_PLANT_FRAMES, w: BANNER_W, h: BANNER_H },
-  scan: { frames: () => SCAN_FRAMES, w: 32, h: 32 },
+  scan: { frames: SCAN_FRAMES, w: 32, h: 32 },
 } as const satisfies Record<
   string,
   { frames: () => readonly ReactElement[]; w: number; h: number }

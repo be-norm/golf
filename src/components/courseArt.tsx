@@ -1,4 +1,5 @@
 import type { ReactElement } from 'react'
+import { once } from '../lib/once'
 
 /**
  * THE COURSE — the app's own picture of itself, and the one drawing behind the
@@ -76,17 +77,6 @@ const LEGEND: Record<string, string> = {
   f: FLAG,
   d: FLAG_SHADE,
   k: CLOUD, // flagstick, ball and the dollar are all the same cream
-}
-
-/**
- * Built on FIRST USE, not at import. Every screen pulls in `PixelSprite` and
- * `routes.tsx` pulls in every screen, so eager strips are twenty-odd banners'
- * worth of work on the critical path of a cold start — paid in full whether or
- * not anything ever shows one.
- */
-function once<T>(build: () => T): () => T {
-  let made: T | undefined
-  return () => (made ??= build())
 }
 
 type Grid = string[][]
@@ -378,7 +368,11 @@ const APPROACH: readonly (readonly [x: number, y: number])[] = [
 
 export const COURSE_LOGO_FRAMES = once(() =>
   APPROACH.concat([[-1, -1]]).map(([x, y], i) => {
-    const g = scene(BANNER)
+    // GUST 0, NOT STILL AIR. The wind strip opens on phase zero, so an intro
+    // that ends in `undefined` hands over a turf that differs by a hundred-odd
+    // cells — a lit band that pops into the grass at the instant of the swap.
+    // Matching flag shapes across the handover was never the whole of it.
+    const g = scene(BANNER, 0)
     stick(g, BANNER, BANNER.flagTop)
     flag(g, BANNER, i % 2 === 1)
     // the last frame has no ball: it is in the hole, which is the whole point.
@@ -443,8 +437,8 @@ export const COURSE_FLAG_PLANT_FRAMES = once(() =>
   stick(g, l, l.flagTop)
   if (i === 2) fill(g, l.stickX + 1, l.flagTop + 2, 3, 1, 'f')
   else flag(g, l, i === 3)
-    // the last frame wears the shape the wind strip opens on, so the swap from
-    // the ceremony to the loop has nothing to see
+    // the last frame wears the shape AND the gust phase the wind strip opens
+    // on, so the swap from the ceremony to the loop has nothing to see
     return pixels(g, `plant${i}`)
   }),
 )

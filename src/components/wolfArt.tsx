@@ -1,4 +1,5 @@
 import type { ReactElement } from 'react'
+import { once } from '../lib/once'
 
 /**
  * THE WOLF, DRAWN — both of him. `PixelGlyph` renders the still head that marks
@@ -604,9 +605,7 @@ function pixels(g: Grid, key: string): ReactElement {
   return <>{out}</>
 }
 
-export const WOLF_SWING_FRAMES: readonly ReactElement[] = SWING.map((f, i) =>
-  pixels(swingFrame(f, false), `w${i}`),
-)
-export const WOLF_SHADES_SWING_FRAMES: readonly ReactElement[] = SWING.map((f, i) =>
-  pixels(swingFrame(f, true), `b${i}`),
+export const WOLF_SWING_FRAMES = once(() => SWING.map((f, i) => pixels(swingFrame(f, false), `w${i}`)))
+export const WOLF_SHADES_SWING_FRAMES = once(() =>
+  SWING.map((f, i) => pixels(swingFrame(f, true), `b${i}`)),
 )

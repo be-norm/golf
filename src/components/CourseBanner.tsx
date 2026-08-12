@@ -32,7 +32,20 @@ import { PixelSprite, spriteFrames } from './PixelSprite'
 /** Slower than the house rate: a flap, not a flutter. */
 const WIND_FRAME_MS = 200
 
-export function CourseBanner({ intro }: { intro: 'logo' | 'flag-plant' }) {
+type Ceremony = 'logo' | 'flag-plant'
+
+/**
+ * KEYED ON THE CEREMONY, so a banner handed a new one starts it over instead of
+ * skipping to the wind — React's own answer to "reset state when a prop
+ * changes", and it keeps the timer effect free of the setState that resetting
+ * by hand would need. No caller changes `intro` today (both pass a literal, and
+ * a route change remounts), so this closes a trap rather than a bug.
+ */
+export function CourseBanner({ intro }: { intro: Ceremony }) {
+  return <Phases key={intro} intro={intro} />
+}
+
+function Phases({ intro }: { intro: Ceremony }) {
   const [done, setDone] = useState(false)
   // a one-shot travels n-1 frames, so that is what there is to wait out
   useEffect(() => {
