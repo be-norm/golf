@@ -3,7 +3,8 @@ import { mergedRects } from './pixelGrid'
 
 /**
  * THE COURSE — the app's own picture of itself, and the one drawing behind the
- * home screen's animated mark, the first-tee flourish and `public/icon.svg`.
+ * home screen's animated mark, the first-tee flourish and the standalone SVG
+ * published at `docs/assets/course-icon.svg`.
  *
  * IT MATCHES THE SHIPPED ICON, which is the whole reason this file exists. The
  * icon set was redrawn (bright sky, clouds, a tree line, dithered turf, a cream
@@ -103,9 +104,15 @@ function overlay(frame: Grid, backdrop: Grid): Grid {
 const BACKDROP = once(() => scene(BANNER, 0))
 
 /**
- * The shared half, for `<defs>`. ONE ID PER SPRITE: two `<svg>`s carrying the
- * same id would have `<use>` resolve across them, and the home screen mounts
- * the wind while the approach is still on the page.
+ * The shared half, for `<defs>`.
+ *
+ * ONE ID PER SPRITE so each `<svg>` is self-contained — `<use>` resolves by
+ * document id, not within its own tree, so a shared id would have one strip
+ * reaching into another's defs. Note what this does NOT protect against: two
+ * instances of the SAME sprite on one screen still duplicate an id, and the
+ * second `<use>` resolves to the first's copy. That is harmless only because
+ * all three strips share one backdrop drawing and the picture is identical
+ * either way — not because the ids are unique.
  */
 export const courseBackdrop = (name: string) => (
   <g id={`backdrop-${name}`}>{mergedRects(BACKDROP(), LEGEND, `bd-${name}`)}</g>

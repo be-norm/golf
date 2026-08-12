@@ -4,7 +4,7 @@ import { courseIconSvg } from './courseArt'
 
 /**
  * ONE PICTURE, THREE PLACES — and they have drifted before. The PNG icon set
- * was redrawn and neither `public/icon.svg` nor the in-app sprite followed, so
+ * was redrawn and neither the standalone SVG nor the in-app sprite followed, so
  * the mark on your home screen and the mark at the top of the app were two
  * different logos for months.
  *
@@ -18,7 +18,7 @@ import { courseIconSvg } from './courseArt'
  * tab keeps the hand-painted `.ico` rather than this.)
  */
 describe('courseArt', () => {
-  it('keeps public/icon.svg identical to the drawing the app animates', () => {
+  it('keeps the published SVG identical to the drawing the app animates', () => {
     expect(
       committedIcon,
       'docs/assets/course-icon.svg is stale — paste the generated string below over it',

@@ -126,7 +126,7 @@ generated highlight wherever the top edge of a shape is concave.
 
 ## Staying in sync
 
-`public/icon.svg`, the in-app course sprites and the PNG icon set are three
+`docs/assets/course-icon.svg`, the in-app course sprites and the PNG icon set are three
 pictures of one thing, and they have drifted before — the PNGs were upgraded and
 the other two were not, which is what MAI-94 surfaced.
 

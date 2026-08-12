@@ -118,4 +118,37 @@ describe('PixelSprite', () => {
     // 16-grid at a rounded 3, never 16 × 2.5 = 40
     expect(box.style.width).toBe('48px')
   })
+
+  /**
+   * A SHARED BACKDROP THAT DOESN'T RESOLVE IS A SILENT, TOTAL FAILURE. The
+   * banner strips draw their sky, turf, green and cup once into `<defs>` and
+   * `<use>` it per frame; the id is a string in `courseArt` that has to equal
+   * the key in this file's registry, and nothing but this ties them. Rename a
+   * key or typo a literal and every `<use>` dangles — the banner renders as a
+   * flag and a ball floating on transparency — while typecheck, lint and the
+   * rest of the suite stay green, because "has some rects" is still true.
+   *
+   * jsdom resolves no SVG references, so this asks the structural question: the
+   * id each frame points at exists inside the same `<svg>`.
+   */
+  it('gives every <use> a backdrop to find in its own svg', () => {
+    let checked = 0
+    for (const name of ['logo', 'logo-idle', 'flag-plant'] as const) {
+      const { container } = render(<PixelSprite name={name} />)
+      const svg = container.querySelector('[data-sprite]')!
+      const uses = svg.querySelectorAll('use')
+      expect(uses.length, `${name} shares no backdrop`).toBeGreaterThan(0)
+      for (const u of uses) {
+        const href = u.getAttribute('href')!
+        expect(href.startsWith('#'), `${name} uses a non-local href`).toBe(true)
+        expect(
+          svg.querySelector(`defs ${href}`),
+          `${name} points at ${href}, which is not in its own defs`,
+        ).not.toBeNull()
+        checked += 1
+      }
+    }
+    // vacuous the day the strips stop sharing anything
+    expect(checked).toBeGreaterThan(20)
+  })
 })

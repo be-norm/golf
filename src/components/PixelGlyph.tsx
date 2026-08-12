@@ -4,7 +4,7 @@ import { SHADES_EYES, WOLF_EYES, wolfHead } from './wolfArt'
 
 /**
  * Hand-drawn 16×16 pixel art, in the house idiom already set by
- * `public/icon.svg`: `shape-rendering="crispEdges"` rects on a 16-unit grid, in
+ * the app icon: `shape-rendering="crispEdges"` rects on a 16-unit grid, in
  * the theme palette. The drawing itself lives in `wolfArt.tsx`, shared with the
  * animated `PixelSprite` — one animal, so the still and the moving picture
  * cannot drift apart.

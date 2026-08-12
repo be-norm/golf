@@ -15,7 +15,7 @@ import { SWING_SIZE, WOLF_SHADES_SWING_FRAMES, WOLF_SWING_FRAMES } from './wolfA
 
 /**
  * ANIMATED 16×16 pixel art — the moving counterpart to `PixelGlyph`, in the
- * same idiom `public/icon.svg` set: `shape-rendering="crispEdges"` rects on a
+ * same idiom the app icon set: `shape-rendering="crispEdges"` rects on a
  * 16-unit grid, in the theme palette.
  *
  * A sprite is N frames drawn side by side into one wide SVG. The SVG sits in a

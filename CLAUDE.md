@@ -371,7 +371,7 @@ change, use a 6-digit code (`{{ .Token }}` + `verifyOtp`) rather than a link.
   the pick; a lie the moment something did.
 - **A game that needs a PICTURE puts a token in the string, never a glyph**
   (`:wolf-shades:`, `engine/core/glyphs.ts`) — engines are pure TS and can't emit
-  React. `GlyphText` swaps in 16×16 pixel art drawn in `public/icon.svg`'s idiom.
+  React. `GlyphText` swaps in 16×16 pixel art drawn in the app icon's idiom.
   ONLY `holeSummary` and `requiredInputs` decode it: the bar renders `summary`/
   `summaryParts` raw, and `settlement.lines`/`detailLines`/`notes` are painted
   onto a CANVAS for the share card, where a token becomes literal `:wolf:` inside
