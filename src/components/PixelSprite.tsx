@@ -2,6 +2,7 @@ import type { ReactElement } from 'react'
 import type { CelebrationSprite } from '../engine/core/celebration'
 import { FRAME_MS } from '../lib/motion'
 import { once } from '../lib/once'
+import { mergedRects } from './pixelGrid'
 import {
   BANNER_H,
   BANNER_W,
@@ -130,27 +131,7 @@ function coinFrame(i: number): CoinGrid {
   return out
 }
 
-function coinPixels(g: CoinGrid, key: string): ReactElement {
-  const out: ReactElement[] = []
-  g.forEach((row, y) => {
-    let x = 0
-    while (x < row.length) {
-      const ch = row[x]!
-      const fill = COIN_LEGEND[ch]
-      if (fill === undefined) {
-        x += 1
-        continue
-      }
-      let w = 1
-      while (row[x + w] === ch) w += 1
-      out.push(<rect key={`${key}-${y}-${x}`} x={x} y={y} width={w} height={1} fill={fill} />)
-      x += w
-    }
-  })
-  return <>{out}</>
-}
-
-const COIN_FRAMES = once(() => [0, 1, 2, 3].map((i) => coinPixels(coinFrame(i), `coin${i}`)))
+const COIN_FRAMES = once(() => [0, 1, 2, 3].map((i) => mergedRects(coinFrame(i), COIN_LEGEND, `coin${i}`)))
 
 /**
  * THE SAME COIN AT 16, and a second drawing rather than a scaled one — which is
@@ -170,7 +151,7 @@ const SMALL: Record<string, string> = { G: GOLD, M: GOLD_MID, D: GOLD_DEEP, L: G
  * gold capsule rather than a disc, and a three-quarter pose narrower than the
  * old edge-on frame.
  */
-const SMALL_RX = [5.5, 3, 0.5, 3] as const
+const SMALL_RX = [5.5, 3, 1, 3] as const
 /**
  * WHICH END IS LIT, and it swaps as the face turns away and comes back — the
  * same cue the big coin gets from `COIN_LIT_LEFT`. Without it frames 1 and 3
@@ -274,28 +255,8 @@ function scanFrame(line: number): string[][] {
   return out
 }
 
-function scanPixels(g: string[][], key: string): ReactElement {
-  const out: ReactElement[] = []
-  g.forEach((row, y) => {
-    let x = 0
-    while (x < row.length) {
-      const ch = row[x]!
-      const fill = SCAN_LEGEND[ch]
-      if (fill === undefined) {
-        x += 1
-        continue
-      }
-      let w = 1
-      while (row[x + w] === ch) w += 1
-      out.push(<rect key={`${key}-${y}-${x}`} x={x} y={y} width={w} height={1} fill={fill} />)
-      x += w
-    }
-  })
-  return <>{out}</>
-}
-
 const SCAN_FRAMES = once(() =>
-  [4, 8, 12, 16, 20, 24, 27].map((y, i) => scanPixels(scanFrame(y), `scan${i}`)),
+  [4, 8, 12, 16, 20, 24, 27].map((y, i) => mergedRects(scanFrame(y), SCAN_LEGEND, `scan${i}`)),
 )
 
 /**

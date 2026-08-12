@@ -1,5 +1,5 @@
-import type { ReactElement } from 'react'
 import { once } from '../lib/once'
+import { mergedRects } from './pixelGrid'
 
 /**
  * THE COURSE — the app's own picture of itself, and the one drawing behind the
@@ -306,48 +306,6 @@ function ball(g: Grid, x: number, y: number) {
 }
 
 /**
- * The grid to rects, merged in BOTH directions — greedily: widen, then deepen
- * while the whole span still matches.
- *
- * Row runs alone were the obvious thing and are not enough at this size. A
- * banner is 5,400 cells and there are twenty-eight frames of it; sky and turf
- * are vast flat fields that a row-at-a-time emitter re-states forty times over.
- * The output is identical pixels either way — this is purely how many nodes the
- * browser is asked to hold.
- */
-function pixels(g: Grid, key: string): ReactElement {
-  const h = g.length
-  const w = g[0]!.length
-  const taken = Array.from({ length: h }, () => Array<boolean>(w).fill(false))
-  const out: ReactElement[] = []
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      if (taken[y]![x]) continue
-      const ch = g[y]![x]!
-      const paint = LEGEND[ch]
-      if (paint === undefined) {
-        taken[y]![x] = true
-        continue
-      }
-      let rw = 1
-      while (x + rw < w && !taken[y]![x + rw] && g[y]![x + rw] === ch) rw += 1
-      let rh = 1
-      grow: while (y + rh < h) {
-        for (let i = 0; i < rw; i++) {
-          if (taken[y + rh]![x + i] || g[y + rh]![x + i] !== ch) break grow
-        }
-        rh += 1
-      }
-      for (let j = 0; j < rh; j++) for (let i = 0; i < rw; i++) taken[y + j]![x + i] = true
-      out.push(
-        <rect key={`${key}-${y}-${x}`} x={x} y={y} width={rw} height={rh} fill={paint} />,
-      )
-    }
-  }
-  return <>{out}</>
-}
-
-/**
  * THE APPROACH THAT GOES IN. The ball comes in high from the left, lands short,
  * bounces twice with the arc dying each time, releases onto the green and drops.
  * Then it is gone and the loop sends another one — which is the shot everybody
@@ -379,7 +337,7 @@ export const COURSE_LOGO_FRAMES = once(() =>
     // Nothing else marks the moment — three white specks over the green was the
     // first attempt at a cheer and read as dirt on the screen.
     if (x >= 0) ball(g, x, y)
-    return pixels(g, `logo${i}`)
+    return mergedRects(g, LEGEND, `logo${i}`)
   }),
 )
 
@@ -409,7 +367,7 @@ export const COURSE_IDLE_FRAMES = once(() => Array.from(
     // frame 0 wears the shape the approach's last frame left, so the swap from
     // one strip to the other has nothing to see
     flag(g, BANNER, i % 4 >= 2)
-    return pixels(g, `idle${i}`)
+    return mergedRects(g, LEGEND, `idle${i}`)
   },
 ))
 
@@ -427,31 +385,35 @@ export const COURSE_IDLE_FRAMES = once(() => Array.from(
 export const COURSE_FLAG_PLANT_FRAMES = once(() =>
   [0, 1, 2, 3, 4].map((i) => {
   const l = BANNER
-  const g = scene(l)
-  if (i === 0) return pixels(g, `plant${i}`)
+  const g = scene(l, 0)
+  if (i === 0) return mergedRects(g, LEGEND, `plant${i}`)
   if (i === 1) {
     // still falling, out of the top of the frame
     fill(g, l.stickX, 0, 1, Math.round(l.cupY * 0.5), 'k')
-    return pixels(g, `plant${i}`)
+    return mergedRects(g, LEGEND, `plant${i}`)
   }
   stick(g, l, l.flagTop)
   if (i === 2) fill(g, l.stickX + 1, l.flagTop + 2, 3, 1, 'f')
   else flag(g, l, i === 3)
     // the last frame wears the shape AND the gust phase the wind strip opens
     // on, so the swap from the ceremony to the loop has nothing to see
-    return pixels(g, `plant${i}`)
+    return mergedRects(g, LEGEND, `plant${i}`)
   }),
 )
 
 /**
  * `public/icon.svg`, AS A STRING, from this same drawing.
  *
- * The favicon and the in-app mark are one picture and have drifted before —
- * the PNG icon set was redrawn and neither of the other two moved, which is how
- * the home screen ended up showing a different logo from the one on your home
- * screen. A comment saying "change both" was the previous arrangement and it is
- * what failed, so the SVG is GENERATED from the frames and a test holds the
- * committed file to it.
+ * NOT THE BROWSER TAB ICON. That is `favicon.ico`, which is hand-painted at
+ * each size it ships — and has to be, because this is a 32-grid scene and a tab
+ * halves it to 16 with smoothing, which turns the tree line, the cup ring and
+ * the `$` into mush. Pointing the tab at this file was tried and made the tab
+ * worse.
+ *
+ * What it IS: the course, published once as a scalable asset, generated from
+ * the frames the app animates and held to them by a test — so the one drawing
+ * in this repo that exists twice cannot drift. The PNG set is a third picture
+ * and is painted by hand; that seam is real and this does not close it.
  *
  * Regenerating: the test prints this string when it disagrees; paste it in.
  */

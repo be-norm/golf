@@ -1,5 +1,6 @@
 import type { ReactElement } from 'react'
 import { once } from '../lib/once'
+import { mergedRects } from './pixelGrid'
 
 /**
  * THE WOLF, DRAWN — both of him. `PixelGlyph` renders the still head that marks
@@ -580,32 +581,7 @@ const LEGEND: Record<string, string> = {
   '*': SPARK,
 }
 
-/**
- * A character grid to rects, collapsing horizontal runs. One rect per run keeps
- * the output the same shape as the hand-written art elsewhere in the house
- * idiom, and every value is on the integer grid by construction.
- */
-function pixels(g: Grid, key: string): ReactElement {
-  const out: ReactElement[] = []
-  g.forEach((row, y) => {
-    let x = 0
-    while (x < row.length) {
-      const ch = row[x]!
-      const fill = LEGEND[ch]
-      if (fill === undefined) {
-        x += 1
-        continue
-      }
-      let w = 1
-      while (row[x + w] === ch) w += 1
-      out.push(<rect key={`${key}-${y}-${x}`} x={x} y={y} width={w} height={1} fill={fill} />)
-      x += w
-    }
-  })
-  return <>{out}</>
-}
-
-export const WOLF_SWING_FRAMES = once(() => SWING.map((f, i) => pixels(swingFrame(f, false), `w${i}`)))
+export const WOLF_SWING_FRAMES = once(() => SWING.map((f, i) => mergedRects(swingFrame(f, false), LEGEND, `w${i}`)))
 export const WOLF_SHADES_SWING_FRAMES = once(() =>
-  SWING.map((f, i) => pixels(swingFrame(f, true), `b${i}`)),
+  SWING.map((f, i) => mergedRects(swingFrame(f, true), LEGEND, `b${i}`)),
 )
