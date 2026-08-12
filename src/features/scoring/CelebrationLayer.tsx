@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'motion/react'
 import type { Celebration } from '../../engine/core/celebration'
 import { eventHole } from '../../engine/ledger'
 import { GlyphText } from '../../components/GlyphText'
-import { PixelSprite, spriteGrid } from '../../components/PixelSprite'
+import { PixelSprite, scaleFor, spriteGrid } from '../../components/PixelSprite'
 import { stepped } from '../../lib/motion'
 import type { RoundView } from './useRound'
 
@@ -71,8 +71,10 @@ import type { RoundView } from './useRound'
 
 /** Enough coins to read as "a lot", few enough to stay a garnish. */
 const MAX_SPRITES = 5
-/** Integer, like every sprite scale — 4 renders on the 16px grid at 64px. */
-const SPRITE_SCALE = 4
+/** How big a tossed sprite is on screen. A SIZE, not a scale: the coin is drawn
+ *  at 32 and the next token need not be, and a fixed scale silently means a
+ *  different picture size per sprite. */
+const TOSS_PX = 64
 /** How far apart the coins sit at rest; they leave the bar already spread by
  *  half this, because two coins launched from one point read as one coin. */
 const FAN = 22
@@ -87,14 +89,12 @@ const FAN = 22
 const SCENE_FRAME_MS = 170
 /**
  * A scene is sized in SCREEN PIXELS and the scale is derived from whatever grid
- * the sprite is drawn on — 5 for the wolf's 32, 10 for a 16-grid one. A fixed
- * scale would have been a constant that silently means a different size per
- * sprite, which is the trap this whole diff opened by making the grid
+ * the sprite is drawn on — 5 for the wolf's 32, and whatever the next one needs.
+ * A fixed scale would have been a constant that silently means a different size
+ * per sprite, which is the trap this whole diff opened by making the grid
  * per-sprite. Rounded, because the scale must stay an integer.
  */
 const SCENE_PX = 160
-const sceneScale = (name: Parameters<typeof spriteGrid>[0]) =>
-  Math.max(1, Math.round(SCENE_PX / spriteGrid(name)))
 /** Long enough to play through once (6 steps) and hold the last frame. */
 const SCENE_MS = 1500
 
@@ -295,7 +295,7 @@ function Scene({ celebration }: { celebration: Celebration }) {
       <div className="relative">
         <PixelSprite
           name={celebration.sprite}
-          scale={sceneScale(celebration.sprite)}
+          scale={scaleFor(celebration.sprite, SCENE_PX)}
           frameMs={SCENE_FRAME_MS}
         />
       </div>
@@ -318,7 +318,11 @@ function Burst({
   const n = Math.min(Math.max(1, celebration.style === 'toss' ? celebration.count : 1), MAX_SPRITES)
   // the sprite's own grid, not the house 16 — a 32-grid token tossed with a
   // hardcoded half-width lands a whole sprite off the row it was aimed at
-  const half = (spriteGrid(celebration.sprite) * SPRITE_SCALE) / 2
+  const scale = scaleFor(celebration.sprite, TOSS_PX)
+  // a sprite need not be square, so the two halves are measured separately
+  const size = spriteGrid(celebration.sprite)
+  const halfW = (size.w * scale) / 2
+  const halfH = (size.h * scale) / 2
   const coins = Array.from({ length: n }, (_, i) => i)
 
 
@@ -333,10 +337,10 @@ function Burst({
             key={i}
             className="absolute"
             style={{ left: 0, top: 0 }}
-            initial={{ x: from.x - half + spread / 2, y: from.y - half, opacity: 0 }}
+            initial={{ x: from.x - halfW + spread / 2, y: from.y - halfH, opacity: 0 }}
             animate={{
-              x: to.x - half + spread,
-              y: to.y - half,
+              x: to.x - halfW + spread,
+              y: to.y - halfH,
               opacity: [0, 1, 1, 0],
             }}
             transition={{
@@ -346,7 +350,7 @@ function Burst({
               opacity: { times: [0, 0.15, 0.8, 1], duration: 0.62, delay: i * 0.07 },
             }}
           >
-            <PixelSprite name={celebration.sprite} scale={SPRITE_SCALE} loop />
+            <PixelSprite name={celebration.sprite} scale={scale} loop />
           </motion.div>
         )
       })}

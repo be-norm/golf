@@ -7,7 +7,7 @@ import { newId } from '../../db/ids'
 import { isStrokeIndexPermutation, looksLikeEighteenHoleRating } from '../../engine/core/tees'
 import { useAuth } from '../../auth/AuthProvider'
 import { BigButton } from '../../components/BigButton'
-import { PixelSprite } from '../../components/PixelSprite'
+import { PixelSprite, scaleFor } from '../../components/PixelSprite'
 import { selectOnFocus } from '../../components/inputs'
 
 /** A rating is for the holes the card covers, so a nine's is about half an 18's —
@@ -187,7 +187,7 @@ export function CourseEditorScreen() {
           you scanned a card or tapped "New course" and typed nothing. */}
       {scannedDraft && (
         <p className="animate-stamp pixel flex items-center justify-center gap-3 border-felt-500 bg-felt-900/60 px-4 py-3">
-          <PixelSprite name="scan" scale={2} />
+          <PixelSprite name="scan" scale={scaleFor('scan', 32)} />
           <span className="font-display text-[10px] uppercase text-felt-200">
             Scorecard read · {scannedDraft.holes.length} holes · check it over
           </span>

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { render } from '@testing-library/react'
 import { CELEBRATION_SPRITES } from '../engine/core/celebration'
-import { PixelSprite } from './PixelSprite'
+import { PixelSprite, spriteGrid } from './PixelSprite'
 
 /**
  * THE ANIMATION AND THE HANDLE MUST BE ON THE SAME ELEMENT.
@@ -31,18 +31,30 @@ describe('PixelSprite', () => {
    * invisible in every test that only asks whether a sprite mounted.
    */
   it('holds the final frame when it plays once, and wraps when it loops', () => {
+    // EVERY NUMBER HERE IS DERIVED, none written down. The arithmetic under
+    // test is steps-and-travel; the cell width and the frame count are the
+    // sprite's business and both have already changed under this test once —
+    // the logo went from a 16-grid square of five frames to a 135-wide banner
+    // of eleven, and a literal turned an art change into a failing unit test
+    // about animation timing.
+    const cell = spriteGrid('logo').w * 4
+
     const once = render(<PixelSprite name="logo" scale={4} />)
     const onceSvg = once.container.querySelector<HTMLElement>('[data-sprite]')!
-    // logo has 5 frames: 4 steps, travelling 4 cells of 64px
-    expect(onceSvg.style.animationTimingFunction).toBe('steps(4)')
-    expect(onceSvg.style.getPropertyValue('--sprite-travel')).toBe('-256px')
+    // DIRECT children only: a strip that shares a backdrop keeps it in `<defs>`,
+    // which is a `<g>` too, and counting those would report one frame too many
+    const n = onceSvg.querySelectorAll(':scope > g').length
+    expect(n).toBeGreaterThan(1)
+    // a one-shot comes to rest ON the last frame: n-1 steps over n-1 cells
+    expect(onceSvg.style.animationTimingFunction).toBe(`steps(${n - 1})`)
+    expect(onceSvg.style.getPropertyValue('--sprite-travel')).toBe(`${-(n - 1) * cell}px`)
     expect(onceSvg.style.animationIterationCount).toBe('1')
 
     const loop = render(<PixelSprite name="logo" scale={4} loop />)
     const loopSvg = loop.container.querySelector<HTMLElement>('[data-sprite]')!
-    // looping shows all 5 and wraps, so it travels the whole strip
-    expect(loopSvg.style.animationTimingFunction).toBe('steps(5)')
-    expect(loopSvg.style.getPropertyValue('--sprite-travel')).toBe('-320px')
+    // looping shows all n and wraps, so it travels the whole strip
+    expect(loopSvg.style.animationTimingFunction).toBe(`steps(${n})`)
+    expect(loopSvg.style.getPropertyValue('--sprite-travel')).toBe(`${-n * cell}px`)
     expect(loopSvg.style.animationIterationCount).toBe('infinite')
   })
 
@@ -90,5 +102,53 @@ describe('PixelSprite', () => {
         expect(frame.querySelectorAll('rect').length, `${name} frame ${i} is blank`).toBeGreaterThan(0)
       })
     }
+  })
+
+  /**
+   * A FRACTIONAL SCALE IS THE ONE WAY TO BREAK THE IDIOM SILENTLY. Crisp rects
+   * snap to device pixels, and at 2.5 they snap to DIFFERENT widths across the
+   * sprite — the coin comes out with one flat side. Nothing about it throws or
+   * logs; it just renders a slightly wrong picture, which is exactly the class
+   * of defect nobody files. `docs/pixel-art.md` states the rule; this is the
+   * choke point that keeps it true.
+   */
+  it('refuses a fractional scale rather than rendering a lopsided sprite', () => {
+    const { container } = render(<PixelSprite name="coin-small" scale={2.5} />)
+    const box = container.querySelector<HTMLElement>('[data-sprite]')!.parentElement!
+    // 16-grid at a rounded 3, never 16 × 2.5 = 40
+    expect(box.style.width).toBe('48px')
+  })
+
+  /**
+   * A SHARED BACKDROP THAT DOESN'T RESOLVE IS A SILENT, TOTAL FAILURE. The
+   * banner strips draw their sky, turf, green and cup once into `<defs>` and
+   * `<use>` it per frame; the id is a string in `courseArt` that has to equal
+   * the key in this file's registry, and nothing but this ties them. Rename a
+   * key or typo a literal and every `<use>` dangles — the banner renders as a
+   * flag and a ball floating on transparency — while typecheck, lint and the
+   * rest of the suite stay green, because "has some rects" is still true.
+   *
+   * jsdom resolves no SVG references, so this asks the structural question: the
+   * id each frame points at exists inside the same `<svg>`.
+   */
+  it('gives every <use> a backdrop to find in its own svg', () => {
+    let checked = 0
+    for (const name of ['logo', 'logo-idle', 'flag-plant'] as const) {
+      const { container } = render(<PixelSprite name={name} />)
+      const svg = container.querySelector('[data-sprite]')!
+      const uses = svg.querySelectorAll('use')
+      expect(uses.length, `${name} shares no backdrop`).toBeGreaterThan(0)
+      for (const u of uses) {
+        const href = u.getAttribute('href')!
+        expect(href.startsWith('#'), `${name} uses a non-local href`).toBe(true)
+        expect(
+          svg.querySelector(`defs ${href}`),
+          `${name} points at ${href}, which is not in its own defs`,
+        ).not.toBeNull()
+        checked += 1
+      }
+    }
+    // vacuous the day the strips stop sharing anything
+    expect(checked).toBeGreaterThan(20)
   })
 })

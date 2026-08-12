@@ -2,7 +2,7 @@ import { useRef, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { useAuth } from '../../auth/AuthProvider'
 import { scanScorecard } from '../../remote/scorecard'
-import { PixelSprite } from '../../components/PixelSprite'
+import { PixelSprite, scaleFor } from '../../components/PixelSprite'
 import { AuthSheet } from '../auth/AuthSheet'
 
 /**
@@ -52,7 +52,7 @@ export function ScanButton({ className = '' }: { className?: string }) {
           // round trip to a vision model, and a static label gives no sign the
           // app is still alive on a thin course connection.
           <span className="flex items-center justify-center gap-3">
-            <PixelSprite name="scan" scale={2} loop />
+            <PixelSprite name="scan" scale={scaleFor('scan', 32)} loop />
             Reading scorecard…
           </span>
         ) : (

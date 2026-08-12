@@ -1,4 +1,6 @@
 import type { ReactElement } from 'react'
+import { once } from '../lib/once'
+import { mergedRects } from './pixelGrid'
 
 /**
  * THE WOLF, DRAWN — both of him. `PixelGlyph` renders the still head that marks
@@ -21,7 +23,14 @@ export const FUR = '#a8a29e'
 export const FUR_DARK = '#57534e'
 export const MUZZLE = '#d6d3d1'
 export const INK = '#1c1917'
-export const EYE = '#ffd23e'
+/**
+ * AMBER, NOT COIN GOLD. It was `coin-400` — the same value the money is painted
+ * in — and at two pixels square on a small grey head that reads as headlights
+ * rather than eyes. A wolf's eye is not made of the same stuff as a coin, and
+ * the palette should not pretend otherwise; this is a step down in intensity,
+ * not in warmth.
+ */
+export const EYE = '#e0b03a'
 export const LENS = '#0c0a09'
 export const GLINT = '#f5f5f4'
 
@@ -48,31 +57,98 @@ const SPARK = '#7dff66' // felt-300, the same green the logo's putt bursts with
 
 /* ── the still head, for the glyph ───────────────────────── */
 
-/** The head every variant shares — ears, taper, muzzle. Eyes are the variable. */
+/**
+ * The head every variant shares — ears, taper, muzzle. Eyes are the variable.
+ *
+ * SHADED, BUT NOT OUTLINED, AND NOT LIT. At sixteen CSS pixels one art pixel is
+ * one screen pixel, so what the sprites do is only partly available here.
+ *
+ * NO OUTLINE: it would eat the outer ring and leave a fourteen-pixel animal, and
+ * the ear tips are most of what makes this read as a wolf rather than a cat.
+ *
+ * NO HIGHLIGHT, which is the interesting half. The sprites light every cell with
+ * nothing above it, and on a head with ears that is the GAP BETWEEN THE EARS —
+ * so the brow came out wearing a bright band across it. It is a hole in the
+ * silhouette, not a surface turned to the light, and a rule that cannot tell
+ * those apart invents a blaze. At sprite size the same rule is fine because the
+ * band is one pixel in thirty-two rather than one in sixteen.
+ *
+ * SHADOW ALONE, then, along the jaw and the outer edges where the head turns
+ * away — derived from the silhouette exactly as the swing's is, so it cannot
+ * drift out of register with the shape it is shading.
+ */
+const HEAD_SHAPE = [
+  '                ',
+  '  ##        ##  ',
+  ' #dd#      #dd# ',
+  ' #dd##    ##dd# ',
+  ' ############## ',
+  ' ############## ',
+  ' ############## ',
+  ' ############## ',
+  '  ############  ',
+  '  ############  ',
+  '   ##########   ',
+  '    ########    ',
+  '     ######     ',
+  '      ####      ',
+  '                ',
+  '                ',
+] as const
+
+const HEAD_TONE: Record<string, string> = {
+  '#': FUR,
+  d: FUR_DARK,
+  S: FUR_SH,
+  M: MUZZLE,
+  N: INK,
+}
+
+/** The silhouette, shaded along its bottom edge. */
+const HEAD_ROWS: readonly string[] = (() => {
+  const g = HEAD_SHAPE.map((row) => row.split(''))
+  const solid = (x: number, y: number) => {
+    const ch = g[y]?.[x]
+    return ch !== undefined && ch !== ' '
+  }
+  const out = g.map((row) => [...row])
+  for (let y = 0; y < 16; y++) {
+    for (let x = 0; x < 16; x++) {
+      if (g[y]![x] !== '#') continue
+      if (!solid(x, y + 1)) out[y]![x] = 'S'
+    }
+  }
+  // the muzzle and nose are features, not silhouette, so they go on last
+  for (let x = 6; x <= 9; x++) {
+    out[11]![x] = 'M'
+    out[12]![x] = 'M'
+  }
+  out[12]![7] = 'N'
+  out[12]![8] = 'N'
+  return out.map((row) => row.join(''))
+})()
+
 export function wolfHead(eyes: ReactElement) {
+  const rects: ReactElement[] = []
+  HEAD_ROWS.forEach((row, y) => {
+    let x = 0
+    while (x < row.length) {
+      const ch = row[x]!
+      const fill = HEAD_TONE[ch]
+      if (fill === undefined) {
+        x += 1
+        continue
+      }
+      let w = 1
+      while (row[x + w] === ch) w += 1
+      rects.push(<rect key={`h-${y}-${x}`} x={x} y={y} width={w} height={1} fill={fill} />)
+      x += w
+    }
+  })
   return (
     <>
-      {/* ear tips */}
-      <rect x="2" y="1" width="2" height="1" fill={FUR} />
-      <rect x="12" y="1" width="2" height="1" fill={FUR} />
-      <rect x="1" y="2" width="4" height="1" fill={FUR} />
-      <rect x="11" y="2" width="4" height="1" fill={FUR} />
-      <rect x="1" y="3" width="5" height="1" fill={FUR} />
-      <rect x="10" y="3" width="5" height="1" fill={FUR} />
-      {/* inner ear */}
-      <rect x="2" y="2" width="2" height="2" fill={FUR_DARK} />
-      <rect x="12" y="2" width="2" height="2" fill={FUR_DARK} />
-      {/* skull, then the taper down to the snout */}
-      <rect x="1" y="4" width="14" height="4" fill={FUR} />
-      <rect x="2" y="8" width="12" height="2" fill={FUR} />
-      <rect x="3" y="10" width="10" height="1" fill={FUR} />
-      <rect x="4" y="11" width="8" height="1" fill={FUR} />
-      <rect x="5" y="12" width="6" height="1" fill={FUR} />
-      <rect x="6" y="13" width="4" height="1" fill={FUR} />
+      {rects}
       {eyes}
-      {/* muzzle + nose */}
-      <rect x="6" y="11" width="4" height="2" fill={MUZZLE} />
-      <rect x="7" y="12" width="2" height="1" fill={INK} />
     </>
   )
 }
@@ -505,34 +581,7 @@ const LEGEND: Record<string, string> = {
   '*': SPARK,
 }
 
-/**
- * A character grid to rects, collapsing horizontal runs. One rect per run keeps
- * the output the same shape as the hand-written art elsewhere in the house
- * idiom, and every value is on the integer grid by construction.
- */
-function pixels(g: Grid, key: string): ReactElement {
-  const out: ReactElement[] = []
-  g.forEach((row, y) => {
-    let x = 0
-    while (x < row.length) {
-      const ch = row[x]!
-      const fill = LEGEND[ch]
-      if (fill === undefined) {
-        x += 1
-        continue
-      }
-      let w = 1
-      while (row[x + w] === ch) w += 1
-      out.push(<rect key={`${key}-${y}-${x}`} x={x} y={y} width={w} height={1} fill={fill} />)
-      x += w
-    }
-  })
-  return <>{out}</>
-}
-
-export const WOLF_SWING_FRAMES: readonly ReactElement[] = SWING.map((f, i) =>
-  pixels(swingFrame(f, false), `w${i}`),
-)
-export const WOLF_SHADES_SWING_FRAMES: readonly ReactElement[] = SWING.map((f, i) =>
-  pixels(swingFrame(f, true), `b${i}`),
+export const WOLF_SWING_FRAMES = once(() => SWING.map((f, i) => mergedRects(swingFrame(f, false), LEGEND, `w${i}`)))
+export const WOLF_SHADES_SWING_FRAMES = once(() =>
+  SWING.map((f, i) => mergedRects(swingFrame(f, true), LEGEND, `b${i}`)),
 )
