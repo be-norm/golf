@@ -655,3 +655,139 @@ describe('wolf — golden fixture (hand-verified)', () => {
     })
   })
 })
+
+/**
+ * THE CELEBRATION CHANNEL (MAI-94). Wolf is the second engine on it, and the
+ * first to answer "which holes earn a noise?" with something other than "the
+ * ones somebody won".
+ *
+ * HAND-DERIVED, front 9, rotation A·B·C·D, $1 a point, gross. `rotationHoles`
+ * is 9 − (9 % 4) = 8, so h1–h5 all take their wolf straight from the rotation
+ * and the trailing-player rule never comes into it.
+ *
+ *   h1  A + B (4)  beat C, D (5)          partnered wolfWin   A+1 B+1 C−1 D−1
+ *   h2  B lone (3) beats A, C, D (4)      lone      wolfWin   B+6 A−2 C−2 D−2
+ *   h3  scored 4,4,4,4 with NO pick       pending             nothing
+ *   h4  D blind (5) loses to A, B, C (4)  blind     packWin   D−9 A+3 B+3 C+3
+ *   h5  A lone (4) ties B, C, D's best 4  halved              nothing
+ *   h6–h9  unscored                       pending             nothing
+ *
+ *   totals: A +2 · B +10 · C 0 · D −12   (sums to 0)
+ *
+ * Only h1–h5 are scored, so the back of the nine stays pending and the round is
+ * never completed — which keeps the `notes` about h3's missing declaration out
+ * of the way and leaves the unplayed holes genuinely unplayed.
+ */
+describe('wolf — celebrations', () => {
+  const CARD: Record<string, number[]> = {
+    A: [4, 4, 4, 4, 4],
+    B: [4, 3, 4, 4, 4],
+    C: [5, 4, 4, 4, 5],
+    D: [5, 4, 4, 5, 5],
+  }
+
+  /** The fixture, optionally truncated to the first `holes` of the card. */
+  const fixture = (holes = 5) => {
+    const players = makePlayers([{ name: 'A' }, { name: 'B' }, { name: 'C' }, { name: 'D' }])
+    const round = makeRound({
+      players,
+      holes: 'front9',
+      games: [{ type: 'wolf', config: { pointCents: 100, rotation: ['p-a', 'p-b', 'p-c', 'p-d'] } }],
+    })
+    const log = new EventLog()
+    pick(log, 1, 'p-b') // A rides with B
+    pick(log, 2, 'lone') // B alone
+    // h3 is deliberately undeclared
+    pick(log, 4, 'blind') // D blind
+    pick(log, 5, 'lone') // A alone
+    log.scoreByHole(
+      round,
+      Object.fromEntries(Object.entries(CARD).map(([name, byHole]) => [name, byHole.slice(0, holes)])),
+      [1, 2, 3, 4, 5].slice(0, holes),
+    )
+    return deriveRound(round, log.events).derivations.get('game-1')!
+  }
+
+  /**
+   * BOTH WAYS A SOLO HOLE CAN LAND. The SPRITE is the declaration — plain wolf
+   * for lone, shades for blind — because that is the difference the group is
+   * reacting to, and the same hole is already wearing the matching glyph in its
+   * ledger line.
+   *
+   * THE STYLE IS PINNED because it is a decision rather than a default. Skins
+   * tosses a pile of coins at a row; Wolf's sprite is a little film, and a
+   * second copy of it is not a bigger moment — so it declares `scene`, plays
+   * centre screen, and carries no count at all. Anything that makes this a toss
+   * fails here, and would also have to invent the count the type refuses it.
+   */
+  it('celebrates the holes somebody went it alone on', () => {
+    const d = fixture()
+    // the wolf pulled it off alone: his sprite, his row
+    expect(d.celebration!(2)).toEqual({
+      style: 'scene',
+      sprite: 'wolf',
+      playerIds: ['p-b'],
+      text: 'B lone +6',
+      hole: 2,
+    })
+    // and the pack ran a blind wolf down — the shades, and the three who beat him
+    expect(d.celebration!(4)).toEqual({
+      style: 'scene',
+      sprite: 'wolf-shades',
+      playerIds: ['p-a', 'p-b', 'p-c'],
+      text: 'A & B & C +3 · blind lost',
+      hole: 4,
+    })
+  })
+
+  /**
+   * THE DECLARATION EARNS THE NOISE, NOT THE WIN. h1 is a perfectly good wolf
+   * win and says nothing, which is the whole rule: every decided hole has a
+   * winning side, so celebrating them would mark half the round.
+   *
+   * h5 is the interesting silence — somebody DID go alone, and it halved. A
+   * halve is not a win, exactly as it isn't in Skins.
+   */
+  it('says nothing about a partnered hole, a halved one, an undeclared one, or one nobody played', () => {
+    const d = fixture()
+    expect(d.celebration!(1), 'partnered wolf win').toBeNull()
+    expect(d.celebration!(3), 'played but never declared').toBeNull()
+    expect(d.celebration!(5), 'lone, and halved').toBeNull()
+    for (const hole of [6, 7, 8, 9]) {
+      expect(d.celebration!(hole), `unplayed hole ${hole}`).toBeNull()
+    }
+  })
+
+  /**
+   * NOT A SETTLEMENT DIFF, which is the reason this is a channel of its own.
+   * C is on the pack that ran down the blind wolf on h4 — a hole worth three
+   * stakes to him — and finishes the round at exactly nothing, having paid the
+   * same amount back across h1 and h2. Derive the celebration from the money
+   * and this player's moment disappears.
+   */
+  it('celebrates a hole for a player who finishes the round dead level', () => {
+    const d = fixture()
+    expect(d.settlement.perPlayerCents).toEqual({
+      'p-a': 200,
+      'p-b': 1000,
+      'p-c': 0,
+      'p-d': -1200,
+    })
+    expect(d.celebration!(4)!.playerIds).toContain('p-c')
+  })
+
+  /**
+   * ONE SENTENCE, NOT TWO THAT AGREE. The bar's recap and the celebration's
+   * text are the same `recap(hole)`, so this pins them together — reword one
+   * without the other and this fails, which is the only thing that stops the
+   * wolves from eventually saying something the bar contradicts.
+   *
+   * Truncated to two holes so the latest DECIDED hole is h2's lone win rather
+   * than h5's halve, which is what puts one hole in front of both channels.
+   */
+  it('says exactly what the bar says about the same hole', () => {
+    const d = fixture(2)
+    expect(d.summaryParts).toEqual([{ label: 'H2', value: 'B lone +6' }])
+    expect(d.celebration!(2)!.text).toBe('B lone +6')
+  })
+})

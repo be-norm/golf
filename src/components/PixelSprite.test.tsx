@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { render } from '@testing-library/react'
+import { CELEBRATION_SPRITES } from '../engine/core/celebration'
 import { PixelSprite } from './PixelSprite'
 
 /**
@@ -56,5 +57,38 @@ describe('PixelSprite', () => {
 
     const labelled = render(<PixelSprite name="coin" label="a coin" />)
     expect(labelled.container.querySelector('[role="img"]')).not.toBeNull()
+  })
+
+  /**
+   * BLIND WOLF HAS TO LOOK DIFFERENT, and that is the entire difference between
+   * these two sprites: one wolf, one swing, shades or no shades. The frames are
+   * GENERATED from a shared character map (`wolfArt.tsx`) rather than drawn
+   * twice, so a broken substitution — the eye/bridge characters resolving the
+   * same way for both — would render two identical strips while every other
+   * test passed and the engine went on correctly naming two different tokens.
+   * The lone hole and the blind hole would simply celebrate the same way.
+   */
+  it('draws the blind wolf differently from the lone one', () => {
+    const art = (name: 'wolf' | 'wolf-shades') =>
+      render(<PixelSprite name={name} />).container.querySelector('[data-sprite]')!.innerHTML
+    expect(art('wolf')).not.toBe(art('wolf-shades'))
+  })
+
+  /**
+   * EVERY CELEBRATION FRAME HAS SOMETHING IN IT. `CelebrationsHaveArt` in the
+   * component is a TYPE check: it proves a token maps to a frame list, not that
+   * the list draws anything. An empty strip, or one frame of it that a legend
+   * typo silently emptied, compiles and renders a blank box on the one screen
+   * nobody writes a test for.
+   */
+  it('gives every celebration sprite something to draw in every frame', () => {
+    for (const name of CELEBRATION_SPRITES) {
+      const { container } = render(<PixelSprite name={name} />)
+      const frames = container.querySelectorAll('[data-sprite] > g')
+      expect(frames.length, `${name} has no frames`).toBeGreaterThan(1)
+      frames.forEach((frame, i) => {
+        expect(frame.querySelectorAll('rect').length, `${name} frame ${i} is blank`).toBeGreaterThan(0)
+      })
+    }
   })
 })

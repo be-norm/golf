@@ -1,6 +1,7 @@
 import type { ReactElement } from 'react'
 import type { CelebrationSprite } from '../engine/core/celebration'
 import { FRAME_MS } from '../lib/motion'
+import { SWING_SIZE, WOLF_SHADES_SWING_FRAMES, WOLF_SWING_FRAMES } from './wolfArt'
 
 /**
  * ANIMATED 16×16 pixel art — the moving counterpart to `PixelGlyph`, in the
@@ -12,6 +13,12 @@ import { FRAME_MS } from '../lib/motion'
  * frame at a time under `steps()`. Nothing tweens: frame 2 replaces frame 1
  * whole, which is the difference between pixel art that moves and a picture
  * being slid around.
+ *
+ * EACH SPRITE DECLARES ITS OWN GRID. 16 is the house size and what everything
+ * inline uses, but a sprite that plays large — the wolf's swing, centre screen
+ * at five times scale — has to be drawn at 32 or it reads as flat and cheap.
+ * The grid is per-sprite rather than global because the two live side by side:
+ * the same wolf is a 16px mark in a ledger line and a 32px figure mid-swing.
  *
  * INTEGER SCALE ONLY, for the reason `PixelGlyph` documents at length — crisp
  * rects snap to device pixels, and at a fractional scale they snap to DIFFERENT
@@ -131,6 +138,11 @@ const COIN_FRAMES: readonly ReactElement[] = [
   </>,
 ]
 
+/* ── the wolf, taking a swing at it ─────────────────────── */
+/**
+ * The art is `wolfArt.tsx`'s, beside the still head `PixelGlyph` renders — one
+ * animal, one palette, and the only sprite here drawn on the 32 grid.
+ */
 /* ── the course, as `public/icon.svg` draws it ───────────── */
 /**
  * THE ICON, REDRAWN AS FRAMES. Same subject, same palette and the same rects as
@@ -294,13 +306,25 @@ const SCAN_FRAMES: readonly ReactElement[] = [2, 4, 6, 8, 10, 12, 14].map((y) =>
  * simply never used, which is worse than none.
  */
 const SPRITES = {
-  coin: COIN_FRAMES,
-  logo: LOGO_FRAMES,
-  'flag-plant': FLAG_PLANT_FRAMES,
-  scan: SCAN_FRAMES,
-} as const satisfies Record<string, readonly ReactElement[]>
+  coin: { frames: COIN_FRAMES, grid: 16 },
+  wolf: { frames: WOLF_SWING_FRAMES, grid: SWING_SIZE },
+  'wolf-shades': { frames: WOLF_SHADES_SWING_FRAMES, grid: SWING_SIZE },
+  logo: { frames: LOGO_FRAMES, grid: 16 },
+  'flag-plant': { frames: FLAG_PLANT_FRAMES, grid: 16 },
+  scan: { frames: SCAN_FRAMES, grid: 16 },
+} as const satisfies Record<string, { frames: readonly ReactElement[]; grid: number }>
 
 export type SpriteName = keyof typeof SPRITES
+
+/**
+ * The grid a sprite is drawn on, for callers that have to place it. A layer
+ * positioning a sprite needs its real size, and hardcoding 16 was safe only
+ * while every sprite shared that grid — the wolf's swing is 32, and the next
+ * one need not be either.
+ */
+export function spriteGrid(name: SpriteName): number {
+  return SPRITES[name].grid
+}
 
 /**
  * EVERY CELEBRATION TOKEN MUST HAVE ART. The engine owns the token list and
@@ -317,7 +341,8 @@ void _celebrationsCovered
 
 interface PixelSpriteProps {
   name: SpriteName
-  /** integer multiplier on the 16px grid — 4 renders a 64px sprite */
+  /** integer multiplier on the sprite's own grid — 4 renders a 16-grid sprite
+   *  at 64px and a 32-grid one at 128px */
   scale?: number
   /** loop forever (a progress indicator) rather than play once and hold */
   loop?: boolean
@@ -338,9 +363,9 @@ export function PixelSprite({
   frameMs = FRAME_MS,
   label,
 }: PixelSpriteProps) {
-  const frames = SPRITES[name]
+  const { frames, grid } = SPRITES[name]
   const n = frames.length
-  const cell = 16 * scale
+  const cell = grid * scale
 
   // A LOOP runs all N frames and wraps, so it travels a full N cells and the
   // last frame gets its own slice of time before frame 0 comes back. A ONE-SHOT
@@ -363,7 +388,7 @@ export function PixelSprite({
         // `data-sprite` one element up would silently match nothing while
         // looking exactly right. Same placement as `PixelGlyph`'s `data-glyph`.
         data-sprite={name}
-        viewBox={`0 0 ${16 * n} 16`}
+        viewBox={`0 0 ${grid * n} ${grid}`}
         shapeRendering="crispEdges"
         focusable="false"
         style={{
@@ -379,7 +404,7 @@ export function PixelSprite({
         }}
       >
         {frames.map((frame, i) => (
-          <g key={i} transform={`translate(${i * 16}, 0)`}>
+          <g key={i} transform={`translate(${i * grid}, 0)`}>
             {frame}
           </g>
         ))}

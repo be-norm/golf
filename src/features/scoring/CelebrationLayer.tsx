@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'motion/react'
 import type { Celebration } from '../../engine/core/celebration'
 import { eventHole } from '../../engine/ledger'
 import { GlyphText } from '../../components/GlyphText'
-import { PixelSprite } from '../../components/PixelSprite'
+import { PixelSprite, spriteGrid } from '../../components/PixelSprite'
 import { stepped } from '../../lib/motion'
 import type { RoundView } from './useRound'
 
@@ -56,21 +56,54 @@ import type { RoundView } from './useRound'
  * than left to a `find` missing and the fallback firing anyway.
  */
 
+/**
+ * TWO SHAPES, AND THE ENGINE PICKS (`Celebration.style`). A TOSS is a garnish
+ * you read out of the corner of your eye while you carry on entering scores, so
+ * it is small, fast, and thrown at the row it belongs to. A SCENE is something
+ * to WATCH: one picture, centre screen, still, and slow enough to follow.
+ *
+ * The split is not decoration. Wolf's sprite is a little film — the wolf clubs
+ * a ball at the camera over seven frames — and run at the toss's speed and size
+ * it was a smear travelling across a phone, which is what the first version of
+ * it was. Nothing here asks WHICH GAME is celebrating; that would be the
+ * per-game branching invariant #7 forbids. It asks what shape the engine said.
+ */
+
 /** Enough coins to read as "a lot", few enough to stay a garnish. */
 const MAX_SPRITES = 5
 /** Integer, like every sprite scale — 4 renders on the 16px grid at 64px. */
 const SPRITE_SCALE = 4
-const HALF = (16 * SPRITE_SCALE) / 2
 /** How far apart the coins sit at rest; they leave the bar already spread by
  *  half this, because two coins launched from one point read as one coin. */
 const FAN = 22
+
+/**
+ * A SCENE IS SLOW AND BIG ON PURPOSE. At the house frame rate seven frames are
+ * over in six tenths of a second, which is fine for a coin doing the same thing
+ * four times and useless for a picture that changes every frame. Roughly double
+ * the frame time reads as deliberate; double the sprite scale is what makes a
+ * club distinguishable from a ball at arm's length.
+ */
+const SCENE_FRAME_MS = 170
+/**
+ * A scene is sized in SCREEN PIXELS and the scale is derived from whatever grid
+ * the sprite is drawn on — 5 for the wolf's 32, 10 for a 16-grid one. A fixed
+ * scale would have been a constant that silently means a different size per
+ * sprite, which is the trap this whole diff opened by making the grid
+ * per-sprite. Rounded, because the scale must stay an integer.
+ */
+const SCENE_PX = 160
+const sceneScale = (name: Parameters<typeof spriteGrid>[0]) =>
+  Math.max(1, Math.round(SCENE_PX / spriteGrid(name)))
+/** Long enough to play through once (6 steps) and hold the last frame. */
+const SCENE_MS = 1500
 
 interface Playing {
   /** re-keys AnimatePresence so the same hole celebrated twice replays */
   nonce: number
   celebration: Celebration
-  from: { x: number; y: number }
-  to: { x: number; y: number }
+  /** where the sprites fly; a scene doesn't fly, so it has none */
+  path?: { from: { x: number; y: number }; to: { x: number; y: number } }
 }
 
 /**
@@ -179,10 +212,19 @@ export function CelebrationLayer({ view }: { view: RoundView | undefined | null 
       )
 
     const celebration = pick[1].c
+    nonceRef.current += 1
+    if (celebration.style === 'scene') {
+      // no rows measured, no bar: a scene plays where it is looked at
+      setPlaying({ nonce: nonceRef.current, celebration })
+      return
+    }
     const to = anchorFor(celebration.playerIds)
     const from = barOrigin()
-    nonceRef.current += 1
-    setPlaying({ nonce: nonceRef.current, celebration, from, to: to ?? { ...from, y: from.y - 60 } })
+    setPlaying({
+      nonce: nonceRef.current,
+      celebration,
+      path: { from, to: to ?? { ...from, y: from.y - 60 } },
+    })
   }, [view])
 
   /**
@@ -199,7 +241,8 @@ export function CelebrationLayer({ view }: { view: RoundView | undefined | null 
    */
   useEffect(() => {
     if (!playing) return
-    const t = setTimeout(() => setPlaying((p) => (p?.nonce === playing.nonce ? null : p)), 1100)
+    const ms = playing.celebration.style === 'scene' ? SCENE_MS + 120 : 1100
+    const t = setTimeout(() => setPlaying((p) => (p?.nonce === playing.nonce ? null : p)), ms)
     return () => clearTimeout(t)
   }, [playing])
 
@@ -209,15 +252,73 @@ export function CelebrationLayer({ view }: { view: RoundView | undefined | null 
   return (
     <div aria-hidden className="pointer-events-none fixed inset-0 z-[60] overflow-hidden">
       <AnimatePresence>
-        {playing && <Burst key={playing.nonce} playing={playing} />}
+        {playing &&
+          (playing.path ? (
+            <Burst key={playing.nonce} playing={playing} path={playing.path} />
+          ) : (
+            <Scene key={playing.nonce} celebration={playing.celebration} />
+          ))}
       </AnimatePresence>
     </div>
   )
 }
 
-function Burst({ playing }: { playing: Playing }) {
-  const { celebration, from, to } = playing
-  const n = Math.min(Math.max(1, celebration.count), MAX_SPRITES)
+/**
+ * ONE PICTURE, CENTRE SCREEN, HELD STILL. Played ONCE rather than looped, so it
+ * comes to rest on its final frame — for Wolf that is the ball filling the box,
+ * which is the shot the whole animation is for. A loop would snap back to the
+ * address position and start again, turning a punchline into a fidget.
+ *
+ * The scrim is faint and exists for legibility: a 160px picture over a scoring
+ * grid of numbers has nothing to separate it from the numbers. It is
+ * pointer-events-none like everything else here, so scoring stays live.
+ *
+ * BOTH THE SPRITE AND THE CAPTION ARE POSITIONED, and that is load-bearing
+ * rather than tidy. The scrim is `absolute` and so paints in the positioned
+ * pass, above ordinary in-flow content — so an unpositioned sprite ends up
+ * UNDER the wash meant to set it off, rendered at 60% while the caption beside
+ * it stays bright. The caption always carried `relative`; the picture did not.
+ */
+function Scene({ celebration }: { celebration: Celebration }) {
+  return (
+    <motion.div
+      className="absolute inset-0 flex flex-col items-center justify-center gap-4"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: [0, 1, 1, 0] }}
+      transition={{
+        duration: SCENE_MS / 1000,
+        times: [0, 0.08, 0.82, 1],
+        ease: stepped(4),
+      }}
+    >
+      <div className="absolute inset-0 bg-black/40" />
+      <div className="relative">
+        <PixelSprite
+          name={celebration.sprite}
+          scale={sceneScale(celebration.sprite)}
+          frameMs={SCENE_FRAME_MS}
+        />
+      </div>
+      <p className="font-display relative max-w-[16rem] text-center text-[10px] uppercase leading-relaxed text-coin-400 [text-shadow:2px_2px_0_rgb(0_0_0/0.8)]">
+        <GlyphText text={celebration.text} />
+      </p>
+    </motion.div>
+  )
+}
+
+function Burst({
+  playing,
+  path,
+}: {
+  playing: Playing
+  path: NonNullable<Playing['path']>
+}) {
+  const { celebration } = playing
+  const { from, to } = path
+  const n = Math.min(Math.max(1, celebration.style === 'toss' ? celebration.count : 1), MAX_SPRITES)
+  // the sprite's own grid, not the house 16 — a 32-grid token tossed with a
+  // hardcoded half-width lands a whole sprite off the row it was aimed at
+  const half = (spriteGrid(celebration.sprite) * SPRITE_SCALE) / 2
   const coins = Array.from({ length: n }, (_, i) => i)
 
 
@@ -232,10 +333,10 @@ function Burst({ playing }: { playing: Playing }) {
             key={i}
             className="absolute"
             style={{ left: 0, top: 0 }}
-            initial={{ x: from.x - HALF + spread / 2, y: from.y - HALF, opacity: 0 }}
+            initial={{ x: from.x - half + spread / 2, y: from.y - half, opacity: 0 }}
             animate={{
-              x: to.x - HALF + spread,
-              y: to.y - HALF,
+              x: to.x - half + spread,
+              y: to.y - half,
               opacity: [0, 1, 1, 0],
             }}
             transition={{

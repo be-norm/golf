@@ -151,6 +151,9 @@ function derive(
     const r = holeResults.find((h) => h.hole === hole)
     if (r?.kind !== 'won') return null
     return {
+      // a pile of coins thrown to the winner's row — the toss is what this
+      // channel was built for, and the count IS the magnitude
+      style: 'toss',
       sprite: 'coin',
       playerIds: [r.winnerId],
       count: r.skins,

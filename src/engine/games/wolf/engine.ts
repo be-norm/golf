@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import type { GameEngine, GameDerivation, InputRequest } from '../../catalog'
+import type { Celebration, GameEngine, GameDerivation, InputRequest } from '../../catalog'
 import type { RoundContext } from '../../core/context'
 import type { GameScopedEvent } from '../../core/events'
 import { emptySettlement, type Settlement } from '../../core/money'
@@ -290,32 +290,107 @@ function derive(
       : r.pick!.kind === 'blind'
         ? 'blind'
         : 'lone'
-  const summaryParts = latestHoleSummary(
-    ctx.holesPlayed,
-    (hole) => {
-      const r = holeResults.find((h) => h.hole === hole)
-      if (!r || r.outcome === 'pending') return null
-      const wolfName = nameOf.get(r.wolfId)
-      if (r.outcome === 'halved') return `${wolfName} ${pickTag(r)} · halved`
-      const gainers = [...r.points!.entries()].filter(([, p]) => p > 0)
-      const pts = gainers[0]?.[1] ?? 0
-      const names = gainers.map(([id]) => nameOf.get(id)).join(' & ')
-      // the mode tag rides on ANY solo hole, won or lost ("Ben lone +6" /
-      // "Colby & DJ & Grant +2 · lone"): the multiplier is what makes those
-      // numbers surprising, and it is the losing side that sees the big one
-      const solo = r.pick!.kind !== 'partner'
-      // won or LOST. The multiplier is why the number is what it is, and the
-      // loser of a blind hole moves nine stakes — dropping the tag there left
-      // "+3" on the bar with nothing explaining why it wasn't "+1".
-      return solo
-        ? r.outcome === 'wolfWin'
-          ? `${names} ${pickTag(r)} +${pts}`
-          : `${names} +${pts} · ${pickTag(r)} lost`
-        : `${names} +${pts}`
-    },
-    'no points yet',
-  )
+  /**
+   * ONE SENTENCE, TWO CHANNELS. The pinned bar recaps the latest decided hole
+   * and the celebration says the same thing beside its wolves — so they are the
+   * same function, not two literals that agree today (MAI-94). Written out as a
+   * named `const` for exactly that reason: inlined into `latestHoleSummary` it
+   * invited the celebration to grow a second copy, and the first rewording
+   * would have split them. Same shape, and the same reason, as Skins' `recap`.
+   *
+   * PLAIN TEXT, no glyph token. `celebration.text` decodes them and the bar
+   * does NOT, so the moment this string carries one the two channels can no
+   * longer be the same string.
+   */
+  const recap = (hole: number): string | null => {
+    const r = holeResults.find((h) => h.hole === hole)
+    if (!r || r.outcome === 'pending') return null
+    const wolfName = nameOf.get(r.wolfId)
+    if (r.outcome === 'halved') return `${wolfName} ${pickTag(r)} · halved`
+    const gainers = [...r.points!.entries()].filter(([, p]) => p > 0)
+    const pts = gainers[0]?.[1] ?? 0
+    const names = gainers.map(([id]) => nameOf.get(id)).join(' & ')
+    // the mode tag rides on ANY solo hole, won or lost ("Ben lone +6" /
+    // "Colby & DJ & Grant +2 · lone"): the multiplier is what makes those
+    // numbers surprising, and it is the losing side that sees the big one
+    const solo = r.pick!.kind !== 'partner'
+    // won or LOST. The multiplier is why the number is what it is, and the
+    // loser of a blind hole moves nine stakes — dropping the tag there left
+    // "+3" on the bar with nothing explaining why it wasn't "+1".
+    return solo
+      ? r.outcome === 'wolfWin'
+        ? `${names} ${pickTag(r)} +${pts}`
+        : `${names} +${pts} · ${pickTag(r)} lost`
+      : `${names} +${pts}`
+  }
+  const summaryParts = latestHoleSummary(ctx.holesPlayed, recap, 'no points yet')
   const summary = summaryString(summaryParts)
+
+  /**
+   * THE DECLARATION EARNS THE NOISE, NOT THE WIN (MAI-94).
+   *
+   * The obvious rule — celebrate `wolfWin` — picks the wrong axis. EVERY
+   * decided hole here has a winning side, so that marks roughly half the round
+   * and asserts that the wolf side taking a hole is remarkable while the pack
+   * taking one isn't. It isn't; they are the same hole seen from two ends. A
+   * channel that fires on every other hole stops meaning anything, which
+   * `core/celebration.ts` names outright.
+   *
+   * What IS remarkable is somebody going alone. Lone and blind are the decision
+   * the whole game is built on (see HOLE_UNITS), they are rare in a round
+   * priced to make declining usually right, and they are what the group reacts
+   * to. So a solo hole celebrates whichever way it lands — a lone wolf run down
+   * by the pack is the loudest moment at the table, and it is named as the
+   * pack's while the text says which way it went.
+   *
+   * NAMING THREE PLAYERS IS NOT THROWING SPRITES AT THREE ROWS, and this is the
+   * first celebration in the app to name more than one (Skins always had a
+   * single winner). `CelebrationLayer.anchorFor` flies the whole burst to the
+   * FIRST of these ids whose row is mounted. That is accepted rather than
+   * worked around: the money went to all three, the text names all three, and
+   * the id list is also what the layer's seen-key is built from — so a
+   * correction that moves a player between the sides is recognised as a new
+   * event rather than the same one. Widening the burst across rows is a change
+   * to the layer, not to this list.
+   *
+   * Partnered holes are silent (all ±1, three quarters of the round, nothing to
+   * tell apart) and so are halves, for Skins' reason: nothing was won. A round
+   * where nobody goes alone says nothing at all, which is correct — and it is
+   * the cheap direction to be wrong in, since adding partnered wins later is
+   * one line and taking noise away after people have seen it is not.
+   *
+   * THE SPRITE IS THE DECLARATION, not the outcome: the same hole shows the
+   * shades in its ledger line and its pick prompt, so a blind hole throwing
+   * plain wolves would contradict the label sitting beside it.
+   *
+   * COUNT IS ONE, AND THAT IS A STATEMENT ABOUT THE ART. Skins throws a coin
+   * per skin because a coin is a countable object: three of them is a bigger
+   * pile. Wolf's sprite is a SCENE — the wolf turns on it and the ball comes at
+   * you — and a scene does not multiply. Two of them is not a bigger moment,
+   * it is two wolves, overlapping, each caught at a different frame of the same
+   * swing (the layer staggers them). The hole's size is said where it can
+   * actually be read: the shades, which are the whole difference between the
+   * two sprites, and the text, which says +6 or +3.
+   *
+   * NOTHING HERE ASKS ABOUT MONEY. It is not a settlement diff, which is the
+   * whole reason the channel exists rather than being derived from one: a
+   * player can take a lone hole and finish the round dead level.
+   */
+  const celebration = (hole: number): Celebration | null => {
+    const r = holeResults.find((h) => h.hole === hole)
+    if (!r || !r.pick || r.pick.kind === 'partner') return null
+    if (r.outcome !== 'wolfWin' && r.outcome !== 'packWin') return null
+    // The winning side, which is exactly the set `recap` names: every member of
+    // it takes a positive share and every member of the other pays one.
+    const winners = r.outcome === 'wolfWin' ? r.sides!.wolf : r.sides!.pack
+    return {
+      style: 'scene',
+      sprite: r.pick.kind === 'blind' ? 'wolf-shades' : 'wolf',
+      playerIds: winners,
+      text: recap(hole) ?? '',
+      hole,
+    }
+  }
 
   // THE WOLF SIDE, marked. `(W)` for an ordinary partnered hole; the pixel wolf
   // for lone and the same wolf in shades for blind — each followed by the word,
@@ -538,6 +613,7 @@ function derive(
     summaryParts,
     holeSummary,
     requiredInputs,
+    celebration,
     settlement,
     ...(notes.length > 0 && { notes }),
   }
