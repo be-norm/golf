@@ -35,7 +35,7 @@ export function HomeScreen() {
             the picture nothing; the hole is well inside. */}
         <span className="-mx-4 block overflow-hidden">
           <span className="mx-auto block w-fit">
-            <PixelSprite name="logo" scale={5} />
+            <PixelSprite name="logo" scale={4} />
           </span>
         </span>
         <h1 className="font-display mt-3 text-3xl uppercase text-felt-300 [text-shadow:4px_4px_0_rgb(0_0_0/0.6)]">

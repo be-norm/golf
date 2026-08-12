@@ -27,19 +27,27 @@ export const COURSE_SIZE = 32
  * same palette, wider frame — the green and the flag sit right, and the space
  * that buys on the left is what the approach shot flies through.
  *
- * 108 ACROSS IS CHOSEN FROM THE SCREEN, not the drawing. At the house scale of
- * 5 that is 540 CSS pixels, and the number to beat is 532 — `max-w-md` against
- * this app's NINETEEN-pixel root, not the sixteen it would be anywhere else.
- * At 480 the banner was narrower than the buttons underneath it, which is the
- * opposite of bleeding. Wider than the container on every screen means it
- * always fills the width and always crops a little, instead of filling it on a
- * small handset and leaving a gutter on a large one. It cannot stretch to fit:
- * a fluid width is a fractional scale (`docs/pixel-art.md`, rule 1). What crops
- * is fairway off the left and a rim of green off the right, and the hole sits
- * far enough inside to survive the narrowest screen.
+ * 135 x 40 AT SCALE 4 IS 540 x 160 CSS PIXELS, and every one of those numbers
+ * was chosen from the screen rather than the drawing.
+ *
+ * 540 wide because the number to beat is 532 — `max-w-md` against this app's
+ * NINETEEN-pixel root, not the sixteen it would be anywhere else. Wider than the
+ * container on every screen means the banner always fills the width and always
+ * crops a little, instead of filling it on a small handset and leaving a gutter
+ * on a large one. It cannot stretch to fit: a fluid width is a fractional scale
+ * (`docs/pixel-art.md`, rule 1). What crops is fairway off the left and a rim of
+ * green off the right, and the hole sits far enough inside to survive 375px.
+ *
+ * AND FOUR RATHER THAN FIVE, which is the whole reason for 135 and 40. The
+ * banner had to hold a flag small enough not to shout and a `$` legible enough
+ * to be a dollar, and at 32 rows those two wanted the same pixels: a dollar
+ * needs its stem to OVERSHOOT the S — that is the difference between `$` and
+ * the numeral 5 — and the two rows that costs left nothing for the cloth. More
+ * art pixels at a smaller scale is the same picture size with finer grain, so
+ * both the flag and the mark come down while the mark gains the rows it needed.
  */
-export const BANNER_W = 108
-export const BANNER_H = 32
+export const BANNER_W = 135
+export const BANNER_H = 40
 
 /* ── palette, sampled from public/pwa-512x512.png ────────── */
 const SKY_HIGH = '#1983f4'
@@ -165,8 +173,8 @@ const SQUARE: Layout = {
   greenX: 16, greenRx: 12.6, greenRy: 5.7, flagTop: 3,
 }
 const BANNER: Layout = {
-  w: BANNER_W, h: BANNER_H, horizon: 11, stickX: 72, cupY: 21,
-  greenX: 72, greenRx: 22, greenRy: 5.4, flagTop: 2,
+  w: BANNER_W, h: BANNER_H, horizon: 14, stickX: 90, cupY: 26,
+  greenX: 90, greenRx: 28, greenRy: 7, flagTop: 3,
 }
 
 function blankOf(l: Layout): Grid {
@@ -198,12 +206,12 @@ function flag(g: Grid, l: Layout, furled: boolean) {
   // Nine rows deep, because the `$` needs five of them and has to sit INSIDE
   // the cloth — at six rows its stem fell off the bottom edge and left a cream
   // pixel floating in the sky.
-  // TWELVE ROWS, and the point of that is the `$`. At eight the glyph and its
-  // stems filled seven of them — a flag that is mostly dollar. The mark did not
-  // want to be smaller, the cloth wanted to be bigger.
+  // ELEVEN ROWS on the finer grid, which is a SMALLER flag than the ten it
+  // replaces — ten at scale 5 was 50 CSS pixels, eleven at scale 4 is 44 — and
+  // it still has room for a dollar with stems.
   const shape: readonly (readonly [dy: number, w: number])[] = furled
-    ? [[0, 6], [1, 10], [2, 13], [3, 15], [4, 16], [5, 16], [6, 15], [7, 13], [8, 10], [9, 7], [10, 4], [11, 2]]
-    : [[0, 7], [1, 11], [2, 14], [3, 16], [4, 16], [5, 15], [6, 13], [7, 11], [8, 8], [9, 6], [10, 3], [11, 1]]
+    ? [[0, 5], [1, 9], [2, 12], [3, 14], [4, 15], [5, 15], [6, 14], [7, 12], [8, 9], [9, 6], [10, 3]]
+    : [[0, 6], [1, 10], [2, 13], [3, 15], [4, 15], [5, 14], [6, 12], [7, 10], [8, 7], [9, 4], [10, 2]]
   const rows = shape.map(([dy, w]) => [l.flagTop + dy, w] as const)
   for (const [y, w] of rows) fill(g, l.stickX + 1, y, w, 1, 'f')
   // SHADOW IS AN EDGE, NOT A HALF. Flooding every row below the middle turned
@@ -217,6 +225,11 @@ function flag(g: Grid, l: Layout, furled: boolean) {
   // THE DOLLAR IT FLIES FOR. Five rows is the least an S can be drawn in, and
   // it has to actually be an S — a bar/stem/bar checker reads as a ladder,
   // which is what the first attempt put on the flag.
+  // A DOLLAR IS AN S WITH A STEM THROUGH IT, and the stem has to come out the
+  // other side. Without the overshoot the glyph is legibly the numeral 5 — which
+  // is what a flag flew for one round of this — and thinning the S's arms to one
+  // pixel breaks the stem and makes it worse. So it keeps its weight and gets
+  // its two rows; the finer grid is what paid for them.
   const D = ['kkk', 'kk.', 'kkk', '.kk', 'kkk']
   //
   // IT HAS TO FIT INSIDE THE CLOTH, and checking that is the code's job rather
@@ -295,11 +308,11 @@ function pixels(g: Grid, key: string): ReactElement {
  * numbers you choose, not one you derive.
  */
 const APPROACH: readonly (readonly [x: number, y: number])[] = [
-  [2, 5], [12, 9], [22, 13], [32, 17],
-  [41, 20], // pitches on the fairway
-  [49, 16], [56, 20], // and again, lower
-  [62, 18], [67, 20], // a last hop onto the green
-  [70, 20], // running at it
+  [2, 6], [15, 11], [27, 16], [40, 21],
+  [51, 25], // pitches on the fairway
+  [61, 20], [70, 25], // and again, lower, onto the green
+  [78, 22], [84, 25], // a last hop
+  [87, 25], // running at it
 ]
 
 export const COURSE_LOGO_FRAMES: readonly ReactElement[] = APPROACH.concat([[-1, -1]]).map(
