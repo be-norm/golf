@@ -91,4 +91,19 @@ describe('PixelSprite', () => {
       })
     }
   })
+
+  /**
+   * A FRACTIONAL SCALE IS THE ONE WAY TO BREAK THE IDIOM SILENTLY. Crisp rects
+   * snap to device pixels, and at 2.5 they snap to DIFFERENT widths across the
+   * sprite — the coin comes out with one flat side. Nothing about it throws or
+   * logs; it just renders a slightly wrong picture, which is exactly the class
+   * of defect nobody files. `docs/pixel-art.md` states the rule; this is the
+   * choke point that keeps it true.
+   */
+  it('refuses a fractional scale rather than rendering a lopsided sprite', () => {
+    const { container } = render(<PixelSprite name="coin" scale={2.5} />)
+    const box = container.querySelector<HTMLElement>('[data-sprite]')!.parentElement!
+    // 16-grid at a rounded 3, never 16 × 2.5 = 40
+    expect(box.style.width).toBe('48px')
+  })
 })

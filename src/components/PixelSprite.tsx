@@ -341,8 +341,8 @@ void _celebrationsCovered
 
 interface PixelSpriteProps {
   name: SpriteName
-  /** integer multiplier on the sprite's own grid — 4 renders a 16-grid sprite
-   *  at 64px and a 32-grid one at 128px */
+  /** multiplier on the sprite's own grid — 4 renders a 16-grid sprite at 64px
+   *  and a 32-grid one at 128px. Rounded to an integer; see below. */
   scale?: number
   /** loop forever (a progress indicator) rather than play once and hold */
   loop?: boolean
@@ -365,7 +365,13 @@ export function PixelSprite({
 }: PixelSpriteProps) {
   const { frames, grid } = SPRITES[name]
   const n = frames.length
-  const cell = grid * scale
+  // INTEGER SCALE IS THE WHOLE IDIOM, so it is enforced rather than asked for.
+  // A fractional scale makes crisp rects snap to DIFFERENT device-pixel widths
+  // across the sprite — the coin comes out with one flat side — and the failure
+  // is a slightly wrong picture, which nobody files a bug against. Rounded
+  // rather than thrown: a celebration is not worth a white screen.
+  const scaled = Math.max(1, Math.round(scale))
+  const cell = grid * scaled
 
   // A LOOP runs all N frames and wraps, so it travels a full N cells and the
   // last frame gets its own slice of time before frame 0 comes back. A ONE-SHOT

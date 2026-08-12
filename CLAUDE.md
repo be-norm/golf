@@ -8,10 +8,10 @@ holds those plus every game still to come, with implementation-grade scoring mat
 stale before.)
 
 **The architecture of record is the invariants below** — there is no separate plan history to
-consult, and this line used to promise one. `docs/` carries exactly two standing design notes
-(`native-app-plan.md`, `account-deletion.md`) alongside that catalog; everything else is in
-Linear (team MAI, project "Additional Games"), where each ticket says why it was built the
-way it was.
+consult, and this line used to promise one. `docs/` carries exactly three standing design notes
+(`native-app-plan.md`, `account-deletion.md`, `pixel-art.md`) alongside that catalog; everything
+else is in Linear (team MAI, project "Additional Games"), where each ticket says why it was
+built the way it was.
 
 ## Commands
 
@@ -466,8 +466,13 @@ change, use a 6-digit code (`{{ .Token }}` + `verifyOtp`) rather than a link.
 - **Motion is stepped, and reduced motion is honoured in two halves.**
   `stepped(n)` (`src/lib/motion.ts`) quantises easing so movement snaps to a
   grid — the same reason both CSS keyframes use `steps()`. Sprites animate by
-  translating a frame strip, at INTEGER scale only (`PixelSprite`; note Tailwind
-  `size-*` is rem-based against a 19px root, so `size-16` is 76px, not 64).
+  translating a frame strip, at INTEGER scale only (enforced in `PixelSprite`,
+  not merely asked for; note Tailwind `size-*` is rem-based against a 19px root,
+  so `size-16` is 76px, not 64). **How the art itself is drawn — grids by render
+  size, the 1px outline, tone budgets, cool shadows, generated-vs-hand-drawn —
+  is `docs/pixel-art.md`**, along with the palette of record and why the 16px
+  glyphs stay flat. Each sprite declares its own grid, so anything PLACING one
+  asks `spriteGrid` rather than assuming 16.
   `<MotionConfig reducedMotion="user">` covers everything Motion drives; the
   `prefers-reduced-motion` block in `index.css` covers the keyframes it cannot
   see. Both are required — neither is sufficient. **The CSS half selects
