@@ -18,6 +18,15 @@ import { PixelSprite, spriteFrames } from './PixelSprite'
  * device-pixel widths across one picture (`docs/pixel-art.md`, rule 1). The
  * banner is drawn wider than the column, escapes the gutter and lets its ends
  * clip; what goes is fairway off one side and a rim of green off the other.
+ *
+ * CENTRED BY FLEX, NOT BY `mx-auto`, and that is not a style preference. When a
+ * box is WIDER than its containing block, CSS resolves auto margins to zero —
+ * so `mx-auto` silently left-aligns and every pixel of the overflow comes off
+ * the RIGHT, which is the end the flag and the hole are on. On a 375px screen
+ * that cropped them away entirely. Flex centring overflows both ends, which is
+ * what "crops a little off each side" needs to be true. `shrink-0` because a
+ * flex item would otherwise be squeezed to the container instead of overflowing
+ * it, which lands in the same place by a third route.
  */
 
 /** Slower than the house rate: a flap, not a flutter. */
@@ -32,8 +41,8 @@ export function CourseBanner({ intro }: { intro: 'logo' | 'flag-plant' }) {
   }, [intro])
 
   return (
-    <span className="-mx-4 block overflow-hidden">
-      <span className="mx-auto block w-fit">
+    <span className="-mx-4 flex justify-center overflow-hidden">
+      <span className="shrink-0">
         {done ? (
           <PixelSprite name="logo-idle" scale={4} frameMs={WIND_FRAME_MS} loop />
         ) : (

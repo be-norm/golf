@@ -27,7 +27,11 @@ describe('HomeScreen', () => {
     expect(container.querySelector('[data-sprite="logo"]')).not.toBeNull()
     expect(container.querySelector('[data-sprite="logo-idle"]')).toBeNull()
 
-    await waitFor(() => expect(container.querySelector('[data-sprite="logo-idle"]')).not.toBeNull())
+    // generously past the ~900ms swap: the default 1000ms left no margin, and
+    // passed only because the re-render blocked the thread across a tick
+    await waitFor(() => expect(container.querySelector('[data-sprite="logo-idle"]')).not.toBeNull(), {
+      timeout: 4000,
+    })
     // and the ball is not coming round again
     expect(container.querySelector('[data-sprite="logo"]')).toBeNull()
   })

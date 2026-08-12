@@ -51,9 +51,9 @@ The palette, sampled from the 512 master and clustered:
      pixel, and there is no room for detail that would only turn to mud.
    - **32** for anything that plays large — 64px and up. At 16 the same drawing
      reads flat and cheap, which is the whole of what "too NES" means here.
-   - **A banner** for anything spanning a column: the home screen's mark is
-     80×28, because a square asked to fill a width either crops or leaves the
-     sides empty. Note it cannot be `width: 100%` — a fluid width is a
+   - **A banner** for anything spanning a column: the course mark is 135×40,
+     because a square asked to fill a width either crops or leaves the sides
+     empty. Note it cannot be `width: 100%` — a fluid width is a
      fractional scale, and rule (1) is why it can't be.
    - Each sprite declares its own grid (`PixelSprite`'s `SPRITES` table), and
      **callers ask for a SIZE, not a scale** (`scaleFor(name, px)`). A hardcoded

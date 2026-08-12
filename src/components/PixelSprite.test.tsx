@@ -34,7 +34,7 @@ describe('PixelSprite', () => {
     // EVERY NUMBER HERE IS DERIVED, none written down. The arithmetic under
     // test is steps-and-travel; the cell width and the frame count are the
     // sprite's business and both have already changed under this test once —
-    // the logo went from a 16-grid square of five frames to an 80-wide banner
+    // the logo went from a 16-grid square of five frames to a 135-wide banner
     // of eleven, and a literal turned an art change into a failing unit test
     // about animation timing.
     const cell = spriteGrid('logo').w * 4

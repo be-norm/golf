@@ -61,7 +61,6 @@ const GREEN = '#35a421'
 const OUTLINE = '#112711'
 const FLAG = '#ec0e12'
 const FLAG_SHADE = '#71140c'
-const SPARK = '#f9f0d7' // cream: the burst lands on bright turf, not dark sky
 
 const LEGEND: Record<string, string> = {
   s: SKY_HIGH,
@@ -77,7 +76,17 @@ const LEGEND: Record<string, string> = {
   f: FLAG,
   d: FLAG_SHADE,
   k: CLOUD, // flagstick, ball and the dollar are all the same cream
-  '*': SPARK,
+}
+
+/**
+ * Built on FIRST USE, not at import. Every screen pulls in `PixelSprite` and
+ * `routes.tsx` pulls in every screen, so eager strips are twenty-odd banners'
+ * worth of work on the critical path of a cold start — paid in full whether or
+ * not anything ever shows one.
+ */
+function once<T>(build: () => T): () => T {
+  let made: T | undefined
+  return () => (made ??= build())
 }
 
 type Grid = string[][]
@@ -117,13 +126,18 @@ function ellipse(g: Grid, cx: number, cy: number, rx: number, ry: number, ch: st
 const TREE_JITTER = [0, -1, -1, 0, -2, -1, 0, -1, -2, -2, -1, 0, -1, -2, -1, 0]
 const treeTop = (x: number, horizon: number) => horizon + TREE_JITTER[x % TREE_JITTER.length]!
 
-/** cloud puffs, as a fraction of the width so they spread with the frame */
-const CLOUDS: readonly (readonly [at: number, y: number, w: number])[] = [
-  [0.06, 0.14, 5], [0.03, 0.19, 8],
-  [0.66, 0.07, 4], [0.63, 0.11, 7],
-  [0.20, 0.29, 3], [0.17, 0.34, 6],
-  [0.84, 0.25, 4], [0.81, 0.30, 6],
-  [0.40, 0.11, 3], [0.37, 0.16, 5],
+/**
+ * Cloud puffs: x as a FRACTION of the width so they spread with the frame, y as
+ * an explicit ROW. They were fractions of the horizon, and two fractions a
+ * twentieth apart round to the same row on a thirteen-row sky — which flattened
+ * four of the five two-row puffs into single bars.
+ */
+const CLOUDS: readonly (readonly [at: number, row: number, w: number])[] = [
+  [0.06, 1, 5], [0.03, 2, 8],
+  [0.66, 0, 4], [0.63, 1, 7],
+  [0.20, 3, 3], [0.17, 4, 6],
+  [0.84, 2, 4], [0.81, 3, 6],
+  [0.40, 1, 3], [0.37, 2, 5],
 ]
 
 /**
@@ -147,13 +161,22 @@ function ground(g: Grid, w: number, h: number, horizon: number, gust?: number) {
       const top = treeTop(x, horizon)
       if (y < top) continue
       if (y <= top + 1) {
-        put(g, x, y, (x + y) % 3 === 0 ? 'T' : 't')
+        // blocked like the turf's, and for the same reason — a per-pixel
+        // pattern across the horizon is another few thousand unmergeable nodes
+        put(g, x, y, (Math.floor(x / 3) + y) % 3 === 0 ? 'T' : 't')
         continue
       }
       // the turf lightens toward the viewer, with a checker over the top
       const near = (y - top) / (h - top)
       const base = near < 0.35 ? 'g' : 'G'
-      const lit = (x + y) % 2 === 0 && (x * 7 + y * 3) % 5 !== 0
+      // THREE BY THREE, not per pixel. A single-pixel checker is unmergeable in
+      // both directions by construction, and the turf is nearly two thirds of
+      // every frame — it alone put the home screen's strip past twenty thousand
+      // rects. Coarser is also closer to the icon, whose dither blocks are
+      // chunky at 512.
+      const bx = Math.floor(x / 3)
+      const by = Math.floor(y / 3)
+      const lit = (bx + by) % 2 === 0 && (bx * 7 + by * 3) % 5 !== 0
       let ch = lit && near > 0.2 ? (base === 'G' ? 'L' : 'G') : base
       if (gust !== undefined) {
         const d = (((x + 2 * (y - top) - gust) % GUST_PERIOD) + GUST_PERIOD) % GUST_PERIOD
@@ -198,9 +221,7 @@ function blankOf(l: Layout): Grid {
 function scene(l: Layout, gust?: number): Grid {
   const g = blankOf(l)
   fill(g, 0, Math.round(l.horizon * 0.45), l.w, l.horizon, 'S')
-  for (const [at, yf, w] of CLOUDS) {
-    fill(g, Math.round(at * l.w), Math.round(yf * l.horizon), w, 1, 'c')
-  }
+  for (const [at, row, w] of CLOUDS) fill(g, Math.round(at * l.w), row, w, 1, 'c')
   ground(g, l.w, l.h, l.horizon, gust)
   ellipse(g, l.greenX, l.cupY + 2, l.greenRx + 1, l.greenRy + 0.8, 'o')
   ellipse(g, l.greenX, l.cupY + 2, l.greenRx, l.greenRy, 'p')
@@ -294,23 +315,45 @@ function ball(g: Grid, x: number, y: number) {
   put(g, x + 1, y + 1, 'c')
 }
 
+/**
+ * The grid to rects, merged in BOTH directions — greedily: widen, then deepen
+ * while the whole span still matches.
+ *
+ * Row runs alone were the obvious thing and are not enough at this size. A
+ * banner is 5,400 cells and there are twenty-eight frames of it; sky and turf
+ * are vast flat fields that a row-at-a-time emitter re-states forty times over.
+ * The output is identical pixels either way — this is purely how many nodes the
+ * browser is asked to hold.
+ */
 function pixels(g: Grid, key: string): ReactElement {
+  const h = g.length
+  const w = g[0]!.length
+  const taken = Array.from({ length: h }, () => Array<boolean>(w).fill(false))
   const out: ReactElement[] = []
-  g.forEach((row, y) => {
-    let x = 0
-    while (x < row.length) {
-      const ch = row[x]!
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (taken[y]![x]) continue
+      const ch = g[y]![x]!
       const paint = LEGEND[ch]
       if (paint === undefined) {
-        x += 1
+        taken[y]![x] = true
         continue
       }
-      let w = 1
-      while (row[x + w] === ch) w += 1
-      out.push(<rect key={`${key}-${y}-${x}`} x={x} y={y} width={w} height={1} fill={paint} />)
-      x += w
+      let rw = 1
+      while (x + rw < w && !taken[y]![x + rw] && g[y]![x + rw] === ch) rw += 1
+      let rh = 1
+      grow: while (y + rh < h) {
+        for (let i = 0; i < rw; i++) {
+          if (taken[y + rh]![x + i] || g[y + rh]![x + i] !== ch) break grow
+        }
+        rh += 1
+      }
+      for (let j = 0; j < rh; j++) for (let i = 0; i < rw; i++) taken[y + j]![x + i] = true
+      out.push(
+        <rect key={`${key}-${y}-${x}`} x={x} y={y} width={rw} height={rh} fill={paint} />,
+      )
     }
-  })
+  }
   return <>{out}</>
 }
 
@@ -333,17 +376,17 @@ const APPROACH: readonly (readonly [x: number, y: number])[] = [
   [87, 25], // running at it
 ]
 
-export const COURSE_LOGO_FRAMES: readonly ReactElement[] = APPROACH.concat([[-1, -1]]).map(
-  ([x, y], i) => {
+export const COURSE_LOGO_FRAMES = once(() =>
+  APPROACH.concat([[-1, -1]]).map(([x, y], i) => {
     const g = scene(BANNER)
-    stick(g, BANNER, BANNER.flagTop + 1)
+    stick(g, BANNER, BANNER.flagTop)
     flag(g, BANNER, i % 2 === 1)
     // the last frame has no ball: it is in the hole, which is the whole point.
     // Nothing else marks the moment — three white specks over the green was the
     // first attempt at a cheer and read as dirt on the screen.
     if (x >= 0) ball(g, x, y)
     return pixels(g, `logo${i}`)
-  },
+  }),
 )
 
 /**
@@ -358,19 +401,23 @@ export const COURSE_LOGO_FRAMES: readonly ReactElement[] = APPROACH.concat([[-1,
  *
  * The flag holds each shape for two frames: alternating every frame at this
  * rate is a flutter, and what is wanted is a flap. The gust's phase carries it
- * exactly one period across the strip, so the loop has no seam.
+ * exactly one period across the strip whatever the frame count, so the loop has
+ * no seam — and the count is as low as it can be while the gust still travels
+ * smoothly, because every frame of a banner this size is thousands of nodes.
  */
-export const COURSE_IDLE_FRAMES: readonly ReactElement[] = Array.from(
-  { length: 12 },
+const IDLE_FRAMES = 8
+
+export const COURSE_IDLE_FRAMES = once(() => Array.from(
+  { length: IDLE_FRAMES },
   (_, i) => {
-    const g = scene(BANNER, i * (GUST_PERIOD / 12))
-    stick(g, BANNER, BANNER.flagTop + 1)
+    const g = scene(BANNER, i * (GUST_PERIOD / IDLE_FRAMES))
+    stick(g, BANNER, BANNER.flagTop)
     // frame 0 wears the shape the approach's last frame left, so the swap from
     // one strip to the other has nothing to see
     flag(g, BANNER, i % 4 >= 2)
     return pixels(g, `idle${i}`)
   },
-)
+))
 
 /**
  * FIRST TEE — the flag goes in. The stick drops from above and the pennant
@@ -383,7 +430,8 @@ export const COURSE_IDLE_FRAMES: readonly ReactElement[] = Array.from(
  * approach shot on the FIRST tee would have been the wrong story told with the
  * right picture.
  */
-export const COURSE_FLAG_PLANT_FRAMES: readonly ReactElement[] = [0, 1, 2, 3, 4].map((i) => {
+export const COURSE_FLAG_PLANT_FRAMES = once(() =>
+  [0, 1, 2, 3, 4].map((i) => {
   const l = BANNER
   const g = scene(l)
   if (i === 0) return pixels(g, `plant${i}`)
@@ -392,13 +440,14 @@ export const COURSE_FLAG_PLANT_FRAMES: readonly ReactElement[] = [0, 1, 2, 3, 4]
     fill(g, l.stickX, 0, 1, Math.round(l.cupY * 0.5), 'k')
     return pixels(g, `plant${i}`)
   }
-  stick(g, l, l.flagTop + 1)
+  stick(g, l, l.flagTop)
   if (i === 2) fill(g, l.stickX + 1, l.flagTop + 2, 3, 1, 'f')
   else flag(g, l, i === 3)
-  // the last frame wears the shape the wind strip opens on, so the swap from
-  // the ceremony to the loop has nothing to see
-  return pixels(g, `plant${i}`)
-})
+    // the last frame wears the shape the wind strip opens on, so the swap from
+    // the ceremony to the loop has nothing to see
+    return pixels(g, `plant${i}`)
+  }),
+)
 
 /**
  * `public/icon.svg`, AS A STRING, from this same drawing.
@@ -414,7 +463,7 @@ export const COURSE_FLAG_PLANT_FRAMES: readonly ReactElement[] = [0, 1, 2, 3, 4]
  */
 export function courseIconSvg(): string {
   const g = scene(SQUARE)
-  stick(g, SQUARE, SQUARE.flagTop + 1)
+  stick(g, SQUARE, SQUARE.flagTop)
   flag(g, SQUARE, false)
   const out: string[] = [
     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" shape-rendering="crispEdges">',

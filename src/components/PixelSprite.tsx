@@ -24,9 +24,13 @@ import { SWING_SIZE, WOLF_SHADES_SWING_FRAMES, WOLF_SWING_FRAMES } from './wolfA
  * EACH SPRITE DECLARES ITS OWN SIZE, and it need not be square. 16 is the house
  * grid and what everything inline uses, but a sprite that plays large — the
  * wolf's swing, centre screen at five times scale — has to be drawn at 32 or it
- * reads as flat and cheap, and one that spans a screen (the home screen's mark)
- * is a BANNER: 80 across and 28 down, because a square asked to fill a width
- * either crops or leaves the sides empty.
+ * reads as flat and cheap, and one that spans a screen (the course banner) is
+ * drawn wider than it is tall, because a square asked to fill a width either
+ * crops or leaves the sides empty.
+ *
+ * FRAMES ARE A THUNK, not an array: every screen imports this module and a
+ * banner is thousands of nodes, so the strips are built the first time one is
+ * actually rendered rather than on the critical path of a cold start.
  *
  * INTEGER SCALE ONLY, for the reason `PixelGlyph` documents at length — crisp
  * rects snap to device pixels, and at a fractional scale they snap to DIFFERENT
@@ -162,20 +166,30 @@ const COIN_FRAMES: readonly ReactElement[] = [0, 1, 2, 3].map((i) =>
  */
 const SMALL: Record<string, string> = { G: GOLD, M: GOLD_MID, D: GOLD_DEEP, L: GOLD_LIT }
 const SMALL_WIDTHS = [7, 4, 1, 4] as const
+/**
+ * WHICH END IS LIT, and it swaps as the face turns away and comes back — the
+ * same cue the big coin gets from `COIN_LIT_LEFT`. Without it frames 1 and 3
+ * are pixel-identical and the spin reads as a pulse rather than a rotation.
+ */
+const SMALL_LIT_TOP = [true, true, false, false] as const
 
 function smallCoin(i: number, key: string): ReactElement {
   const rx = SMALL_WIDTHS[i]!
+  const litTop = SMALL_LIT_TOP[i]!
   const out: ReactElement[] = []
   for (let y = 0; y < 16; y++) {
     const dy = (y - 7.5) / 7
     const span = 1 - dy * dy
     if (span <= 0) continue
     const w = Math.max(1, Math.round(rx * Math.sqrt(span)))
-    const x = Math.round(7.5 - w / 2 + 0.5)
-    const tone = i === 2 ? 'D' : y < 6 ? 'L' : y > 10 ? 'M' : 'G'
-    out.push(
-      <rect key={`${key}-${y}`} x={x} y={y} width={Math.max(1, w)} height={1} fill={SMALL[tone]} />,
-    )
+    // centred on the same axis whatever the parity — rounding a half-pixel
+    // centre made even and odd widths sit on different columns, so one edge
+    // stepped in while the other stepped out
+    const x = Math.round(8 - w / 2)
+    const near = litTop ? y < 6 : y > 9
+    const far = litTop ? y > 10 : y < 5
+    const tone = i === 2 ? 'D' : near ? 'L' : far ? 'M' : 'G'
+    out.push(<rect key={`${key}-${y}`} x={x} y={y} width={w} height={1} fill={SMALL[tone]} />)
   }
   return <>{out}</>
 }
@@ -233,14 +247,15 @@ function scanFrame(line: number): string[][] {
     put(13, y, 'R')
     put(20, y, 'R')
   }
-  // paper falls into shadow along its lower and right edges
-  for (let x = 5; x < 27; x++) put(x, 28, 'S')
-  for (let y = 3; y < 29; y++) put(26, y, 'S')
   // the line, with a trail behind it
   for (let x = 5; x < 27; x++) {
     put(x, line, 'L')
     if (line > 3) put(x, line - 1, 'T')
   }
+  // paper falls into shadow along its lower and right edges — AFTER the line,
+  // which otherwise punched a bright pixel through the shadow on every frame
+  for (let x = 5; x < 27; x++) put(x, 28, 'S')
+  for (let y = 3; y < 29; y++) put(26, y, 'S')
   const out = g.map((row) => [...row])
   for (let y = 0; y < 32; y++) {
     for (let x = 0; x < 32; x++) {
@@ -288,15 +303,18 @@ const SCAN_FRAMES: readonly ReactElement[] = [4, 8, 12, 16, 20, 24, 27].map((y, 
  * simply never used, which is worse than none.
  */
 const SPRITES = {
-  coin: { frames: COIN_FRAMES, w: 32, h: 32 },
-  'coin-small': { frames: COIN_SMALL_FRAMES, w: 16, h: 16 },
-  wolf: { frames: WOLF_SWING_FRAMES, w: SWING_SIZE, h: SWING_SIZE },
-  'wolf-shades': { frames: WOLF_SHADES_SWING_FRAMES, w: SWING_SIZE, h: SWING_SIZE },
+  coin: { frames: () => COIN_FRAMES, w: 32, h: 32 },
+  'coin-small': { frames: () => COIN_SMALL_FRAMES, w: 16, h: 16 },
+  wolf: { frames: () => WOLF_SWING_FRAMES, w: SWING_SIZE, h: SWING_SIZE },
+  'wolf-shades': { frames: () => WOLF_SHADES_SWING_FRAMES, w: SWING_SIZE, h: SWING_SIZE },
   logo: { frames: COURSE_LOGO_FRAMES, w: BANNER_W, h: BANNER_H },
   'logo-idle': { frames: COURSE_IDLE_FRAMES, w: BANNER_W, h: BANNER_H },
   'flag-plant': { frames: COURSE_FLAG_PLANT_FRAMES, w: BANNER_W, h: BANNER_H },
-  scan: { frames: SCAN_FRAMES, w: 32, h: 32 },
-} as const satisfies Record<string, { frames: readonly ReactElement[]; w: number; h: number }>
+  scan: { frames: () => SCAN_FRAMES, w: 32, h: 32 },
+} as const satisfies Record<
+  string,
+  { frames: () => readonly ReactElement[]; w: number; h: number }
+>
 
 export type SpriteName = keyof typeof SPRITES
 
@@ -324,7 +342,7 @@ export function scaleFor(name: SpriteName, px: number): number {
 
 /** How many frames a sprite has — for a caller that has to wait one out. */
 export function spriteFrames(name: SpriteName): number {
-  return SPRITES[name].frames.length
+  return SPRITES[name].frames().length
 }
 
 /**
@@ -364,7 +382,8 @@ export function PixelSprite({
   frameMs = FRAME_MS,
   label,
 }: PixelSpriteProps) {
-  const { frames, w, h } = SPRITES[name]
+  const { frames: build, w, h } = SPRITES[name]
+  const frames = build()
   const n = frames.length
   // INTEGER SCALE IS THE WHOLE IDIOM, so it is enforced rather than asked for.
   // A fractional scale makes crisp rects snap to DIFFERENT device-pixel widths
