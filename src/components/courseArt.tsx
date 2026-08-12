@@ -133,7 +133,16 @@ const CLOUDS: readonly (readonly [at: number, y: number, w: number])[] = [
  * home screen disagree by a pixel, and a "random" texture regenerated per build
  * is a diff nobody can review.
  */
-function ground(g: Grid, w: number, h: number, horizon: number) {
+/**
+ * THE GUST, as a diagonal band of brighter turf sweeping across. Grass does not
+ * wave a blade at a time at this size — what reads as wind is a lighter streak
+ * travelling over the field, which is how every 16-bit outdoor tileset did it.
+ * `undefined` means still air, which is what the one-shot approach plays in.
+ */
+const GUST_PERIOD = 72
+const GUST_WIDTH = 5
+
+function ground(g: Grid, w: number, h: number, horizon: number, gust?: number) {
   for (let y = horizon - 2; y < h; y++) {
     for (let x = 0; x < w; x++) {
       const top = treeTop(x, horizon)
@@ -146,7 +155,12 @@ function ground(g: Grid, w: number, h: number, horizon: number) {
       const near = (y - top) / (h - top)
       const base = near < 0.35 ? 'g' : 'G'
       const lit = (x + y) % 2 === 0 && (x * 7 + y * 3) % 5 !== 0
-      put(g, x, y, lit && near > 0.2 ? (base === 'G' ? 'L' : 'G') : base)
+      let ch = lit && near > 0.2 ? (base === 'G' ? 'L' : 'G') : base
+      if (gust !== undefined) {
+        const d = (((x + 2 * (y - top) - gust) % GUST_PERIOD) + GUST_PERIOD) % GUST_PERIOD
+        if (d < GUST_WIDTH) ch = ch === 'g' ? 'G' : 'L'
+      }
+      put(g, x, y, ch)
     }
   }
 }
@@ -181,13 +195,13 @@ function blankOf(l: Layout): Grid {
   return Array.from({ length: l.h }, () => Array<string>(l.w).fill('s'))
 }
 
-function scene(l: Layout): Grid {
+function scene(l: Layout, gust?: number): Grid {
   const g = blankOf(l)
   fill(g, 0, Math.round(l.horizon * 0.45), l.w, l.horizon, 'S')
   for (const [at, yf, w] of CLOUDS) {
     fill(g, Math.round(at * l.w), Math.round(yf * l.horizon), w, 1, 'c')
   }
-  ground(g, l.w, l.h, l.horizon)
+  ground(g, l.w, l.h, l.horizon, gust)
   ellipse(g, l.greenX, l.cupY + 2, l.greenRx + 1, l.greenRy + 0.8, 'o')
   ellipse(g, l.greenX, l.cupY + 2, l.greenRx, l.greenRy, 'p')
   ellipse(g, l.stickX, l.cupY, 2.4, 1.2, 'o')
@@ -329,6 +343,32 @@ export const COURSE_LOGO_FRAMES: readonly ReactElement[] = APPROACH.concat([[-1,
     // first attempt at a cheer and read as dirt on the screen.
     if (x >= 0) ball(g, x, y)
     return pixels(g, `logo${i}`)
+  },
+)
+
+/**
+ * AFTER IT DROPS: the flag flaps and a gust crosses the grass, forever.
+ *
+ * A SECOND STRIP RATHER THAN A LONGER ONE, because the two halves have
+ * different jobs. The approach happens ONCE — a ball that keeps holing out
+ * every two seconds stops being a shot and becomes a metronome — and the wind
+ * has to run for as long as anybody is looking at the screen. One strip can
+ * loop or play once; it cannot do the first thing and then the second, so the
+ * screen swaps sprites when the ball is down.
+ *
+ * The flag holds each shape for two frames: alternating every frame at this
+ * rate is a flutter, and what is wanted is a flap. The gust's phase carries it
+ * exactly one period across the strip, so the loop has no seam.
+ */
+export const COURSE_IDLE_FRAMES: readonly ReactElement[] = Array.from(
+  { length: 12 },
+  (_, i) => {
+    const g = scene(BANNER, i * (GUST_PERIOD / 12))
+    stick(g, BANNER, BANNER.flagTop + 1)
+    // frame 0 wears the shape the approach's last frame left, so the swap from
+    // one strip to the other has nothing to see
+    flag(g, BANNER, i % 4 >= 2)
+    return pixels(g, `idle${i}`)
   },
 )
 

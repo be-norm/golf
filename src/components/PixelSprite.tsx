@@ -5,6 +5,7 @@ import {
   BANNER_H,
   BANNER_W,
   COURSE_FLAG_PLANT_FRAMES,
+  COURSE_IDLE_FRAMES,
   COURSE_LOGO_FRAMES,
   COURSE_SIZE,
 } from './courseArt'
@@ -293,6 +294,7 @@ const SPRITES = {
   wolf: { frames: WOLF_SWING_FRAMES, w: SWING_SIZE, h: SWING_SIZE },
   'wolf-shades': { frames: WOLF_SHADES_SWING_FRAMES, w: SWING_SIZE, h: SWING_SIZE },
   logo: { frames: COURSE_LOGO_FRAMES, w: BANNER_W, h: BANNER_H },
+  'logo-idle': { frames: COURSE_IDLE_FRAMES, w: BANNER_W, h: BANNER_H },
   'flag-plant': { frames: COURSE_FLAG_PLANT_FRAMES, w: COURSE_SIZE, h: COURSE_SIZE },
   scan: { frames: SCAN_FRAMES, w: 32, h: 32 },
 } as const satisfies Record<string, { frames: readonly ReactElement[]; w: number; h: number }>
@@ -319,6 +321,11 @@ export function spriteGrid(name: SpriteName): { w: number; h: number } {
  */
 export function scaleFor(name: SpriteName, px: number): number {
   return Math.max(1, Math.round(px / SPRITES[name].w))
+}
+
+/** How many frames a sprite has — for a caller that has to wait one out. */
+export function spriteFrames(name: SpriteName): number {
+  return SPRITES[name].frames.length
 }
 
 /**
