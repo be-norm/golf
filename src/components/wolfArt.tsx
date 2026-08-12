@@ -207,17 +207,21 @@ const SHADES_GLINTS: readonly (readonly [x: number, y: number])[] = [
  * arms are longer than the club is — put the hands halfway and they end up
  * inside the wolf's own chest on every frame.
  */
-const PIVOT: readonly [x: number, y: number] = [14, 16]
+const PIVOT: readonly [x: number, y: number] = [11, 16]
 /**
- * NEAR AND FAR SHOULDER, pulled deliberately apart. Anatomically they sit
- * almost on top of each other in profile, and drawn that way the two arms
- * converge into a single limb about four pixels along — which is a one-armed
- * golfer again, by a different route. Spreading them is the standard sprite
- * cheat: the far arm emerges high and behind, the near one low and forward,
- * and the internal edge between them is what makes the pair legible.
+ * THE SHOULDERS OPEN OUT, because a profile torso can never show two arms.
+ * Stacked one behind the other they run as a single limb no matter how they
+ * are shaded — which is what "swinging with one arm" was, after the hands
+ * were fixed. Squared up they sit eight pixels apart, and the far arm CROSSES
+ * THE CHEST to reach the grip: the triangle that makes is the shape a golf
+ * swing has from the front, and it cannot be mistaken for one arm.
+ *
+ * The head was already turned to camera to have a face at all, so the body
+ * squaring up to match is the pose becoming consistent rather than a second
+ * compromise.
  */
-const NEAR_SHOULDER: readonly [x: number, y: number] = [14, 18]
-const FAR_SHOULDER: readonly [x: number, y: number] = [11, 14]
+const NEAR_SHOULDER: readonly [x: number, y: number] = [12, 16]
+const FAR_SHOULDER: readonly [x: number, y: number] = [4, 15]
 const GRIP_ALONG = 0.62
 /**
  * How far apart the two hands sit along the shaft — adjacent, as a real grip
@@ -260,9 +264,9 @@ const SWING: readonly SwingFrame[] = [
   { club: [21, 28], ball: [22, 28, 2], spark: [] },
   { club: [3, 3], ball: [22, 28, 2], spark: [] },
   { club: [21, 28], ball: [22, 28, 2], spark: [[25, 26], [26, 29], [25, 31]] },
-  { club: [27, 21], ball: [20, 24, 4], spark: [[25, 27], [28, 30]] },
-  { club: [28, 8], ball: [16, 18, 8], spark: [] },
-  { club: [20, 1], ball: [8, 11, 14], spark: [] },
+  { club: [26, 21], ball: [20, 24, 4], spark: [[25, 27], [28, 30]] },
+  { club: [26, 8], ball: [16, 18, 8], spark: [] },
+  { club: [19, 2], ball: [8, 11, 14], spark: [] },
   { club: [12, 1], ball: [5, 9, 20], spark: [] },
 ]
 
