@@ -109,60 +109,84 @@ export const SHADES_EYES = (
 export const SWING_SIZE = 32
 
 /**
- * THE WOLF IN PROFILE, ADDRESSING THE BALL. Silhouette only — the tones are
- * applied below, because edge-shading a shape is mechanical work and doing it
- * by hand across a figure this size is how a highlight ends up one pixel out on
- * one row and nowhere else.
+ * THE WOLF, HEAD TO CAMERA, BODY IN PROFILE — the oldest trick in sprite work
+ * and the only way a face survives at this size. In true profile you see one
+ * eye at the back of a grey lump: there is no face, which is exactly what the
+ * first version of this looked like. Turned to camera he has two eyes, a
+ * muzzle and a nose, and — the part that matters most — the blind wolf wears a
+ * recognisable PAIR of sunglasses rather than a bar across one temple.
  *
- * `e` is the eye, `n` the nose, `i` the inside of an ear. Everything else is
- * body. Drawn inside a one-pixel margin so the outline pass has somewhere to go.
+ * It is also true to the shot. He is hitting the ball straight at you, so
+ * looking at you is where he should be looking.
+ *
+ * Silhouette plus marks; the tones are applied below, because edge-shading a
+ * shape is mechanical and doing it by hand across a figure this size is how a
+ * highlight ends up one pixel out on one row and nowhere else. `e` is an eye,
+ * `m` the muzzle, `n` the nose, `i` the inside of an ear. Drawn inside a
+ * one-pixel margin so the outline pass has somewhere to go.
  */
 const WOLF_FIGURE = [
   '                                ',
-  '                                ',
-  '   #      ##                    ',
-  '   ##    #ii#                   ',
-  '  #ii#  #iii#                   ',
-  '  ###########                   ',
-  '  ##ee########                  ',
-  '  ###############               ',
-  '   ################n            ',
-  '    ##############              ',
-  '     ##########                 ',
-  '      ########                  ',
-  '     #########                  ',
-  '  #  #########                  ',
-  ' ### ##########                 ',
-  ' ###############                ',
-  '  ##############                ',
+  '    #        #                  ',
+  '   ###      ###                 ',
+  '   #i#      #i#                 ',
+  '  #ii##    ##ii#                ',
   '  #############                 ',
+  '  ##ee#####ee##                 ',
+  '  ##ee#####ee##                 ',
   '  #############                 ',
-  '  #############                 ',
-  '   ############                 ',
   '   ###########                  ',
-  '   ####  ######                 ',
-  '   ####  ######                 ',
-  '   ####   #####                 ',
-  '  #####   #####                 ',
-  '  ####    #####                 ',
-  '  ####    #####                 ',
-  ' ######  #######                ',
-  ' ######  #######                ',
+  '    ###mmm###                   ',
+  '     ##mnm##                    ',
+  '      #####                     ',
+  '      #####                     ',
+  '    #########                   ',
+  '   ###########                  ',
+  '   ###########                  ',
+  '  ############                  ',
+  '  ############                  ',
+  '  ###########                   ',
+  '  ###########                   ',
+  '  ####  #####                   ',
+  '  ####  #####                   ',
+  '  ####   ####                   ',
+  '  ####   ####                   ',
+  ' #####   ####                   ',
+  ' ####    ####                   ',
+  ' ####    ####                   ',
+  '######  ######                  ',
+  '######  ######                  ',
   '                                ',
   '                                ',
 ] as const
 
-/** where the shades sit in profile: one bar across the eye, back to the ear */
-const SHADES_BAR: readonly (readonly [x: number, y: number])[] = [
-  [4, 6],
-  [5, 6],
-  [6, 6],
-  [7, 6],
-  [8, 6],
-  [9, 6],
-  [3, 5],
+/** the brush of tail behind him — off the body map so it can stay ragged */
+const TAIL: readonly (readonly [x: number, y: number])[] = [
+  [1, 15],
+  [0, 16],
+  [0, 17],
+  [1, 18],
+  [2, 15],
+  [2, 16],
+  [2, 17],
 ]
-const SHADES_GLINT: readonly [x: number, y: number] = [8, 6]
+
+/**
+ * THE SHADES, as the glyph draws them: two lenses joined by a bridge, temples
+ * reaching for the ears. The same object in both places, which is the point —
+ * a blind hole shows this mark in its ledger line and this sprite on the
+ * screen, and they have to be recognisably one pair of sunglasses.
+ */
+const SHADES_BAR: readonly (readonly [x: number, y: number])[] = [
+  [4, 6], [5, 6], [6, 6], [4, 7], [5, 7], [6, 7],
+  [10, 6], [11, 6], [12, 6], [10, 7], [11, 7], [12, 7],
+  [7, 7], [8, 7], [9, 7],
+  [3, 6], [13, 6],
+]
+const SHADES_GLINTS: readonly (readonly [x: number, y: number])[] = [
+  [4, 6],
+  [10, 6],
+]
 
 /**
  * THE SWING, AS A LEVER. The shoulder is a pivot, the club head travels an arc
@@ -183,7 +207,7 @@ const SHADES_GLINT: readonly [x: number, y: number] = [8, 6]
  * arms are longer than the club is — put the hands halfway and they end up
  * inside the wolf's own chest on every frame.
  */
-const PIVOT: readonly [x: number, y: number] = [15, 14]
+const PIVOT: readonly [x: number, y: number] = [14, 16]
 /**
  * NEAR AND FAR SHOULDER, pulled deliberately apart. Anatomically they sit
  * almost on top of each other in profile, and drawn that way the two arms
@@ -192,8 +216,8 @@ const PIVOT: readonly [x: number, y: number] = [15, 14]
  * cheat: the far arm emerges high and behind, the near one low and forward,
  * and the internal edge between them is what makes the pair legible.
  */
-const NEAR_SHOULDER: readonly [x: number, y: number] = [15, 17]
-const FAR_SHOULDER: readonly [x: number, y: number] = [12, 12]
+const NEAR_SHOULDER: readonly [x: number, y: number] = [14, 18]
+const FAR_SHOULDER: readonly [x: number, y: number] = [11, 14]
 const GRIP_ALONG = 0.62
 /**
  * How far apart the two hands sit along the shaft — adjacent, as a real grip
@@ -369,25 +393,27 @@ function swingFrame(f: SwingFrame, blind: boolean): Grid {
   WOLF_FIGURE.forEach((row, y) => {
     for (let x = 0; x < SWING_SIZE; x++) {
       const ch = row[x]!
-      if (ch === '#') put(g, x, y, 'F')
+      if (ch === '#' || ch === 'm') put(g, x, y, 'F')
       else if (ch === 'i') put(g, x, y, 'D')
       else if (ch === 'n') put(g, x, y, 'N')
-      else if (ch === 'e') put(g, x, y, blind ? ' ' : 'E')
+      else if (ch === 'e') put(g, x, y, blind ? 'F' : 'E')
     }
   })
+  for (const [x, y] of TAIL) put(g, x, y, 'F')
   shade(g)
   // the eye and the ear linings survive shading; re-stamp them
   WOLF_FIGURE.forEach((row, y) => {
     for (let x = 0; x < SWING_SIZE; x++) {
       const ch = row[x]!
       if (ch === 'i') put(g, x, y, 'D')
+      else if (ch === 'm') put(g, x, y, 'M')
       else if (ch === 'n') put(g, x, y, 'N')
       else if (ch === 'e' && !blind) put(g, x, y, 'E')
     }
   })
   if (blind) {
     for (const [x, y] of SHADES_BAR) put(g, x, y, 'L')
-    put(g, SHADES_GLINT[0], SHADES_GLINT[1], 'G')
+    for (const [x, y] of SHADES_GLINTS) put(g, x, y, 'G')
   }
 
   // arms, hands and club go on their own layer so they can be edged against
@@ -461,6 +487,7 @@ const LEGEND: Record<string, string> = {
   F: FUR,
   S: FUR_SH,
   D: FUR_DARK,
+  M: MUZZLE,
   N: INK,
   E: EYE,
   L: LENS,
