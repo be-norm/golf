@@ -26,9 +26,17 @@ export const COURSE_SIZE = 32
  * fill, and a square there either crops or leaves the sides empty. Same scene,
  * same palette, wider frame — the green and the flag sit right, and the space
  * that buys on the left is what the approach shot flies through.
+ *
+ * 96 ACROSS IS CHOSEN FROM THE SCREEN, not the drawing. At the house scale of
+ * 5 that is 480 CSS pixels, which is wider than any phone — so the banner
+ * always fills the width and always crops a little, instead of filling it on a
+ * small handset and leaving a gutter on a large one. It cannot stretch to fit:
+ * a fluid width is a fractional scale (`docs/pixel-art.md`, rule 1). What crops
+ * is fairway off the left and a rim of green off the right, and the hole sits
+ * far enough inside to survive the narrowest screen.
  */
-export const BANNER_W = 80
-export const BANNER_H = 28
+export const BANNER_W = 96
+export const BANNER_H = 32
 
 /* ── palette, sampled from public/pwa-512x512.png ────────── */
 const SKY_HIGH = '#1983f4'
@@ -154,8 +162,8 @@ const SQUARE: Layout = {
   greenX: 16, greenRx: 12.6, greenRy: 5.7, flagTop: 3,
 }
 const BANNER: Layout = {
-  w: BANNER_W, h: BANNER_H, horizon: 10, stickX: 56, cupY: 20,
-  greenX: 56, greenRx: 17, greenRy: 5.6, flagTop: 2,
+  w: BANNER_W, h: BANNER_H, horizon: 11, stickX: 66, cupY: 21,
+  greenX: 66, greenRx: 20, greenRy: 5.4, flagTop: 2,
 }
 
 function blankOf(l: Layout): Grid {
@@ -235,7 +243,14 @@ function stick(g: Grid, l: Layout, fromY: number) {
  * promptly disappeared.
  */
 function ball(g: Grid, x: number, y: number) {
-  for (let j = -1; j <= 2; j++) for (let i = -1; i <= 2; i++) put(g, x + i, y + j, 'o')
+  // ROUNDED, NOT BOXED. A full ring around a two-pixel ball is half its radius
+  // in outline, and it read as a dark tile with a white middle. Dropping the
+  // four corners costs nothing and turns the same rim into a curve.
+  for (const [i, j] of [
+    [0, -1], [1, -1], [-1, 0], [2, 0], [-1, 1], [2, 1], [0, 2], [1, 2],
+  ] as const) {
+    put(g, x + i, y + j, 'o')
+  }
   put(g, x, y, 'k')
   put(g, x + 1, y, 'k')
   put(g, x, y + 1, 'k')
@@ -274,11 +289,11 @@ function pixels(g: Grid, key: string): ReactElement {
  * numbers you choose, not one you derive.
  */
 const APPROACH: readonly (readonly [x: number, y: number])[] = [
-  [3, 2], [10, 5], [17, 9], [24, 14],
-  [30, 19], // pitches on the fairway
-  [36, 15], [42, 19], // and again, lower
-  [47, 17], [51, 19], // a last hop onto the green
-  [54, 19], // running at it
+  [2, 5], [11, 9], [20, 13], [28, 17],
+  [35, 20], // pitches on the fairway
+  [42, 16], [49, 20], // and again, lower
+  [55, 18], [60, 20], // a last hop onto the green
+  [64, 20], // running at it
 ]
 
 export const COURSE_LOGO_FRAMES: readonly ReactElement[] = APPROACH.concat([[-1, -1]]).map(
