@@ -382,5 +382,14 @@ describe('CelebrationLayer', () => {
     // distinguishable from a ball at arm's length.
     expect(sprite!.style.animationIterationCount).toBe('1')
     expect(sprite!.parentElement!.style.width).toBe('160px')
+
+    // AND IT IS NOT UNDER ITS OWN SCRIM. The wash behind a scene is `absolute`,
+    // so it paints in the positioned pass — above ordinary in-flow content.
+    // Leave the sprite unpositioned and the 40% black lands ON it: the picture
+    // renders dimmed while the caption beside it stays bright, and the scrim
+    // buys the separation it exists for exactly nowhere. jsdom cannot evaluate
+    // painting order, so this pins the structural half the way
+    // `PixelSprite.test.tsx` pins the reduced-motion rule's target.
+    expect(sprite!.closest('.relative'), 'sprite is under the scrim').not.toBeNull()
   })
 })

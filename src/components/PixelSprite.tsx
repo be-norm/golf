@@ -317,6 +317,16 @@ const SPRITES = {
 export type SpriteName = keyof typeof SPRITES
 
 /**
+ * The grid a sprite is drawn on, for callers that have to place it. A layer
+ * positioning a sprite needs its real size, and hardcoding 16 was safe only
+ * while every sprite shared that grid — the wolf's swing is 32, and the next
+ * one need not be either.
+ */
+export function spriteGrid(name: SpriteName): number {
+  return SPRITES[name].grid
+}
+
+/**
  * EVERY CELEBRATION TOKEN MUST HAVE ART. The engine owns the token list and
  * cannot see this file, so without this the first game to name a sprite nobody
  * drew would render an empty box at runtime instead of failing to compile.
