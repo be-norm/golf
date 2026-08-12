@@ -105,13 +105,24 @@ The palette, sampled from the 512 master and clustered:
   to camera even when the body stays in profile — the oldest trick in sprite work
   and the only thing that survives at this size.
 
-## The 16px exception, which is not laziness
+## The 16px exception: shaded, but not outlined and not lit
 
-`PixelGlyph`'s wolf marks render inline in a sentence at exactly 16 CSS pixels.
-They are flat and unoutlined on purpose: an outline would eat the outer ring and
-leave a 14×14 animal, and a second fur tone at that size is one pixel that reads
-as dirt. Anything drawn for 16px stays flat. The rule in (2) is the reason, and
-"make the glyphs match the sprites" is the mistake it exists to prevent.
+`PixelGlyph`'s wolf marks render inline in a sentence at exactly 16 CSS pixels,
+where one art pixel is one screen pixel. Rule (3)'s outline is unavailable there
+— it eats the outer ring and leaves a 14×14 animal, and the ear tips are most of
+what makes the mark read as a wolf rather than a cat. Tone costs nothing in
+dimensions, so tone is what they get.
+
+**But only the shadow half**, and the reason is worth keeping. Rule (7)'s derived
+shading lights every cell with nothing above it. On a head with EARS, that set
+includes the gap between them — which is a hole in the silhouette, not a surface
+turned to the light. The rule cannot tell those apart, so the brow came out
+wearing a bright band across it. At sprite size the same rule is fine, because
+one row in thirty-two reads as a highlight; at sixteen it is one row in sixteen
+and reads as a blaze.
+
+So: derive the shadow, place any highlight by hand, and be suspicious of a
+generated highlight wherever the top edge of a shape is concave.
 
 ## Staying in sync
 
