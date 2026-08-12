@@ -1,7 +1,13 @@
 import type { ReactElement } from 'react'
 import type { CelebrationSprite } from '../engine/core/celebration'
 import { FRAME_MS } from '../lib/motion'
-import { COURSE_FLAG_PLANT_FRAMES, COURSE_LOGO_FRAMES, COURSE_SIZE } from './courseArt'
+import {
+  BANNER_H,
+  BANNER_W,
+  COURSE_FLAG_PLANT_FRAMES,
+  COURSE_LOGO_FRAMES,
+  COURSE_SIZE,
+} from './courseArt'
 import { SWING_SIZE, WOLF_SHADES_SWING_FRAMES, WOLF_SWING_FRAMES } from './wolfArt'
 
 /**
@@ -15,11 +21,12 @@ import { SWING_SIZE, WOLF_SHADES_SWING_FRAMES, WOLF_SWING_FRAMES } from './wolfA
  * whole, which is the difference between pixel art that moves and a picture
  * being slid around.
  *
- * EACH SPRITE DECLARES ITS OWN GRID. 16 is the house size and what everything
- * inline uses, but a sprite that plays large — the wolf's swing, centre screen
- * at five times scale — has to be drawn at 32 or it reads as flat and cheap.
- * The grid is per-sprite rather than global because the two live side by side:
- * the same wolf is a 16px mark in a ledger line and a 32px figure mid-swing.
+ * EACH SPRITE DECLARES ITS OWN SIZE, and it need not be square. 16 is the house
+ * grid and what everything inline uses, but a sprite that plays large — the
+ * wolf's swing, centre screen at five times scale — has to be drawn at 32 or it
+ * reads as flat and cheap, and one that spans a screen (the home screen's mark)
+ * is a BANNER: 80 across and 28 down, because a square asked to fill a width
+ * either crops or leaves the sides empty.
  *
  * INTEGER SCALE ONLY, for the reason `PixelGlyph` documents at length — crisp
  * rects snap to device pixels, and at a fractional scale they snap to DIFFERENT
@@ -281,14 +288,14 @@ const SCAN_FRAMES: readonly ReactElement[] = [4, 8, 12, 16, 20, 24, 27].map((y, 
  * simply never used, which is worse than none.
  */
 const SPRITES = {
-  coin: { frames: COIN_FRAMES, grid: 32 },
-  'coin-small': { frames: COIN_SMALL_FRAMES, grid: 16 },
-  wolf: { frames: WOLF_SWING_FRAMES, grid: SWING_SIZE },
-  'wolf-shades': { frames: WOLF_SHADES_SWING_FRAMES, grid: SWING_SIZE },
-  logo: { frames: COURSE_LOGO_FRAMES, grid: COURSE_SIZE },
-  'flag-plant': { frames: COURSE_FLAG_PLANT_FRAMES, grid: COURSE_SIZE },
-  scan: { frames: SCAN_FRAMES, grid: 32 },
-} as const satisfies Record<string, { frames: readonly ReactElement[]; grid: number }>
+  coin: { frames: COIN_FRAMES, w: 32, h: 32 },
+  'coin-small': { frames: COIN_SMALL_FRAMES, w: 16, h: 16 },
+  wolf: { frames: WOLF_SWING_FRAMES, w: SWING_SIZE, h: SWING_SIZE },
+  'wolf-shades': { frames: WOLF_SHADES_SWING_FRAMES, w: SWING_SIZE, h: SWING_SIZE },
+  logo: { frames: COURSE_LOGO_FRAMES, w: BANNER_W, h: BANNER_H },
+  'flag-plant': { frames: COURSE_FLAG_PLANT_FRAMES, w: COURSE_SIZE, h: COURSE_SIZE },
+  scan: { frames: SCAN_FRAMES, w: 32, h: 32 },
+} as const satisfies Record<string, { frames: readonly ReactElement[]; w: number; h: number }>
 
 export type SpriteName = keyof typeof SPRITES
 
@@ -298,8 +305,8 @@ export type SpriteName = keyof typeof SPRITES
  * while every sprite shared that grid — the wolf's swing is 32, and the next
  * one need not be either.
  */
-export function spriteGrid(name: SpriteName): number {
-  return SPRITES[name].grid
+export function spriteGrid(name: SpriteName): { w: number; h: number } {
+  return { w: SPRITES[name].w, h: SPRITES[name].h }
 }
 
 /**
@@ -311,7 +318,7 @@ export function spriteGrid(name: SpriteName): number {
  * wants the picture; the grid is the sprite's business.
  */
 export function scaleFor(name: SpriteName, px: number): number {
-  return Math.max(1, Math.round(px / SPRITES[name].grid))
+  return Math.max(1, Math.round(px / SPRITES[name].w))
 }
 
 /**
@@ -351,7 +358,7 @@ export function PixelSprite({
   frameMs = FRAME_MS,
   label,
 }: PixelSpriteProps) {
-  const { frames, grid } = SPRITES[name]
+  const { frames, w, h } = SPRITES[name]
   const n = frames.length
   // INTEGER SCALE IS THE WHOLE IDIOM, so it is enforced rather than asked for.
   // A fractional scale makes crisp rects snap to DIFFERENT device-pixel widths
@@ -359,7 +366,8 @@ export function PixelSprite({
   // is a slightly wrong picture, which nobody files a bug against. Rounded
   // rather than thrown: a celebration is not worth a white screen.
   const scaled = Math.max(1, Math.round(scale))
-  const cell = grid * scaled
+  const cellW = w * scaled
+  const cellH = h * scaled
 
   // A LOOP runs all N frames and wraps, so it travels a full N cells and the
   // last frame gets its own slice of time before frame 0 comes back. A ONE-SHOT
@@ -367,14 +375,14 @@ export function PixelSprite({
   // and holds — travelling N would park the strip one cell past the art and
   // leave an empty box on screen.
   const steps = loop ? n : Math.max(1, n - 1)
-  const travel = -cell * steps
+  const travel = -cellW * steps
 
   return (
     <span
       role={label ? 'img' : undefined}
       aria-label={label}
       aria-hidden={label ? undefined : true}
-      style={{ width: cell, height: cell, overflow: 'hidden', display: 'inline-block' }}
+      style={{ width: cellW, height: cellH, overflow: 'hidden', display: 'inline-block' }}
     >
       <svg
         // ON THE ANIMATED ELEMENT, not the wrapper — `animation` does not
@@ -382,12 +390,12 @@ export function PixelSprite({
         // `data-sprite` one element up would silently match nothing while
         // looking exactly right. Same placement as `PixelGlyph`'s `data-glyph`.
         data-sprite={name}
-        viewBox={`0 0 ${grid * n} ${grid}`}
+        viewBox={`0 0 ${w * n} ${h}`}
         shapeRendering="crispEdges"
         focusable="false"
         style={{
-          width: cell * n,
-          height: cell,
+          width: cellW * n,
+          height: cellH,
           display: 'block',
           ['--sprite-travel' as string]: `${travel}px`,
           animationName: 'sprite-strip',
@@ -398,7 +406,7 @@ export function PixelSprite({
         }}
       >
         {frames.map((frame, i) => (
-          <g key={i} transform={`translate(${i * grid}, 0)`}>
+          <g key={i} transform={`translate(${i * w}, 0)`}>
             {frame}
           </g>
         ))}

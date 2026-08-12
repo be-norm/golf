@@ -20,6 +20,15 @@ import type { ReactElement } from 'react'
  */
 
 export const COURSE_SIZE = 32
+/**
+ * THE HOME SCREEN'S MARK IS A BANNER, not the icon. The icon is square because
+ * a home-screen tile is; the mark at the top of the app has a whole width to
+ * fill, and a square there either crops or leaves the sides empty. Same scene,
+ * same palette, wider frame — the green and the flag sit right, and the space
+ * that buys on the left is what the approach shot flies through.
+ */
+export const BANNER_W = 80
+export const BANNER_H = 28
 
 /* ── palette, sampled from public/pwa-512x512.png ────────── */
 const SKY_HIGH = '#1983f4'
@@ -55,16 +64,16 @@ const LEGEND: Record<string, string> = {
 
 type Grid = string[][]
 
-const blank = (): Grid =>
-  Array.from({ length: COURSE_SIZE }, () => Array<string>(COURSE_SIZE).fill('s'))
-
-const inside = (x: number, y: number) =>
-  x >= 0 && x < COURSE_SIZE && y >= 0 && y < COURSE_SIZE
-
+/**
+ * BOUNDS COME FROM THE GRID, not from a constant. They were `COURSE_SIZE` when
+ * every frame was 32 square, and the banner then drew its whole right-hand two
+ * thirds — green, flag, cup — into a check that silently threw it away.
+ */
 function put(g: Grid, x: number, y: number, ch: string) {
   const px = Math.round(x)
   const py = Math.round(y)
-  if (inside(px, py)) g[py]![px] = ch
+  const row = g[py]
+  if (row !== undefined && px >= 0 && px < row.length) row[px] = ch
 }
 
 function fill(g: Grid, x0: number, y0: number, w: number, h: number, ch: string) {
@@ -82,16 +91,21 @@ function ellipse(g: Grid, cx: number, cy: number, rx: number, ry: number, ch: st
   }
 }
 
-/** the horizon's ragged top, so the tree line reads as a mass rather than a bar */
-const TREE_TOP = [13, 12, 12, 13, 11, 12, 13, 12, 11, 11, 12, 13, 12, 11, 12, 13,
-  12, 12, 11, 12, 13, 12, 11, 12, 12, 13, 12, 11, 12, 13, 12, 12]
+/**
+ * The horizon's ragged top, so the tree line reads as a mass rather than a bar.
+ * A REPEATING PATTERN rather than a fixed-length table, because the same scene
+ * is drawn 32 wide for the icon and 80 wide for the banner.
+ */
+const TREE_JITTER = [0, -1, -1, 0, -2, -1, 0, -1, -2, -2, -1, 0, -1, -2, -1, 0]
+const treeTop = (x: number, horizon: number) => horizon + TREE_JITTER[x % TREE_JITTER.length]!
 
-/** cloud blobs: [x, y, width] rows, stacked into puffs */
-const CLOUDS: readonly (readonly [x: number, y: number, w: number])[] = [
-  [2, 4, 5], [1, 5, 8], [3, 3, 3],
-  [21, 2, 4], [20, 3, 7], [23, 1, 2],
-  [6, 8, 3], [5, 9, 6],
-  [26, 7, 4], [25, 8, 6],
+/** cloud puffs, as a fraction of the width so they spread with the frame */
+const CLOUDS: readonly (readonly [at: number, y: number, w: number])[] = [
+  [0.06, 0.14, 5], [0.03, 0.19, 8],
+  [0.66, 0.07, 4], [0.63, 0.11, 7],
+  [0.20, 0.29, 3], [0.17, 0.34, 6],
+  [0.84, 0.25, 4], [0.81, 0.30, 6],
+  [0.40, 0.11, 3], [0.37, 0.16, 5],
 ]
 
 /**
@@ -100,38 +114,64 @@ const CLOUDS: readonly (readonly [x: number, y: number, w: number])[] = [
  * home screen disagree by a pixel, and a "random" texture regenerated per build
  * is a diff nobody can review.
  */
-function ground(g: Grid) {
-  for (let y = 11; y < COURSE_SIZE; y++) {
-    for (let x = 0; x < COURSE_SIZE; x++) {
-      if (y < TREE_TOP[x]!) continue
-      if (y <= TREE_TOP[x]! + 1) {
+function ground(g: Grid, w: number, h: number, horizon: number) {
+  for (let y = horizon - 2; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const top = treeTop(x, horizon)
+      if (y < top) continue
+      if (y <= top + 1) {
         put(g, x, y, (x + y) % 3 === 0 ? 'T' : 't')
         continue
       }
       // the turf lightens toward the viewer, with a checker over the top
-      const base = y < 19 ? 'g' : 'G'
+      const near = (y - top) / (h - top)
+      const base = near < 0.35 ? 'g' : 'G'
       const lit = (x + y) % 2 === 0 && (x * 7 + y * 3) % 5 !== 0
-      put(g, x, y, lit && y > 15 ? (base === 'G' ? 'L' : 'G') : base)
+      put(g, x, y, lit && near > 0.2 ? (base === 'G' ? 'L' : 'G') : base)
     }
   }
 }
 
-/** the putting surface: a flatter, darker green ringed in near-black */
-function green(g: Grid) {
-  ellipse(g, 16, 26, 12.6, 5.7, 'o')
-  ellipse(g, 16, 26, 11.6, 4.9, 'p')
+/**
+ * WHERE EVERYTHING SITS, for a frame of a given size. The square icon centres
+ * the hole; the banner pushes it right and leaves the left two thirds as
+ * fairway for a ball to come in over.
+ */
+interface Layout {
+  w: number
+  h: number
+  horizon: number
+  stickX: number
+  cupY: number
+  greenX: number
+  greenRx: number
+  greenRy: number
+  flagTop: number
 }
 
-const STICK_X = 14
-const CUP_Y = 24
+const SQUARE: Layout = {
+  w: 32, h: 32, horizon: 13, stickX: 14, cupY: 24,
+  greenX: 16, greenRx: 12.6, greenRy: 5.7, flagTop: 3,
+}
+const BANNER: Layout = {
+  w: BANNER_W, h: BANNER_H, horizon: 10, stickX: 56, cupY: 20,
+  greenX: 56, greenRx: 17, greenRy: 5.6, flagTop: 2,
+}
 
-function scene(): Grid {
-  const g = blank()
-  fill(g, 0, 6, COURSE_SIZE, 8, 'S')
-  for (const [x, y, w] of CLOUDS) fill(g, x, y, w, 1, 'c')
-  ground(g)
-  green(g)
-  ellipse(g, STICK_X, CUP_Y, 2.4, 1.2, 'o')
+function blankOf(l: Layout): Grid {
+  return Array.from({ length: l.h }, () => Array<string>(l.w).fill('s'))
+}
+
+function scene(l: Layout): Grid {
+  const g = blankOf(l)
+  fill(g, 0, Math.round(l.horizon * 0.45), l.w, l.horizon, 'S')
+  for (const [at, yf, w] of CLOUDS) {
+    fill(g, Math.round(at * l.w), Math.round(yf * l.horizon), w, 1, 'c')
+  }
+  ground(g, l.w, l.h, l.horizon)
+  ellipse(g, l.greenX, l.cupY + 2, l.greenRx + 1, l.greenRy + 0.8, 'o')
+  ellipse(g, l.greenX, l.cupY + 2, l.greenRx, l.greenRy, 'p')
+  ellipse(g, l.stickX, l.cupY, 2.4, 1.2, 'o')
   return g
 }
 
@@ -140,45 +180,66 @@ function scene(): Grid {
  * two differ only in where the trailing point sits — and the `$` stays put,
  * because a three-pixel-wide glyph that moves is a three-pixel-wide smear.
  */
-function flag(g: Grid, furled: boolean) {
+function flag(g: Grid, l: Layout, furled: boolean) {
   // A PENNANT, hung off the pole and coming to a point on the right. Widest in
   // the middle, not at the bottom — a flag that tapers downward reads as a
   // banner, and the icon's does not.
   // Nine rows deep, because the `$` needs five of them and has to sit INSIDE
   // the cloth — at six rows its stem fell off the bottom edge and left a cream
   // pixel floating in the sky.
-  const rows: readonly (readonly [y: number, w: number])[] = furled
-    ? [[3, 6], [4, 9], [5, 11], [6, 12], [7, 12], [8, 10], [9, 7], [10, 4]]
-    : [[3, 7], [4, 10], [5, 12], [6, 12], [7, 11], [8, 9], [9, 6], [10, 3]]
-  for (const [y, w] of rows) fill(g, STICK_X + 1, y, w, 1, 'f')
+  const shape: readonly (readonly [dy: number, w: number])[] = furled
+    ? [[0, 6], [1, 9], [2, 11], [3, 12], [4, 12], [5, 10], [6, 7], [7, 4]]
+    : [[0, 7], [1, 10], [2, 12], [3, 12], [4, 11], [5, 9], [6, 6], [7, 3]]
+  const rows = shape.map(([dy, w]) => [l.flagTop + dy, w] as const)
+  for (const [y, w] of rows) fill(g, l.stickX + 1, y, w, 1, 'f')
   // SHADOW IS AN EDGE, NOT A HALF. Flooding every row below the middle turned
   // the bottom of the flag into a dark slab; what the icon has is a dark
   // trailing point and a dark underside one pixel deep.
   const last = rows[rows.length - 1]!
-  for (const [y, w] of rows) put(g, STICK_X + w, y, 'd')
-  fill(g, STICK_X + 1, last[0], last[1], 1, 'd')
-  for (const [y, w] of rows) if (y === last[0] - 1) fill(g, STICK_X + w - 1, y, 1, 1, 'd')
+  for (const [y, w] of rows) put(g, l.stickX + w, y, 'd')
+  fill(g, l.stickX + 1, last[0], last[1], 1, 'd')
+  for (const [y, w] of rows) if (y === last[0] - 1) fill(g, l.stickX + w - 1, y, 1, 1, 'd')
 
   // THE DOLLAR IT FLIES FOR. Five rows is the least an S can be drawn in, and
   // it has to actually be an S — a bar/stem/bar checker reads as a ladder,
   // which is what the first attempt put on the flag.
   const D = ['kkk', 'kk.', 'kkk', '.kk', 'kkk']
+  //
+  // IT HAS TO FIT INSIDE THE CLOTH, and checking that is the code's job rather
+  // than mine: the pennant narrows toward the bottom, so a stem placed by eye
+  // hung off the last row and left a cream pixel in the sky. Every mark is
+  // tested against the row it lands on and dropped if the flag has run out.
+  const onCloth = (x: number, y: number) => {
+    const row = rows.find(([ry]) => ry === y)
+    return row !== undefined && x > l.stickX && x <= l.stickX + row[1] - 1
+  }
+  const ink = (x: number, y: number) => {
+    if (onCloth(x, y)) put(g, x, y, 'k')
+  }
   D.forEach((row, i) => {
-    for (let x = 0; x < row.length; x++) if (row[x] === 'k') put(g, STICK_X + 3 + x, 5 + i, 'k')
+    for (let x = 0; x < row.length; x++) if (row[x] === 'k') ink(l.stickX + 3 + x, l.flagTop + 2 + i)
   })
-  put(g, STICK_X + 4, 4, 'k')
-  put(g, STICK_X + 4, 10, 'k')
+  ink(l.stickX + 4, l.flagTop + 1)
+  ink(l.stickX + 4, l.flagTop + 7)
 }
 
-function stick(g: Grid, fromY: number) {
-  fill(g, STICK_X, fromY, 1, CUP_Y - fromY + 1, 'k')
+function stick(g: Grid, l: Layout, fromY: number) {
+  fill(g, l.stickX, fromY, 1, l.cupY - fromY + 1, 'k')
 }
 
-function ball(g: Grid, x: number) {
-  put(g, x, 22, 'k')
-  put(g, x + 1, 22, 'k')
-  put(g, x, 23, 'k')
-  put(g, x + 1, 23, 'c')
+/**
+ * THE BALL IS THE ONE CHARACTER IN A SCENE, so it is the one thing here that
+ * takes a rim (`docs/pixel-art.md`, rule 3). It flies over sky, cloud, tree
+ * line, fairway and green in the space of one loop, and it is cream — the same
+ * cream the clouds are, which is where it started its flight and where it
+ * promptly disappeared.
+ */
+function ball(g: Grid, x: number, y: number) {
+  for (let j = -1; j <= 2; j++) for (let i = -1; i <= 2; i++) put(g, x + i, y + j, 'o')
+  put(g, x, y, 'k')
+  put(g, x + 1, y, 'k')
+  put(g, x, y + 1, 'k')
+  put(g, x + 1, y + 1, 'c')
 }
 
 function pixels(g: Grid, key: string): ReactElement {
@@ -201,38 +262,52 @@ function pixels(g: Grid, key: string): ReactElement {
   return <>{out}</>
 }
 
-/** The ball finds the cup, the flag ripples the whole way. Five frames. */
-export const COURSE_LOGO_FRAMES: readonly ReactElement[] = [0, 1, 2, 3, 4].map((i) => {
-  const g = scene()
-  stick(g, 4)
-  flag(g, i % 2 === 1)
-  if (i < 4) ball(g, 6 + i * 3)
-  else {
-    put(g, 12, 20, '*')
-    put(g, 20, 19, '*')
-    put(g, 16, 17, '*')
-  }
-  return pixels(g, `logo${i}`)
-})
+/**
+ * THE APPROACH THAT GOES IN. The ball comes in high from the left, lands short,
+ * bounces twice with the arc dying each time, releases onto the green and drops.
+ * Then it is gone and the loop sends another one — which is the shot everybody
+ * is actually here for.
+ *
+ * Hand-placed rather than simulated. A parabola computed from a gravity
+ * constant looks correct and reads as nothing, because at this size what sells
+ * a bounce is the SPACING — long, then short, then a roll — and those are three
+ * numbers you choose, not one you derive.
+ */
+const APPROACH: readonly (readonly [x: number, y: number])[] = [
+  [3, 2], [10, 5], [17, 9], [24, 14],
+  [30, 19], // pitches on the fairway
+  [36, 15], [42, 19], // and again, lower
+  [47, 17], [51, 19], // a last hop onto the green
+  [54, 19], // running at it
+]
+
+export const COURSE_LOGO_FRAMES: readonly ReactElement[] = APPROACH.concat([[-1, -1]]).map(
+  ([x, y], i) => {
+    const g = scene(BANNER)
+    stick(g, BANNER, BANNER.flagTop + 1)
+    flag(g, BANNER, i % 2 === 1)
+    // the last frame has no ball: it is in the hole, which is the whole point.
+    // Nothing else marks the moment — three white specks over the green was the
+    // first attempt at a cheer and read as dirt on the screen.
+    if (x >= 0) ball(g, x, y)
+    return pixels(g, `logo${i}`)
+  },
+)
 
 /**
  * FIRST TEE — the flag goes in. The stick drops from above and the pennant
  * unfurls behind it, which is the picture of a hole being made ready to play.
  */
 export const COURSE_FLAG_PLANT_FRAMES: readonly ReactElement[] = [0, 1, 2, 3, 4].map((i) => {
-  const g = scene()
+  const g = scene(SQUARE)
   if (i === 0) return pixels(g, `plant${i}`)
   if (i === 1) {
-    fill(g, STICK_X, 0, 1, 10, 'k')
+    fill(g, SQUARE.stickX, 0, 1, 10, 'k')
     return pixels(g, `plant${i}`)
   }
-  stick(g, 4)
-  if (i === 2) fill(g, STICK_X + 1, 5, 3, 1, 'f')
-  else flag(g, i === 3)
-  if (i === 4) {
-    put(g, 8, 12, '*')
-    put(g, 26, 15, '*')
-  }
+  stick(g, SQUARE, SQUARE.flagTop + 1)
+  if (i === 2) fill(g, SQUARE.stickX + 1, SQUARE.flagTop + 2, 3, 1, 'f')
+  else flag(g, SQUARE, i === 3)
   return pixels(g, `plant${i}`)
 })
 
@@ -249,9 +324,9 @@ export const COURSE_FLAG_PLANT_FRAMES: readonly ReactElement[] = [0, 1, 2, 3, 4]
  * Regenerating: the test prints this string when it disagrees; paste it in.
  */
 export function courseIconSvg(): string {
-  const g = scene()
-  stick(g, 4)
-  flag(g, false)
+  const g = scene(SQUARE)
+  stick(g, SQUARE, SQUARE.flagTop + 1)
+  flag(g, SQUARE, false)
   const out: string[] = [
     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" shape-rendering="crispEdges">',
     '  <!-- GENERATED from src/components/courseArt.tsx — see courseIconSvg() -->',

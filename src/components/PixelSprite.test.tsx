@@ -31,25 +31,28 @@ describe('PixelSprite', () => {
    * invisible in every test that only asks whether a sprite mounted.
    */
   it('holds the final frame when it plays once, and wraps when it loops', () => {
-    // A CELL IS THE SPRITE'S OWN GRID times the scale, not 16 times it — the
-    // logo is drawn at 32, so scale 4 is a 128px cell. Deriving it here rather
-    // than writing 512 is the point: the arithmetic under test is steps-and-
-    // travel, and a literal would have to be re-guessed every time a sprite is
-    // redrawn at a different fidelity.
-    const cell = spriteGrid('logo') * 4
+    // EVERY NUMBER HERE IS DERIVED, none written down. The arithmetic under
+    // test is steps-and-travel; the cell width and the frame count are the
+    // sprite's business and both have already changed under this test once —
+    // the logo went from a 16-grid square of five frames to an 80-wide banner
+    // of eleven, and a literal turned an art change into a failing unit test
+    // about animation timing.
+    const cell = spriteGrid('logo').w * 4
 
     const once = render(<PixelSprite name="logo" scale={4} />)
     const onceSvg = once.container.querySelector<HTMLElement>('[data-sprite]')!
-    // logo has 5 frames: 4 steps, travelling 4 cells
-    expect(onceSvg.style.animationTimingFunction).toBe('steps(4)')
-    expect(onceSvg.style.getPropertyValue('--sprite-travel')).toBe(`${-4 * cell}px`)
+    const n = onceSvg.querySelectorAll('g').length
+    expect(n).toBeGreaterThan(1)
+    // a one-shot comes to rest ON the last frame: n-1 steps over n-1 cells
+    expect(onceSvg.style.animationTimingFunction).toBe(`steps(${n - 1})`)
+    expect(onceSvg.style.getPropertyValue('--sprite-travel')).toBe(`${-(n - 1) * cell}px`)
     expect(onceSvg.style.animationIterationCount).toBe('1')
 
     const loop = render(<PixelSprite name="logo" scale={4} loop />)
     const loopSvg = loop.container.querySelector<HTMLElement>('[data-sprite]')!
-    // looping shows all 5 and wraps, so it travels the whole strip
-    expect(loopSvg.style.animationTimingFunction).toBe('steps(5)')
-    expect(loopSvg.style.getPropertyValue('--sprite-travel')).toBe(`${-5 * cell}px`)
+    // looping shows all n and wraps, so it travels the whole strip
+    expect(loopSvg.style.animationTimingFunction).toBe(`steps(${n})`)
+    expect(loopSvg.style.getPropertyValue('--sprite-travel')).toBe(`${-n * cell}px`)
     expect(loopSvg.style.animationIterationCount).toBe('infinite')
   })
 

@@ -26,7 +26,12 @@ export function HomeScreen() {
           the launch actually waits on, and holding THAT for an animation would
           tax every cold start on the first tee (MAI-36). */}
       <header className="pt-6 text-center">
-        <span className="mx-auto block w-fit">
+        {/* A BANNER, not a badge: 80 art pixels across at scale 4 is 320, which
+            fills the column on a phone and stays inside it on the narrowest one
+            we support. It cannot simply be `width: 100%` — a fluid width means
+            a fractional scale, and crisp rects at a fractional scale snap to
+            different device-pixel widths across the picture. */}
+        <span className="mx-auto block w-fit max-w-full">
           <PixelSprite name="logo" scale={4} />
         </span>
         <h1 className="font-display mt-3 text-3xl uppercase text-felt-300 [text-shadow:4px_4px_0_rgb(0_0_0/0.6)]">

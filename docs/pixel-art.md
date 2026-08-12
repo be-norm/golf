@@ -45,11 +45,16 @@ The palette, sampled from the 512 master and clustered:
    are set in explicit pixels and never with a Tailwind `size-*` class — those
    are rem-based against a 19px root, so `size-16` is 76px, not 64.
 
-2. **The grid is chosen by RENDER SIZE, not by taste.**
+2. **The grid is chosen by RENDER SIZE AND SHAPE, not by taste.** A sprite
+   declares a width and a height; they need not match.
    - **16** for anything drawn at 16 CSS pixels: one art pixel is one screen
      pixel, and there is no room for detail that would only turn to mud.
    - **32** for anything that plays large — 64px and up. At 16 the same drawing
      reads flat and cheap, which is the whole of what "too NES" means here.
+   - **A banner** for anything spanning a column: the home screen's mark is
+     80×28, because a square asked to fill a width either crops or leaves the
+     sides empty. Note it cannot be `width: 100%` — a fluid width is a
+     fractional scale, and rule (1) is why it can't be.
    - Each sprite declares its own grid (`PixelSprite`'s `SPRITES` table), and
      **callers ask for a SIZE, not a scale** (`scaleFor(name, px)`). A hardcoded
      scale silently means a different picture size the day a sprite is redrawn:

@@ -319,7 +319,10 @@ function Burst({
   // the sprite's own grid, not the house 16 — a 32-grid token tossed with a
   // hardcoded half-width lands a whole sprite off the row it was aimed at
   const scale = scaleFor(celebration.sprite, TOSS_PX)
-  const half = (spriteGrid(celebration.sprite) * scale) / 2
+  // a sprite need not be square, so the two halves are measured separately
+  const size = spriteGrid(celebration.sprite)
+  const halfW = (size.w * scale) / 2
+  const halfH = (size.h * scale) / 2
   const coins = Array.from({ length: n }, (_, i) => i)
 
 
@@ -334,10 +337,10 @@ function Burst({
             key={i}
             className="absolute"
             style={{ left: 0, top: 0 }}
-            initial={{ x: from.x - half + spread / 2, y: from.y - half, opacity: 0 }}
+            initial={{ x: from.x - halfW + spread / 2, y: from.y - halfH, opacity: 0 }}
             animate={{
-              x: to.x - half + spread,
-              y: to.y - half,
+              x: to.x - halfW + spread,
+              y: to.y - halfH,
               opacity: [0, 1, 1, 0],
             }}
             transition={{
