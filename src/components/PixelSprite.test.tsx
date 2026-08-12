@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { render } from '@testing-library/react'
 import { CELEBRATION_SPRITES } from '../engine/core/celebration'
-import { PixelSprite } from './PixelSprite'
+import { PixelSprite, spriteGrid } from './PixelSprite'
 
 /**
  * THE ANIMATION AND THE HANDLE MUST BE ON THE SAME ELEMENT.
@@ -31,18 +31,25 @@ describe('PixelSprite', () => {
    * invisible in every test that only asks whether a sprite mounted.
    */
   it('holds the final frame when it plays once, and wraps when it loops', () => {
+    // A CELL IS THE SPRITE'S OWN GRID times the scale, not 16 times it — the
+    // logo is drawn at 32, so scale 4 is a 128px cell. Deriving it here rather
+    // than writing 512 is the point: the arithmetic under test is steps-and-
+    // travel, and a literal would have to be re-guessed every time a sprite is
+    // redrawn at a different fidelity.
+    const cell = spriteGrid('logo') * 4
+
     const once = render(<PixelSprite name="logo" scale={4} />)
     const onceSvg = once.container.querySelector<HTMLElement>('[data-sprite]')!
-    // logo has 5 frames: 4 steps, travelling 4 cells of 64px
+    // logo has 5 frames: 4 steps, travelling 4 cells
     expect(onceSvg.style.animationTimingFunction).toBe('steps(4)')
-    expect(onceSvg.style.getPropertyValue('--sprite-travel')).toBe('-256px')
+    expect(onceSvg.style.getPropertyValue('--sprite-travel')).toBe(`${-4 * cell}px`)
     expect(onceSvg.style.animationIterationCount).toBe('1')
 
     const loop = render(<PixelSprite name="logo" scale={4} loop />)
     const loopSvg = loop.container.querySelector<HTMLElement>('[data-sprite]')!
     // looping shows all 5 and wraps, so it travels the whole strip
     expect(loopSvg.style.animationTimingFunction).toBe('steps(5)')
-    expect(loopSvg.style.getPropertyValue('--sprite-travel')).toBe('-320px')
+    expect(loopSvg.style.getPropertyValue('--sprite-travel')).toBe(`${-5 * cell}px`)
     expect(loopSvg.style.animationIterationCount).toBe('infinite')
   })
 

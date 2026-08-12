@@ -1,6 +1,7 @@
 import type { ReactElement } from 'react'
 import type { CelebrationSprite } from '../engine/core/celebration'
 import { FRAME_MS } from '../lib/motion'
+import { COURSE_FLAG_PLANT_FRAMES, COURSE_LOGO_FRAMES, COURSE_SIZE } from './courseArt'
 import { SWING_SIZE, WOLF_SHADES_SWING_FRAMES, WOLF_SWING_FRAMES } from './wolfArt'
 
 /**
@@ -143,130 +144,8 @@ const COIN_FRAMES: readonly ReactElement[] = [
  * The art is `wolfArt.tsx`'s, beside the still head `PixelGlyph` renders — one
  * animal, one palette, and the only sprite here drawn on the 32 grid.
  */
-/* ── the course, as `public/icon.svg` draws it ───────────── */
-/**
- * THE ICON, REDRAWN AS FRAMES. Same subject, same palette and the same rects as
- * `public/icon.svg` — deliberately, so the home screen animates the mark people
- * already have on their home screen rather than introducing a second one. Any
- * change to the icon belongs in both, and MAI-12's 1024px source should be
- * exported from this drawing rather than become a third.
- */
-const SKY = '#052e16' // felt-950
-const TURF_HI = '#15803d' // felt-700
-const TURF = '#16a34a' // felt-600
-const CUP = '#04220f'
-const STICK = '#e7e5e4'
-const FLAG = '#ff4444' // flag-500
-const FLAG_DARK = '#dc2626' // flag-600
-const BALL = '#fafaf9'
-const SPARK = '#7dff66' // felt-300
-
-function course() {
-  return (
-    <>
-      <rect x="0" y="0" width="16" height="10" fill={SKY} />
-      <rect x="0" y="10" width="16" height="2" fill={TURF_HI} />
-      <rect x="0" y="12" width="16" height="4" fill={TURF} />
-      <rect x="9" y="11" width="4" height="1" fill={CUP} />
-      <rect x="10" y="2" width="1" height="9" fill={STICK} />
-    </>
-  )
-}
-
-/** Two flag shapes — the ripple is the whole animation of a flag. */
-function flag(furled: boolean) {
-  return furled ? (
-    <>
-      <rect x="11" y="2" width="3" height="1" fill={FLAG} />
-      <rect x="11" y="3" width="4" height="1" fill={FLAG} />
-      <rect x="11" y="4" width="3" height="1" fill={FLAG_DARK} />
-    </>
-  ) : (
-    <>
-      <rect x="11" y="2" width="4" height="1" fill={FLAG} />
-      <rect x="11" y="3" width="3" height="1" fill={FLAG} />
-      <rect x="11" y="4" width="2" height="1" fill={FLAG_DARK} />
-    </>
-  )
-}
-
-function ball(x: number) {
-  return (
-    <>
-      <rect x={x} y="12" width="2" height="2" fill={BALL} />
-      <rect x={x} y="12" width="1" height="1" fill="#ffffff" />
-    </>
-  )
-}
-
-/** The ball finds the cup, the flag ripples the whole way. Five frames. */
-const LOGO_FRAMES: readonly ReactElement[] = [
-  <>
-    {course()}
-    {flag(false)}
-    {ball(3)}
-  </>,
-  <>
-    {course()}
-    {flag(true)}
-    {ball(5)}
-  </>,
-  <>
-    {course()}
-    {flag(false)}
-    {ball(7)}
-  </>,
-  <>
-    {course()}
-    {flag(true)}
-    {ball(9)}
-  </>,
-  // dropped: the cup, and the little burst of nothing that follows a putt
-  <>
-    {course()}
-    {flag(false)}
-    <rect x="8" y="9" width="1" height="1" fill={SPARK} />
-    <rect x="13" y="8" width="1" height="1" fill={SPARK} />
-    <rect x="10" y="7" width="1" height="1" fill={SPARK} />
-  </>,
-]
-
-/**
- * FIRST TEE — the flag goes in. The stick drops from above and the flag unfurls
- * behind it, which is the picture of a hole being made ready to play.
- */
-const FLAG_PLANT_FRAMES: readonly ReactElement[] = [
-  <>
-    <rect x="0" y="0" width="16" height="10" fill={SKY} />
-    <rect x="0" y="10" width="16" height="2" fill={TURF_HI} />
-    <rect x="0" y="12" width="16" height="4" fill={TURF} />
-    <rect x="9" y="11" width="4" height="1" fill={CUP} />
-  </>,
-  <>
-    <rect x="0" y="0" width="16" height="10" fill={SKY} />
-    <rect x="0" y="10" width="16" height="2" fill={TURF_HI} />
-    <rect x="0" y="12" width="16" height="4" fill={TURF} />
-    <rect x="9" y="11" width="4" height="1" fill={CUP} />
-    <rect x="10" y="0" width="1" height="5" fill={STICK} />
-  </>,
-  <>
-    {course()}
-    <rect x="11" y="2" width="1" height="1" fill={FLAG} />
-  </>,
-  <>
-    {course()}
-    <rect x="11" y="2" width="2" height="1" fill={FLAG} />
-    <rect x="11" y="3" width="2" height="1" fill={FLAG_DARK} />
-  </>,
-  <>
-    {course()}
-    {flag(false)}
-    <rect x="4" y="5" width="1" height="1" fill={SPARK} />
-    <rect x="14" y="7" width="1" height="1" fill={SPARK} />
-  </>,
-]
-
 /* ── reading a scorecard ─────────────────────────────────── */
+const SPARK = '#7dff66' // felt-300
 const CARD_BG = '#1c1917'
 const CARD_LINE = '#44403c'
 const CARD_EDGE = '#15803d'
@@ -309,8 +188,8 @@ const SPRITES = {
   coin: { frames: COIN_FRAMES, grid: 16 },
   wolf: { frames: WOLF_SWING_FRAMES, grid: SWING_SIZE },
   'wolf-shades': { frames: WOLF_SHADES_SWING_FRAMES, grid: SWING_SIZE },
-  logo: { frames: LOGO_FRAMES, grid: 16 },
-  'flag-plant': { frames: FLAG_PLANT_FRAMES, grid: 16 },
+  logo: { frames: COURSE_LOGO_FRAMES, grid: COURSE_SIZE },
+  'flag-plant': { frames: COURSE_FLAG_PLANT_FRAMES, grid: COURSE_SIZE },
   scan: { frames: SCAN_FRAMES, grid: 16 },
 } as const satisfies Record<string, { frames: readonly ReactElement[]; grid: number }>
 
