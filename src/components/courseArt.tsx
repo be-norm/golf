@@ -82,6 +82,45 @@ const LEGEND: Record<string, string> = {
 type Grid = string[][]
 
 /**
+ * WHAT THIS FRAME ADDS TO THE BACKDROP — every cell that differs, blanked
+ * everywhere else so the emitter skips it.
+ *
+ * A banner is 5,400 cells and a strip is up to eleven of them, nearly all of it
+ * the same sky, the same turf, the same green, restated per frame. Nine and a
+ * half thousand DOM nodes on the app's cold-start screen is a tax its own
+ * comment says the mark must not impose. The backdrop is drawn once into
+ * `<defs>` and each frame `<use>`s it, so a frame costs what actually moves: a
+ * flag, a ball, a band of lit grass.
+ *
+ * Diffing rather than restructuring the drawing, on purpose — the scene code is
+ * unchanged and still builds whole pictures, which is what makes it readable.
+ */
+function overlay(frame: Grid, backdrop: Grid): Grid {
+  return frame.map((row, y) => row.map((ch, x) => (ch === backdrop[y]![x] ? ' ' : ch)))
+}
+
+/** Sky, trees, turf, green and cup — everything no frame of any strip moves. */
+const BACKDROP = once(() => scene(BANNER, 0))
+
+/**
+ * The shared half, for `<defs>`. ONE ID PER SPRITE: two `<svg>`s carrying the
+ * same id would have `<use>` resolve across them, and the home screen mounts
+ * the wind while the approach is still on the page.
+ */
+export const courseBackdrop = (name: string) => (
+  <g id={`backdrop-${name}`}>{mergedRects(BACKDROP(), LEGEND, `bd-${name}`)}</g>
+)
+
+function frameOf(g: Grid, name: string, key: string) {
+  return (
+    <>
+      <use href={`#backdrop-${name}`} />
+      {mergedRects(overlay(g, BACKDROP()), LEGEND, key)}
+    </>
+  )
+}
+
+/**
  * BOUNDS COME FROM THE GRID, not from a constant. They were a fixed 32 when
  * every frame was square, and the banner then drew its whole right-hand two
  * thirds — green, flag, cup — into a check that silently threw it away.
@@ -337,7 +376,7 @@ export const COURSE_LOGO_FRAMES = once(() =>
     // Nothing else marks the moment — three white specks over the green was the
     // first attempt at a cheer and read as dirt on the screen.
     if (x >= 0) ball(g, x, y)
-    return mergedRects(g, LEGEND, `logo${i}`)
+    return frameOf(g, 'logo', `logo${i}`)
   }),
 )
 
@@ -367,7 +406,7 @@ export const COURSE_IDLE_FRAMES = once(() => Array.from(
     // frame 0 wears the shape the approach's last frame left, so the swap from
     // one strip to the other has nothing to see
     flag(g, BANNER, i % 4 >= 2)
-    return mergedRects(g, LEGEND, `idle${i}`)
+    return frameOf(g, 'logo-idle', `idle${i}`)
   },
 ))
 
@@ -386,23 +425,23 @@ export const COURSE_FLAG_PLANT_FRAMES = once(() =>
   [0, 1, 2, 3, 4].map((i) => {
   const l = BANNER
   const g = scene(l, 0)
-  if (i === 0) return mergedRects(g, LEGEND, `plant${i}`)
+  if (i === 0) return frameOf(g, 'flag-plant', `plant${i}`)
   if (i === 1) {
     // still falling, out of the top of the frame
     fill(g, l.stickX, 0, 1, Math.round(l.cupY * 0.5), 'k')
-    return mergedRects(g, LEGEND, `plant${i}`)
+    return frameOf(g, 'flag-plant', `plant${i}`)
   }
   stick(g, l, l.flagTop)
   if (i === 2) fill(g, l.stickX + 1, l.flagTop + 2, 3, 1, 'f')
   else flag(g, l, i === 3)
     // the last frame wears the shape AND the gust phase the wind strip opens
     // on, so the swap from the ceremony to the loop has nothing to see
-    return mergedRects(g, LEGEND, `plant${i}`)
+    return frameOf(g, 'flag-plant', `plant${i}`)
   }),
 )
 
 /**
- * `public/icon.svg`, AS A STRING, from this same drawing.
+ * THE COURSE AS A STANDALONE SVG, from this same drawing.
  *
  * NOT THE BROWSER TAB ICON. That is `favicon.ico`, which is hand-painted at
  * each size it ships — and has to be, because this is a 32-grid scene and a tab

@@ -130,15 +130,16 @@ generated highlight wherever the top edge of a shape is concave.
 pictures of one thing, and they have drifted before — the PNGs were upgraded and
 the other two were not, which is what MAI-94 surfaced.
 
-- The **sprites and `public/icon.svg` are generated from one drawing**
-  (`src/components/courseArt.tsx`), so they cannot drift; a test compares the
-  committed SVG against that source.
-- **`icon.svg` is not the browser tab icon**, and pointing the tab at it makes
-  the tab worse: it is a 32-grid scene, and a 16px tab halves it with smoothing
-  until the tree line, the cup ring and the `$` are mush. The tab keeps
-  `favicon.ico`, which is painted at each size it ships. A drawing built for one
-  grid does not become a smaller drawing by being scaled — rule (2), from the
-  other end.
+- The **sprites and `docs/assets/course-icon.svg` are generated from one
+  drawing** (`src/components/courseArt.tsx`), so they cannot drift; a test
+  compares the committed SVG against that source.
+- **That SVG is a repo artifact, not a shipped icon**, which is why it lives in
+  `docs/` — `public/` is service-worker-precached to every user, and it had no
+  consumer. Pointing the browser tab at it was tried and made the tab worse: it
+  is a 32-grid scene, and a 16px tab halves it with smoothing until the tree
+  line, the cup ring and the `$` are mush. The tab keeps `favicon.ico`, painted
+  at each size it ships. A drawing built for one grid does not become a smaller
+  drawing by being scaled — rule (2), from the other end.
 - The **PNG/ICO set is painted by hand** and is regenerated deliberately.
   Changing it means `favicon.ico`, `apple-touch-icon-180x180`,
   `maskable-icon-512x512` and `pwa-64/192/512` all move together — and they ship

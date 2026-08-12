@@ -6,6 +6,7 @@ import { mergedRects } from './pixelGrid'
 import {
   BANNER_H,
   BANNER_W,
+  courseBackdrop,
   COURSE_FLAG_PLANT_FRAMES,
   COURSE_IDLE_FRAMES,
   COURSE_LOGO_FRAMES,
@@ -264,13 +265,19 @@ const SPRITES = {
   'coin-small': { frames: COIN_SMALL_FRAMES, w: 16, h: 16 },
   wolf: { frames: WOLF_SWING_FRAMES, w: SWING_SIZE, h: SWING_SIZE },
   'wolf-shades': { frames: WOLF_SHADES_SWING_FRAMES, w: SWING_SIZE, h: SWING_SIZE },
-  logo: { frames: COURSE_LOGO_FRAMES, w: BANNER_W, h: BANNER_H },
-  'logo-idle': { frames: COURSE_IDLE_FRAMES, w: BANNER_W, h: BANNER_H },
-  'flag-plant': { frames: COURSE_FLAG_PLANT_FRAMES, w: BANNER_W, h: BANNER_H },
+  logo: { frames: COURSE_LOGO_FRAMES, w: BANNER_W, h: BANNER_H, defs: courseBackdrop },
+  'logo-idle': { frames: COURSE_IDLE_FRAMES, w: BANNER_W, h: BANNER_H, defs: courseBackdrop },
+  'flag-plant': { frames: COURSE_FLAG_PLANT_FRAMES, w: BANNER_W, h: BANNER_H, defs: courseBackdrop },
   scan: { frames: SCAN_FRAMES, w: 16, h: 16 },
 } as const satisfies Record<
   string,
-  { frames: () => readonly ReactElement[]; w: number; h: number }
+  {
+    frames: () => readonly ReactElement[]
+    w: number
+    h: number
+    /** shared across every frame of the strip, drawn once — see `courseArt` */
+    defs?: (name: string) => ReactElement
+  }
 >
 
 export type SpriteName = keyof typeof SPRITES
@@ -339,7 +346,9 @@ export function PixelSprite({
   frameMs = FRAME_MS,
   label,
 }: PixelSpriteProps) {
-  const { frames: build, w, h } = SPRITES[name]
+  const entry: { frames: () => readonly ReactElement[]; w: number; h: number; defs?: (n: string) => ReactElement } =
+    SPRITES[name]
+  const { frames: build, w, h, defs } = entry
   const frames = build()
   const n = frames.length
   // INTEGER SCALE IS THE WHOLE IDIOM, so it is enforced rather than asked for.
@@ -387,6 +396,7 @@ export function PixelSprite({
           animationFillMode: 'forwards',
         }}
       >
+        {defs && <defs>{defs(name)}</defs>}
         {frames.map((frame, i) => (
           <g key={i} transform={`translate(${i * w}, 0)`}>
             {frame}

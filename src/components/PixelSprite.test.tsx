@@ -41,7 +41,9 @@ describe('PixelSprite', () => {
 
     const once = render(<PixelSprite name="logo" scale={4} />)
     const onceSvg = once.container.querySelector<HTMLElement>('[data-sprite]')!
-    const n = onceSvg.querySelectorAll('g').length
+    // DIRECT children only: a strip that shares a backdrop keeps it in `<defs>`,
+    // which is a `<g>` too, and counting those would report one frame too many
+    const n = onceSvg.querySelectorAll(':scope > g').length
     expect(n).toBeGreaterThan(1)
     // a one-shot comes to rest ON the last frame: n-1 steps over n-1 cells
     expect(onceSvg.style.animationTimingFunction).toBe(`steps(${n - 1})`)

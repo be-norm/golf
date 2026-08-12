@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import committedIcon from '../../public/icon.svg?raw'
+import committedIcon from '../../docs/assets/course-icon.svg?raw'
 import { courseIconSvg } from './courseArt'
 
 /**
@@ -21,7 +21,7 @@ describe('courseArt', () => {
   it('keeps public/icon.svg identical to the drawing the app animates', () => {
     expect(
       committedIcon,
-      'public/icon.svg is stale — paste the generated string below over it',
+      'docs/assets/course-icon.svg is stale — paste the generated string below over it',
     ).toBe(courseIconSvg())
   })
 })

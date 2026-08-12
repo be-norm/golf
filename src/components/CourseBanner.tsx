@@ -68,11 +68,11 @@ function Phases({ intro }: { intro: Ceremony }) {
   // a one-shot travels n-1 frames, so that is what there is to wait out
   useEffect(() => {
     if (done) return
-    // BUILD THE WIND NOW, not in the swap render. The strips are thousands of
-    // nodes and `once()` builds on first use — which, left alone, is inside the
-    // very re-render that mounts them, putting a long task exactly at the
-    // handover. Doing it during the ceremony spends the same work where there
-    // is already a second to spare.
+    // BUILD THE WIND'S ELEMENTS NOW, not in the swap render. `once()` builds on
+    // first use, which left alone is inside the very re-render that mounts
+    // them. This moves the CONSTRUCTION only — mounting the DOM still happens
+    // at the handover and is the larger half; what made that affordable is the
+    // shared backdrop, which took the strip from seven thousand nodes to two.
     spriteFrames('logo-idle')
     const t = setTimeout(() => setDone(true), (spriteFrames(intro) - 1) * FRAME_MS)
     return () => clearTimeout(t)
