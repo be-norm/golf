@@ -243,11 +243,15 @@ function flag(g: Grid, l: Layout, furled: boolean) {
   const ink = (x: number, y: number) => {
     if (onCloth(x, y)) put(g, x, y, 'k')
   }
+  //
+  // A ROW HIGHER THAN CENTRE, deliberately. The pennant tapers, so its visual
+  // mass is all in the top half; a mark centred on the cloth's rows sits low on
+  // the shape you actually see.
   D.forEach((row, i) => {
-    for (let x = 0; x < row.length; x++) if (row[x] === 'k') ink(l.stickX + 3 + x, l.flagTop + 3 + i)
+    for (let x = 0; x < row.length; x++) if (row[x] === 'k') ink(l.stickX + 3 + x, l.flagTop + 2 + i)
   })
-  ink(l.stickX + 4, l.flagTop + 2)
-  ink(l.stickX + 4, l.flagTop + 8)
+  ink(l.stickX + 4, l.flagTop + 1)
+  ink(l.stickX + 4, l.flagTop + 7)
 }
 
 function stick(g: Grid, l: Layout, fromY: number) {
