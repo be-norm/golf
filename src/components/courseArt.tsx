@@ -27,15 +27,18 @@ export const COURSE_SIZE = 32
  * same palette, wider frame — the green and the flag sit right, and the space
  * that buys on the left is what the approach shot flies through.
  *
- * 96 ACROSS IS CHOSEN FROM THE SCREEN, not the drawing. At the house scale of
- * 5 that is 480 CSS pixels, which is wider than any phone — so the banner
+ * 108 ACROSS IS CHOSEN FROM THE SCREEN, not the drawing. At the house scale of
+ * 5 that is 540 CSS pixels, and the number to beat is 532 — `max-w-md` against
+ * this app's NINETEEN-pixel root, not the sixteen it would be anywhere else.
+ * At 480 the banner was narrower than the buttons underneath it, which is the
+ * opposite of bleeding. Wider than the container on every screen means it
  * always fills the width and always crops a little, instead of filling it on a
  * small handset and leaving a gutter on a large one. It cannot stretch to fit:
  * a fluid width is a fractional scale (`docs/pixel-art.md`, rule 1). What crops
  * is fairway off the left and a rim of green off the right, and the hole sits
  * far enough inside to survive the narrowest screen.
  */
-export const BANNER_W = 96
+export const BANNER_W = 108
 export const BANNER_H = 32
 
 /* ── palette, sampled from public/pwa-512x512.png ────────── */
@@ -162,8 +165,8 @@ const SQUARE: Layout = {
   greenX: 16, greenRx: 12.6, greenRy: 5.7, flagTop: 3,
 }
 const BANNER: Layout = {
-  w: BANNER_W, h: BANNER_H, horizon: 11, stickX: 66, cupY: 21,
-  greenX: 66, greenRx: 20, greenRy: 5.4, flagTop: 2,
+  w: BANNER_W, h: BANNER_H, horizon: 11, stickX: 72, cupY: 21,
+  greenX: 72, greenRx: 22, greenRy: 5.4, flagTop: 2,
 }
 
 function blankOf(l: Layout): Grid {
@@ -195,9 +198,12 @@ function flag(g: Grid, l: Layout, furled: boolean) {
   // Nine rows deep, because the `$` needs five of them and has to sit INSIDE
   // the cloth — at six rows its stem fell off the bottom edge and left a cream
   // pixel floating in the sky.
+  // TWELVE ROWS, and the point of that is the `$`. At eight the glyph and its
+  // stems filled seven of them — a flag that is mostly dollar. The mark did not
+  // want to be smaller, the cloth wanted to be bigger.
   const shape: readonly (readonly [dy: number, w: number])[] = furled
-    ? [[0, 6], [1, 9], [2, 11], [3, 12], [4, 12], [5, 10], [6, 7], [7, 4]]
-    : [[0, 7], [1, 10], [2, 12], [3, 12], [4, 11], [5, 9], [6, 6], [7, 3]]
+    ? [[0, 6], [1, 10], [2, 13], [3, 15], [4, 16], [5, 16], [6, 15], [7, 13], [8, 10], [9, 7], [10, 4], [11, 2]]
+    : [[0, 7], [1, 11], [2, 14], [3, 16], [4, 16], [5, 15], [6, 13], [7, 11], [8, 8], [9, 6], [10, 3], [11, 1]]
   const rows = shape.map(([dy, w]) => [l.flagTop + dy, w] as const)
   for (const [y, w] of rows) fill(g, l.stickX + 1, y, w, 1, 'f')
   // SHADOW IS AN EDGE, NOT A HALF. Flooding every row below the middle turned
@@ -225,10 +231,10 @@ function flag(g: Grid, l: Layout, furled: boolean) {
     if (onCloth(x, y)) put(g, x, y, 'k')
   }
   D.forEach((row, i) => {
-    for (let x = 0; x < row.length; x++) if (row[x] === 'k') ink(l.stickX + 3 + x, l.flagTop + 2 + i)
+    for (let x = 0; x < row.length; x++) if (row[x] === 'k') ink(l.stickX + 3 + x, l.flagTop + 3 + i)
   })
-  ink(l.stickX + 4, l.flagTop + 1)
-  ink(l.stickX + 4, l.flagTop + 7)
+  ink(l.stickX + 4, l.flagTop + 2)
+  ink(l.stickX + 4, l.flagTop + 8)
 }
 
 function stick(g: Grid, l: Layout, fromY: number) {
@@ -289,11 +295,11 @@ function pixels(g: Grid, key: string): ReactElement {
  * numbers you choose, not one you derive.
  */
 const APPROACH: readonly (readonly [x: number, y: number])[] = [
-  [2, 5], [11, 9], [20, 13], [28, 17],
-  [35, 20], // pitches on the fairway
-  [42, 16], [49, 20], // and again, lower
-  [55, 18], [60, 20], // a last hop onto the green
-  [64, 20], // running at it
+  [2, 5], [12, 9], [22, 13], [32, 17],
+  [41, 20], // pitches on the fairway
+  [49, 16], [56, 20], // and again, lower
+  [62, 18], [67, 20], // a last hop onto the green
+  [70, 20], // running at it
 ]
 
 export const COURSE_LOGO_FRAMES: readonly ReactElement[] = APPROACH.concat([[-1, -1]]).map(
