@@ -315,7 +315,7 @@ function Confetti() {
                 : { left: `${x}%`, width: size, height: size, backgroundColor: colors[i % colors.length] }
             }
           >
-            {isCoin && <PixelSprite name="coin" scale={1} loop />}
+            {isCoin && <PixelSprite name="coin-small" scale={1} loop />}
           </motion.div>
         )
       })}

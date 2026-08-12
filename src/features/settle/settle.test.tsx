@@ -292,7 +292,10 @@ describe('SettleScreen — the burst', () => {
     })
     const { container } = render(<RouterProvider router={router} />)
     expect(await screen.findByText('Settle up')).toBeInTheDocument()
-    expect(container.querySelectorAll('[data-sprite="coin"]').length).toBe(0)
+    // the confetti falls as SPECKS, so it uses the 16-grid coin — the 32-grid
+    // one cannot render below 32px at integer scale and would tower over the
+    // paper it falls with (see PixelSprite)
+    expect(container.querySelectorAll('[data-sprite="coin-small"]').length).toBe(0)
   })
 
   it('fires when arriving straight from finishing the round', async () => {
@@ -305,9 +308,9 @@ describe('SettleScreen — the burst', () => {
     // …and it SURVIVES the navigation that spends the flag: reading the state
     // live and clearing it in an effect tore the burst down a frame in.
     await waitFor(() =>
-      expect(container.querySelectorAll('[data-sprite="coin"]').length).toBeGreaterThan(0),
+      expect(container.querySelectorAll('[data-sprite="coin-small"]').length).toBeGreaterThan(0),
     )
     expect(router.state.location.state).toBeNull()
-    expect(container.querySelectorAll('[data-sprite="coin"]').length).toBeGreaterThan(0)
+    expect(container.querySelectorAll('[data-sprite="coin-small"]').length).toBeGreaterThan(0)
   })
 })

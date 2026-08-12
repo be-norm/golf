@@ -31,151 +31,247 @@ import { SWING_SIZE, WOLF_SHADES_SWING_FRAMES, WOLF_SWING_FRAMES } from './wolfA
  * `index.css` selects on to freeze the strip at frame 0.
  */
 
-/* ── palette ─────────────────────────────────────────────── */
-const GOLD = '#ffd23e' // coin-400
-const GOLD_DARK = '#f5b800' // coin-500
-const GOLD_EDGE = '#8a6a00' // darker than any token; the coin's rim in shadow
-const GLINT = '#fff6d0'
-
-/** A run of pixels: [y, x, width]. Frames are drawn as lists of these — far
- *  easier to read and re-shape than a wall of <rect>, and it keeps every value
- *  on the integer grid by construction. */
-type Run = readonly [y: number, x: number, w: number]
-
-function runs(list: readonly Run[], fill: string, key: string): ReactElement {
-  return (
-    <>
-      {list.map(([y, x, w], i) => (
-        <rect key={`${key}-${i}`} x={x} y={y} width={w} height={1} fill={fill} />
-      ))}
-    </>
-  )
-}
-
-/** The coin's silhouette at four widths — one full turn. Rows 3–12 throughout,
- *  so it spins about its own axis instead of bobbing. */
-const DISC: readonly Run[] = [
-  [3, 6, 4],
-  [4, 4, 8],
-  [5, 3, 10],
-  [6, 3, 10],
-  [7, 3, 10],
-  [8, 3, 10],
-  [9, 3, 10],
-  [10, 3, 10],
-  [11, 4, 8],
-  [12, 6, 4],
-]
-
-const HALF: readonly Run[] = [
-  [3, 7, 2],
-  [4, 6, 4],
-  [5, 5, 6],
-  [6, 5, 6],
-  [7, 5, 6],
-  [8, 5, 6],
-  [9, 5, 6],
-  [10, 5, 6],
-  [11, 6, 4],
-  [12, 7, 2],
-]
-
-const EDGE: readonly Run[] = [
-  [3, 7, 2],
-  [4, 7, 2],
-  [5, 7, 2],
-  [6, 7, 2],
-  [7, 7, 2],
-  [8, 7, 2],
-  [9, 7, 2],
-  [10, 7, 2],
-  [11, 7, 2],
-  [12, 7, 2],
-]
-
-const COIN_FRAMES: readonly ReactElement[] = [
-  // face on, with a glint high-left and the rim shaded low-right
-  <>
-    {runs(DISC, GOLD, 'd')}
-    {runs(
-      [
-        [10, 5, 6],
-        [11, 6, 4],
-        [12, 6, 4],
-      ],
-      GOLD_DARK,
-      'ds',
-    )}
-    <rect x="5" y="5" width="2" height="1" fill={GLINT} />
-    <rect x="5" y="6" width="1" height="1" fill={GLINT} />
-  </>,
-  // turning away
-  <>
-    {runs(HALF, GOLD, 'h')}
-    {runs(
-      [
-        [10, 5, 6],
-        [11, 6, 4],
-      ],
-      GOLD_DARK,
-      'hs',
-    )}
-    <rect x="6" y="5" width="1" height="1" fill={GLINT} />
-  </>,
-  // edge on — the whole coin is rim
-  <>{runs(EDGE, GOLD_EDGE, 'e')}</>,
-  // coming back round, lit from the other side
-  <>
-    {runs(HALF, GOLD_DARK, 'h2')}
-    {runs(
-      [
-        [4, 6, 4],
-        [5, 5, 6],
-        [6, 5, 6],
-      ],
-      GOLD,
-      'h2l',
-    )}
-  </>,
-]
-
-/* ── the wolf, taking a swing at it ─────────────────────── */
+/* ── the coin ────────────────────────────────────────────── */
 /**
- * The art is `wolfArt.tsx`'s, beside the still head `PixelGlyph` renders — one
- * animal, one palette, and the only sprite here drawn on the 32 grid.
+ * A SPINNING COIN, redrawn at 32 with a dark rim. It is a CHARACTER sprite —
+ * it flies free over the scoring grid at 64px and up, with nothing behind it —
+ * so it takes the one-pixel outline, and at 16 with four flat tones it was the
+ * last thing in the app still reading as NES (`docs/pixel-art.md`).
+ *
+ * Four widths make one full turn, about its own axis rather than bobbing. The
+ * face carries a `$`, which is what the coin is for and what ties it to the
+ * flag; edge-on it is all rim and the `$` is gone, which is the frame that
+ * sells the rotation.
  */
-/* ── reading a scorecard ─────────────────────────────────── */
-const SPARK = '#7dff66' // felt-300
-const CARD_BG = '#1c1917'
-const CARD_LINE = '#44403c'
-const CARD_EDGE = '#15803d'
+const GOLD_LIT = '#ffe98a'
+const GOLD = '#ffd23e' // coin-400
+const GOLD_MID = '#f5b800' // coin-500
+const GOLD_DEEP = '#a97c00'
+const RIM = '#2a1c00'
 
-function scorecard() {
-  return (
-    <>
-      <rect x="0" y="0" width="16" height="16" fill={CARD_EDGE} />
-      <rect x="1" y="1" width="14" height="14" fill={CARD_BG} />
-      {[4, 7, 10, 13].map((y) => (
-        <rect key={y} x="2" y={y} width="12" height="1" fill={CARD_LINE} />
-      ))}
-      <rect x="6" y="2" width="1" height="12" fill={CARD_LINE} />
-      <rect x="10" y="2" width="1" height="12" fill={CARD_LINE} />
-    </>
-  )
+const COIN_LEGEND: Record<string, string> = {
+  o: RIM,
+  L: GOLD_LIT,
+  G: GOLD,
+  M: GOLD_MID,
+  D: GOLD_DEEP,
 }
 
+type CoinGrid = string[][]
+
+/** one turn: face on, three-quarter, edge, three-quarter back */
+const COIN_WIDTHS = [13, 8, 3, 8] as const
+/** which way the light falls — it swaps as the face turns away and back */
+const COIN_LIT_LEFT = [true, true, false, false] as const
+
+function coinFrame(i: number): CoinGrid {
+  const g: CoinGrid = Array.from({ length: 32 }, () => Array<string>(32).fill(' '))
+  const put = (x: number, y: number, ch: string) => {
+    const px = Math.round(x)
+    const py = Math.round(y)
+    if (px >= 0 && px < 32 && py >= 0 && py < 32) g[py]![px] = ch
+  }
+  const rx = COIN_WIDTHS[i]!
+  const ry = 13
+  const cx = 15.5
+  const cy = 15.5
+  const litLeft = COIN_LIT_LEFT[i]!
+  for (let y = 0; y < 32; y++) {
+    for (let x = 0; x < 32; x++) {
+      const dx = (x - cx) / rx
+      const dy = (y - cy) / ry
+      const d = dx * dx + dy * dy
+      if (d > 1) continue
+      // the rim is the outer band of the disc, darker where it turns away
+      if (d > 0.72) {
+        put(x, y, 'D')
+        continue
+      }
+      const towardLight = (litLeft ? -1 : 1) * dx + -dy
+      put(x, y, towardLight > 0.7 ? 'L' : towardLight > -0.35 ? 'G' : 'M')
+    }
+  }
+  // the $ on the face — only while there is a face to carry it
+  if (rx >= 8) {
+    const D = ['ooo', 'oo.', 'ooo', '.oo', 'ooo']
+    D.forEach((row, j) => {
+      for (let k = 0; k < row.length; k++) {
+        if (row[k] === 'o') put(cx - 1 + k, cy - 2.5 + j, 'D')
+      }
+    })
+    put(cx, cy - 3.5, 'D')
+    put(cx, cy + 2.5, 'D')
+  }
+  // one-pixel rim, drawn last so it survives everything
+  const out = g.map((row) => [...row])
+  for (let y = 0; y < 32; y++) {
+    for (let x = 0; x < 32; x++) {
+      if (g[y]![x] !== ' ') continue
+      const touching = ([[1, 0], [-1, 0], [0, 1], [0, -1]] as const).some(([ax, ay]) => {
+        const a = x + ax
+        const b = y + ay
+        return a >= 0 && a < 32 && b >= 0 && b < 32 && g[b]![a] !== ' '
+      })
+      if (touching) out[y]![x] = 'o'
+    }
+  }
+  return out
+}
+
+function coinPixels(g: CoinGrid, key: string): ReactElement {
+  const out: ReactElement[] = []
+  g.forEach((row, y) => {
+    let x = 0
+    while (x < row.length) {
+      const ch = row[x]!
+      const fill = COIN_LEGEND[ch]
+      if (fill === undefined) {
+        x += 1
+        continue
+      }
+      let w = 1
+      while (row[x + w] === ch) w += 1
+      out.push(<rect key={`${key}-${y}-${x}`} x={x} y={y} width={w} height={1} fill={fill} />)
+      x += w
+    }
+  })
+  return <>{out}</>
+}
+
+const COIN_FRAMES: readonly ReactElement[] = [0, 1, 2, 3].map((i) =>
+  coinPixels(coinFrame(i), `coin${i}`),
+)
+
+/**
+ * THE SAME COIN AT 16, and a second drawing rather than a scaled one — which is
+ * the standard's rule (grid follows render size), not a duplication. The settle
+ * screen's confetti is 6–14px specks, and a 32-grid sprite cannot render below
+ * 32px at integer scale, so the big coin lands there five times the size of the
+ * paper it falls with. Same relationship the wolf has: a 16px mark and a 32px
+ * sprite are different pictures of one thing.
+ *
+ * Flat and rimless on purpose. At 16px a rim eats the outer ring, and a third
+ * gold reads as dirt.
+ */
+const SMALL: Record<string, string> = { G: GOLD, M: GOLD_MID, D: GOLD_DEEP, L: GOLD_LIT }
+const SMALL_WIDTHS = [7, 4, 1, 4] as const
+
+function smallCoin(i: number, key: string): ReactElement {
+  const rx = SMALL_WIDTHS[i]!
+  const out: ReactElement[] = []
+  for (let y = 0; y < 16; y++) {
+    const dy = (y - 7.5) / 7
+    const span = 1 - dy * dy
+    if (span <= 0) continue
+    const w = Math.max(1, Math.round(rx * Math.sqrt(span)))
+    const x = Math.round(7.5 - w / 2 + 0.5)
+    const tone = i === 2 ? 'D' : y < 6 ? 'L' : y > 10 ? 'M' : 'G'
+    out.push(
+      <rect key={`${key}-${y}`} x={x} y={y} width={Math.max(1, w)} height={1} fill={SMALL[tone]} />,
+    )
+  }
+  return <>{out}</>
+}
+
+const COIN_SMALL_FRAMES: readonly ReactElement[] = [0, 1, 2, 3].map((i) =>
+  smallCoin(i, `cs${i}`),
+)
+
+/* ── reading a scorecard ─────────────────────────────────── */
 /**
  * SCANNING — a bright line walks down the card, the way the CRT overlay walks
  * down the app. Loops for as long as the request takes, which is the point: it
  * is a progress indicator, not a celebration, and the wait is what it is for.
+ *
+ * Redrawn at 32 with the rest. It is a character sprite by the standard's
+ * definition — it sits on a button over whatever is behind it — so it takes the
+ * rim, and the card gets a paper tone and a ruled grid instead of two greys.
  */
-const SCAN_FRAMES: readonly ReactElement[] = [2, 4, 6, 8, 10, 12, 14].map((y) => (
-  <>
-    {scorecard()}
-    <rect x="1" y={y} width="14" height="1" fill={SPARK} />
-    {y > 2 && <rect x="1" y={y - 1} width="14" height="1" fill="#22c55e" opacity="0.5" />}
-  </>
-))
+const CARD_EDGE = '#15803d'
+const CARD_EDGE_LIT = '#22c55e'
+const PAPER = '#f5f3ea'
+const PAPER_SH = '#cfcabc'
+const RULE = '#a9a394'
+const SCAN_LINE = '#7dff66'
+const SCAN_TRAIL = '#22c55e'
+const CARD_RIM = '#08240f'
+
+const SCAN_LEGEND: Record<string, string> = {
+  o: CARD_RIM,
+  E: CARD_EDGE,
+  e: CARD_EDGE_LIT,
+  P: PAPER,
+  S: PAPER_SH,
+  R: RULE,
+  L: SCAN_LINE,
+  T: SCAN_TRAIL,
+}
+
+const SCAN_ROWS = [6, 9, 12, 15, 18, 21, 24] as const
+
+function scanFrame(line: number): string[][] {
+  const g: string[][] = Array.from({ length: 32 }, () => Array<string>(32).fill(' '))
+  const put = (x: number, y: number, ch: string) => {
+    if (x >= 0 && x < 32 && y >= 0 && y < 32) g[y]![x] = ch
+  }
+  for (let y = 1; y < 31; y++) for (let x = 3; x < 29; x++) put(x, y, 'E')
+  for (let x = 3; x < 29; x++) {
+    put(x, 1, 'e')
+    put(x, 2, 'e')
+  }
+  for (let y = 3; y < 29; y++) for (let x = 5; x < 27; x++) put(x, y, 'P')
+  // a ruled grid — rows of holes, two columns of scores
+  for (const y of SCAN_ROWS) for (let x = 5; x < 27; x++) put(x, y, 'R')
+  for (let y = 3; y < 29; y++) {
+    put(13, y, 'R')
+    put(20, y, 'R')
+  }
+  // paper falls into shadow along its lower and right edges
+  for (let x = 5; x < 27; x++) put(x, 28, 'S')
+  for (let y = 3; y < 29; y++) put(26, y, 'S')
+  // the line, with a trail behind it
+  for (let x = 5; x < 27; x++) {
+    put(x, line, 'L')
+    if (line > 3) put(x, line - 1, 'T')
+  }
+  const out = g.map((row) => [...row])
+  for (let y = 0; y < 32; y++) {
+    for (let x = 0; x < 32; x++) {
+      if (g[y]![x] !== ' ') continue
+      const touching = ([[1, 0], [-1, 0], [0, 1], [0, -1]] as const).some(([ax, ay]) => {
+        const a = x + ax
+        const b = y + ay
+        return a >= 0 && a < 32 && b >= 0 && b < 32 && g[b]![a] !== ' '
+      })
+      if (touching) out[y]![x] = 'o'
+    }
+  }
+  return out
+}
+
+function scanPixels(g: string[][], key: string): ReactElement {
+  const out: ReactElement[] = []
+  g.forEach((row, y) => {
+    let x = 0
+    while (x < row.length) {
+      const ch = row[x]!
+      const fill = SCAN_LEGEND[ch]
+      if (fill === undefined) {
+        x += 1
+        continue
+      }
+      let w = 1
+      while (row[x + w] === ch) w += 1
+      out.push(<rect key={`${key}-${y}-${x}`} x={x} y={y} width={w} height={1} fill={fill} />)
+      x += w
+    }
+  })
+  return <>{out}</>
+}
+
+const SCAN_FRAMES: readonly ReactElement[] = [4, 8, 12, 16, 20, 24, 27].map((y, i) =>
+  scanPixels(scanFrame(y), `scan${i}`),
+)
 
 /**
  * No labels live here: every sprite in the app today rides beside words that
@@ -185,12 +281,13 @@ const SCAN_FRAMES: readonly ReactElement[] = [2, 4, 6, 8, 10, 12, 14].map((y) =>
  * simply never used, which is worse than none.
  */
 const SPRITES = {
-  coin: { frames: COIN_FRAMES, grid: 16 },
+  coin: { frames: COIN_FRAMES, grid: 32 },
+  'coin-small': { frames: COIN_SMALL_FRAMES, grid: 16 },
   wolf: { frames: WOLF_SWING_FRAMES, grid: SWING_SIZE },
   'wolf-shades': { frames: WOLF_SHADES_SWING_FRAMES, grid: SWING_SIZE },
   logo: { frames: COURSE_LOGO_FRAMES, grid: COURSE_SIZE },
   'flag-plant': { frames: COURSE_FLAG_PLANT_FRAMES, grid: COURSE_SIZE },
-  scan: { frames: SCAN_FRAMES, grid: 16 },
+  scan: { frames: SCAN_FRAMES, grid: 32 },
 } as const satisfies Record<string, { frames: readonly ReactElement[]; grid: number }>
 
 export type SpriteName = keyof typeof SPRITES
@@ -203,6 +300,18 @@ export type SpriteName = keyof typeof SPRITES
  */
 export function spriteGrid(name: SpriteName): number {
   return SPRITES[name].grid
+}
+
+/**
+ * The integer scale that renders `name` closest to `px` across.
+ *
+ * Callers used to hardcode a scale, which silently meant a DIFFERENT size the
+ * day a sprite was redrawn at higher fidelity — the coin going from 16 to 32
+ * doubled every one of them at once. What a caller actually knows is how big it
+ * wants the picture; the grid is the sprite's business.
+ */
+export function scaleFor(name: SpriteName, px: number): number {
+  return Math.max(1, Math.round(px / SPRITES[name].grid))
 }
 
 /**

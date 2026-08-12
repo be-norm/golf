@@ -108,7 +108,7 @@ describe('PixelSprite', () => {
    * choke point that keeps it true.
    */
   it('refuses a fractional scale rather than rendering a lopsided sprite', () => {
-    const { container } = render(<PixelSprite name="coin" scale={2.5} />)
+    const { container } = render(<PixelSprite name="coin-small" scale={2.5} />)
     const box = container.querySelector<HTMLElement>('[data-sprite]')!.parentElement!
     // 16-grid at a rounded 3, never 16 × 2.5 = 40
     expect(box.style.width).toBe('48px')

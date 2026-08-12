@@ -51,8 +51,14 @@ The palette, sampled from the 512 master and clustered:
    - **32** for anything that plays large — 64px and up. At 16 the same drawing
      reads flat and cheap, which is the whole of what "too NES" means here.
    - Each sprite declares its own grid (`PixelSprite`'s `SPRITES` table), and
-     anything placing a sprite derives its size from `spriteGrid` rather than
-     assuming 16.
+     **callers ask for a SIZE, not a scale** (`scaleFor(name, px)`). A hardcoded
+     scale silently means a different picture size the day a sprite is redrawn:
+     moving the coin from 16 to 32 doubled every one of its callers at once.
+   - The same subject at two sizes is TWO DRAWINGS, not one scaled. The wolf is
+     a 16px mark and a 32px sprite; the coin is a 16px confetti speck
+     (`coin-small`) and a 32px celebration. That is this rule applied, not
+     duplication — and a 32-grid sprite cannot render below 32px at all, since
+     the scale is an integer.
 
 3. **A one-pixel dark outline is the single largest difference** between a sprite
    that reads and one that doesn't — but only for CHARACTER sprites, the ones
