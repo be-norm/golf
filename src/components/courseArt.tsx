@@ -19,7 +19,6 @@ import type { ReactElement } from 'react'
  * scene owns its own background and gets depth from tone and dither instead.
  */
 
-export const COURSE_SIZE = 32
 /**
  * THE HOME SCREEN'S MARK IS A BANNER, not the icon. The icon is square because
  * a home-screen tile is; the mark at the top of the app has a whole width to
@@ -84,8 +83,8 @@ const LEGEND: Record<string, string> = {
 type Grid = string[][]
 
 /**
- * BOUNDS COME FROM THE GRID, not from a constant. They were `COURSE_SIZE` when
- * every frame was 32 square, and the banner then drew its whole right-hand two
+ * BOUNDS COME FROM THE GRID, not from a constant. They were a fixed 32 when
+ * every frame was square, and the banner then drew its whole right-hand two
  * thirds — green, flag, cup — into a check that silently threw it away.
  */
 function put(g: Grid, x: number, y: number, ch: string) {
@@ -182,6 +181,7 @@ interface Layout {
   flagTop: number
 }
 
+/** the icon's frame — square, because a home-screen tile is */
 const SQUARE: Layout = {
   w: 32, h: 32, horizon: 13, stickX: 14, cupY: 24,
   greenX: 16, greenRx: 12.6, greenRy: 5.7, flagTop: 3,
@@ -375,17 +375,28 @@ export const COURSE_IDLE_FRAMES: readonly ReactElement[] = Array.from(
 /**
  * FIRST TEE — the flag goes in. The stick drops from above and the pennant
  * unfurls behind it, which is the picture of a hole being made ready to play.
+ *
+ * THE SAME BANNER THE HOME SCREEN WEARS, and for the same reason it stopped
+ * being a square there: this is a header across a column, not a tile. It plays
+ * once and hands over to the wind, so the two screens differ in their CEREMONY
+ * — a ball holing out, a flag going in — and agree on everything after it. An
+ * approach shot on the FIRST tee would have been the wrong story told with the
+ * right picture.
  */
 export const COURSE_FLAG_PLANT_FRAMES: readonly ReactElement[] = [0, 1, 2, 3, 4].map((i) => {
-  const g = scene(SQUARE)
+  const l = BANNER
+  const g = scene(l)
   if (i === 0) return pixels(g, `plant${i}`)
   if (i === 1) {
-    fill(g, SQUARE.stickX, 0, 1, 10, 'k')
+    // still falling, out of the top of the frame
+    fill(g, l.stickX, 0, 1, Math.round(l.cupY * 0.5), 'k')
     return pixels(g, `plant${i}`)
   }
-  stick(g, SQUARE, SQUARE.flagTop + 1)
-  if (i === 2) fill(g, SQUARE.stickX + 1, SQUARE.flagTop + 2, 3, 1, 'f')
-  else flag(g, SQUARE, i === 3)
+  stick(g, l, l.flagTop + 1)
+  if (i === 2) fill(g, l.stickX + 1, l.flagTop + 2, 3, 1, 'f')
+  else flag(g, l, i === 3)
+  // the last frame wears the shape the wind strip opens on, so the swap from
+  // the ceremony to the loop has nothing to see
   return pixels(g, `plant${i}`)
 })
 

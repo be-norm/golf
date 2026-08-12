@@ -7,7 +7,6 @@ import {
   COURSE_FLAG_PLANT_FRAMES,
   COURSE_IDLE_FRAMES,
   COURSE_LOGO_FRAMES,
-  COURSE_SIZE,
 } from './courseArt'
 import { SWING_SIZE, WOLF_SHADES_SWING_FRAMES, WOLF_SWING_FRAMES } from './wolfArt'
 
@@ -295,7 +294,7 @@ const SPRITES = {
   'wolf-shades': { frames: WOLF_SHADES_SWING_FRAMES, w: SWING_SIZE, h: SWING_SIZE },
   logo: { frames: COURSE_LOGO_FRAMES, w: BANNER_W, h: BANNER_H },
   'logo-idle': { frames: COURSE_IDLE_FRAMES, w: BANNER_W, h: BANNER_H },
-  'flag-plant': { frames: COURSE_FLAG_PLANT_FRAMES, w: COURSE_SIZE, h: COURSE_SIZE },
+  'flag-plant': { frames: COURSE_FLAG_PLANT_FRAMES, w: BANNER_W, h: BANNER_H },
   scan: { frames: SCAN_FRAMES, w: 32, h: 32 },
 } as const satisfies Record<string, { frames: readonly ReactElement[]; w: number; h: number }>
 

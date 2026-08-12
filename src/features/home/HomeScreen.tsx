@@ -1,49 +1,16 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Link } from 'react-router'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { roundRepo } from '../../db/repos'
 import { holesForRound } from '../../engine/core/holes'
 import { InstallHint } from '../../pwa/InstallHint'
-import { PixelSprite, spriteFrames } from '../../components/PixelSprite'
-import { FRAME_MS } from '../../lib/motion'
+import { CourseBanner } from '../../components/CourseBanner'
 import { useAuth } from '../../auth/AuthProvider'
 import { AuthSheet } from '../auth/AuthSheet'
 
 /** Footer nav rendered as pressable pixel chips — the app's tappable idiom,
  *  so utility links read as controls instead of faint text. */
 const NAV_CHIP = 'pixel-press border-stone-700 bg-stone-900/70 px-3.5 py-2 text-sm text-stone-200'
-
-/**
- * THE APPROACH LANDS ONCE, THEN THE WIND RUNS FOREVER.
- *
- * A one-shot strip comes to rest on its last frame, which is the ball in the
- * hole — right, but it is then a photograph for as long as anyone is on this
- * screen. So the mark swaps to a looping strip of the same scene, minus the
- * ball, with the flag flapping and a gust crossing the grass.
- *
- * Looping the approach instead was the obvious thing and is wrong: a ball that
- * holes out every two seconds stops reading as a shot and starts reading as a
- * metronome. It happens when you arrive, and then the course just sits there in
- * the wind, which is what a course does.
- *
- * A one-shot travels n-1 frames, so that is what there is to wait out.
- */
-const APPROACH_MS = (spriteFrames('logo') - 1) * FRAME_MS
-/** Slower than the house rate: a flap, not a flutter. */
-const WIND_FRAME_MS = 200
-
-function CourseMark() {
-  const [landed, setLanded] = useState(false)
-  useEffect(() => {
-    const t = setTimeout(() => setLanded(true), APPROACH_MS)
-    return () => clearTimeout(t)
-  }, [])
-  return landed ? (
-    <PixelSprite name="logo-idle" scale={4} frameMs={WIND_FRAME_MS} loop />
-  ) : (
-    <PixelSprite name="logo" scale={4} />
-  )
-}
 
 export function HomeScreen() {
   const { activeUserId, isGuest, displayName } = useAuth()
@@ -59,18 +26,7 @@ export function HomeScreen() {
           the launch actually waits on, and holding THAT for an animation would
           tax every cold start on the first tee (MAI-36). */}
       <header className="pt-6 text-center">
-        {/* FULL WIDTH, BY BLEEDING AND CROPPING rather than by stretching. It
-            cannot be `width: 100%` — a fluid width is a fractional scale, and
-            crisp rects at a fractional scale snap to different device-pixel
-            widths across one picture. So the banner is drawn at a fixed integer
-            scale wider than the column, escapes the gutter, and lets the ends
-            clip on a narrow screen. Losing a little fairway off the left costs
-            the picture nothing; the hole is well inside. */}
-        <span className="-mx-4 block overflow-hidden">
-          <span className="mx-auto block w-fit">
-            <CourseMark />
-          </span>
-        </span>
+        <CourseBanner intro="logo" />
         <h1 className="font-display mt-3 text-3xl uppercase text-felt-300 [text-shadow:4px_4px_0_rgb(0_0_0/0.6)]">
           Golf
         </h1>
