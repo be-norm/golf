@@ -167,13 +167,19 @@ const SHADES_GLINT: readonly [x: number, y: number] = [8, 6]
 /**
  * THE SWING, AS A LEVER. The shoulder is a pivot, the club head travels an arc
  * around it, and the hands sit part-way out — so the arms and the shaft are
- * DRAWN, not authored, and both arms reach the same grip by construction.
+ * DRAWN, not authored, and the pose cannot forget a limb the way a hand-drawn
+ * frame can.
  *
- * That is not a shortcut, it is the fix for the bug: hand-drawn, the wolf ended
- * up swinging one-handed, because a second arm is easy to forget in one frame
- * out of seven and impossible to notice afterwards. Geometry cannot forget.
+ * TWO HANDS STACK ALONG THE SHAFT. They do not sit side by side, and that is
+ * the whole reason this reads as a golf grip rather than as a wolf holding a
+ * stick. Drawing both arms to a single point produced one limb every time —
+ * in true profile the near arm simply covers the far one, and no amount of
+ * separating the SHOULDERS fixes it, because the two lines still converge.
+ * They now terminate at two different points, one up the shaft and one down it,
+ * about three pixels apart: the far arm takes the top hand, the near arm the
+ * bottom, and the shaft passes between them exactly as a real grip does.
  *
- * `GRIP_ALONG` is where the hands sit on the lever. Two thirds out, because the
+ * `GRIP_ALONG` is where that pair sits on the lever. Two thirds out, because the
  * arms are longer than the club is — put the hands halfway and they end up
  * inside the wolf's own chest on every frame.
  */
@@ -187,8 +193,21 @@ const PIVOT: readonly [x: number, y: number] = [15, 14]
  * and the internal edge between them is what makes the pair legible.
  */
 const NEAR_SHOULDER: readonly [x: number, y: number] = [15, 17]
-const FAR_SHOULDER: readonly [x: number, y: number] = [11, 12]
+const FAR_SHOULDER: readonly [x: number, y: number] = [12, 12]
 const GRIP_ALONG = 0.62
+/**
+ * How far apart the two hands sit along the shaft — adjacent, as a real grip
+ * is. They still read as two because each is stamped on its own layer and the
+ * second one's outline cuts a dark seam between them; sharing a layer merged
+ * them into a single mitten, which is what "swinging one-handed" looked like.
+ */
+const HAND_GAP = 1.4
+/**
+ * How far the butt of the club stands proud of the top hand. Comfortably more
+ * than the hands are apart, or the shaft starts inside the grip and there is
+ * no club butt at all.
+ */
+const BUTT = 4.2
 
 interface SwingFrame {
   /** where the club head is, in art pixels */
@@ -378,25 +397,44 @@ function swingFrame(f: SwingFrame, blind: boolean): Grid {
   // with the hands, then the ball. One layer for all of them was the first
   // attempt and it put the near arm straight on top of the far one — two arms
   // drawn, one arm visible, which is the exact complaint this redraw is for.
-  const grip = [
-    PIVOT[0] + GRIP_ALONG * (f.club[0] - PIVOT[0]),
-    PIVOT[1] + GRIP_ALONG * (f.club[1] - PIVOT[1]),
-  ] as const
+  const reach = [f.club[0] - PIVOT[0], f.club[1] - PIVOT[1]] as const
+  const len = Math.hypot(reach[0], reach[1])
+  const dir = [reach[0] / len, reach[1] / len] as const
+  const grip = [PIVOT[0] + GRIP_ALONG * reach[0], PIVOT[1] + GRIP_ALONG * reach[1]] as const
+  const topHand = [grip[0] - dir[0] * HAND_GAP, grip[1] - dir[1] * HAND_GAP] as const
+  const lowHand = [grip[0] + dir[0] * HAND_GAP, grip[1] + dir[1] * HAND_GAP] as const
+  const butt = [grip[0] - dir[0] * BUTT, grip[1] - dir[1] * BUTT] as const
 
+  // FIVE LAYERS, BACK TO FRONT, each outlined as it lands. The two hands get
+  // one each and go on LAST, after the shaft, so every hand carries its own
+  // dark ring and a pixel of club shows between them. Sharing a layer let the
+  // two blobs merge into a single mitten — which is precisely what reading as
+  // "one hand on the club" looked like.
   const farArm = blank()
-  stroke(farArm, FAR_SHOULDER, grip, 'S', 2)
+  stroke(farArm, FAR_SHOULDER, topHand, 'S', 2)
   stampWithEdge(g, farArm, '#')
 
   const club = blank()
-  stroke(club, grip, f.club, 'C', 2)
+  stroke(club, butt, f.club, 'C', 2)
   disc(club, f.club[0], f.club[1], 1.6, 'K')
   stampWithEdge(g, club, '#')
 
   const nearArm = blank()
-  stroke(nearArm, NEAR_SHOULDER, grip, 'H', 3)
-  // both hands, together on the grip — the thing that says this is a golf swing
-  disc(nearArm, grip[0], grip[1], 1.4, 'W')
+  stroke(nearArm, NEAR_SHOULDER, lowHand, 'H', 3)
   stampWithEdge(g, nearArm, '#')
+
+  // THE HANDS GO LAST, one layer each. Last, because an arm drawn over them
+  // erases the grip — which is how the top hand vanished and left a wolf
+  // holding a club with one. One layer EACH, because two hands on a golf club
+  // are adjacent, and sharing a layer merges them into a single mitten; stamped
+  // separately, the outline of the second cuts the seam between them.
+  const top = blank()
+  disc(top, topHand[0], topHand[1], 1, 'W')
+  stampWithEdge(g, top, '#')
+
+  const low = blank()
+  disc(low, lowHand[0], lowHand[1], 1, 'W')
+  stampWithEdge(g, low, '#')
 
   for (const [x, y] of f.spark) put(g, x, y, '*')
 
