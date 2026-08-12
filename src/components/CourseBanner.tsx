@@ -81,15 +81,24 @@ function Phases({ intro }: { intro: Ceremony }) {
   return (
     <span className="-mx-4 flex justify-center overflow-hidden">
       <span className="shrink-0">
+        {/* KEYED SO IT REMOUNTS. Without this React reconciles one `<svg>` in
+            place: `animation-name` never changes, so per CSS Animations the
+            running animation is not restarted — only its duration and step
+            count are swapped underneath it. The wind then opens at whatever
+            fraction the approach had reached, which is frame 4 of 8, and the
+            gust jumps a hundred and forty pixels at the handover. Two commits
+            went into matching frame 0 to the intro's last frame; none of it
+            could show while the strip never started at frame 0. */}
         {done ? (
           <PixelSprite
+            key="idle"
             name="logo-idle"
             scale={scaleFor('logo-idle', BANNER_PX)}
             frameMs={WIND_FRAME_MS}
             loop
           />
         ) : (
-          <PixelSprite name={intro} scale={scaleFor(intro, BANNER_PX)} />
+          <PixelSprite key={intro} name={intro} scale={scaleFor(intro, BANNER_PX)} />
         )}
       </span>
     </span>

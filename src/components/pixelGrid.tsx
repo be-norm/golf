@@ -33,11 +33,14 @@ export function mergedRects(
       }
       let rw = 1
       while (x + rw < w && !taken[y]![x + rw] && grid[y]![x + rw] === ch) rw += 1
+      // Deepening does NOT re-check `taken`, and cannot need to: rows are
+      // consumed top to bottom, so a cell below this run can only have been
+      // claimed by a rectangle that also covered this one — in which case we
+      // would have skipped it. Widening does need the check, because a run
+      // earlier in this row may already have grown down past us.
       let rh = 1
       grow: while (y + rh < h) {
-        for (let i = 0; i < rw; i++) {
-          if (taken[y + rh]![x + i] || grid[y + rh]![x + i] !== ch) break grow
-        }
+        for (let i = 0; i < rw; i++) if (grid[y + rh]![x + i] !== ch) break grow
         rh += 1
       }
       for (let j = 0; j < rh; j++) for (let i = 0; i < rw; i++) taken[y + j]![x + i] = true

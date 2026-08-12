@@ -188,10 +188,14 @@ const COIN_SMALL_FRAMES = once(() => [0, 1, 2, 3].map((i) => smallCoin(i, `cs${i
  * down the app. Loops for as long as the request takes, which is the point: it
  * is a progress indicator, not a celebration, and the wait is what it is for.
  *
- * Redrawn at 32 with the rest. It is a character sprite by the standard's
- * definition — it sits on a button over whatever is behind it — so it takes the
- * rim, and the card gets a paper tone and a ruled grid instead of two greys.
+ * BACK ON THE 16 GRID, and that is rule (2) applied rather than abandoned. It
+ * renders at 32 CSS pixels — a button's busy state and a one-line banner — so on
+ * a 32 grid every rim, rule and shadow was a single CSS pixel and the card came
+ * out half as chunky as everything around it. At 16 it is two pixels an art
+ * pixel, which is the app's idiom. The grid follows the RENDER SIZE; 32 is for
+ * things that play at 64 and up.
  */
+const CARD_RIM = '#08240f'
 const CARD_EDGE = '#15803d'
 const CARD_EDGE_LIT = '#22c55e'
 const PAPER = '#f5f3ea'
@@ -199,7 +203,6 @@ const PAPER_SH = '#cfcabc'
 const RULE = '#a9a394'
 const SCAN_LINE = '#7dff66'
 const SCAN_TRAIL = '#22c55e'
-const CARD_RIM = '#08240f'
 
 const SCAN_LEGEND: Record<string, string> = {
   o: CARD_RIM,
@@ -212,42 +215,32 @@ const SCAN_LEGEND: Record<string, string> = {
   T: SCAN_TRAIL,
 }
 
-const SCAN_ROWS = [6, 9, 12, 15, 18, 21, 24] as const
-
 function scanFrame(line: number): string[][] {
-  const g: string[][] = Array.from({ length: 32 }, () => Array<string>(32).fill(' '))
+  const g: string[][] = Array.from({ length: 16 }, () => Array<string>(16).fill(' '))
   const put = (x: number, y: number, ch: string) => {
-    if (x >= 0 && x < 32 && y >= 0 && y < 32) g[y]![x] = ch
+    if (x >= 0 && x < 16 && y >= 0 && y < 16) g[y]![x] = ch
   }
-  for (let y = 1; y < 31; y++) for (let x = 3; x < 29; x++) put(x, y, 'E')
-  for (let x = 3; x < 29; x++) {
-    put(x, 1, 'e')
-    put(x, 2, 'e')
-  }
-  for (let y = 3; y < 29; y++) for (let x = 5; x < 27; x++) put(x, y, 'P')
+  for (let y = 1; y < 15; y++) for (let x = 2; x < 14; x++) put(x, y, 'E')
+  for (let x = 2; x < 14; x++) put(x, 1, 'e')
+  for (let y = 3; y < 14; y++) for (let x = 3; x < 13; x++) put(x, y, 'P')
   // a ruled grid — rows of holes, two columns of scores
-  for (const y of SCAN_ROWS) for (let x = 5; x < 27; x++) put(x, y, 'R')
-  for (let y = 3; y < 29; y++) {
-    put(13, y, 'R')
-    put(20, y, 'R')
-  }
-  // the line, with a trail behind it
-  for (let x = 5; x < 27; x++) {
+  for (const y of [5, 8, 11]) for (let x = 3; x < 13; x++) put(x, y, 'R')
+  for (let y = 3; y < 14; y++) put(8, y, 'R')
+  for (let x = 3; x < 13; x++) put(x, 13, 'S')
+  for (let y = 3; y < 14; y++) put(12, y, 'S')
+  // the line, with a trail behind it — after the shadow, or it punches through
+  for (let x = 3; x < 13; x++) {
     put(x, line, 'L')
     if (line > 3) put(x, line - 1, 'T')
   }
-  // paper falls into shadow along its lower and right edges — AFTER the line,
-  // which otherwise punched a bright pixel through the shadow on every frame
-  for (let x = 5; x < 27; x++) put(x, 28, 'S')
-  for (let y = 3; y < 29; y++) put(26, y, 'S')
   const out = g.map((row) => [...row])
-  for (let y = 0; y < 32; y++) {
-    for (let x = 0; x < 32; x++) {
+  for (let y = 0; y < 16; y++) {
+    for (let x = 0; x < 16; x++) {
       if (g[y]![x] !== ' ') continue
       const touching = ([[1, 0], [-1, 0], [0, 1], [0, -1]] as const).some(([ax, ay]) => {
         const a = x + ax
         const b = y + ay
-        return a >= 0 && a < 32 && b >= 0 && b < 32 && g[b]![a] !== ' '
+        return a >= 0 && a < 16 && b >= 0 && b < 16 && g[b]![a] !== ' '
       })
       if (touching) out[y]![x] = 'o'
     }
@@ -256,7 +249,7 @@ function scanFrame(line: number): string[][] {
 }
 
 const SCAN_FRAMES = once(() =>
-  [4, 8, 12, 16, 20, 24, 27].map((y, i) => mergedRects(scanFrame(y), SCAN_LEGEND, `scan${i}`)),
+  [3, 5, 7, 9, 11, 13].map((y, i) => mergedRects(scanFrame(y), SCAN_LEGEND, `scan${i}`)),
 )
 
 /**
@@ -274,7 +267,7 @@ const SPRITES = {
   logo: { frames: COURSE_LOGO_FRAMES, w: BANNER_W, h: BANNER_H },
   'logo-idle': { frames: COURSE_IDLE_FRAMES, w: BANNER_W, h: BANNER_H },
   'flag-plant': { frames: COURSE_FLAG_PLANT_FRAMES, w: BANNER_W, h: BANNER_H },
-  scan: { frames: SCAN_FRAMES, w: 32, h: 32 },
+  scan: { frames: SCAN_FRAMES, w: 16, h: 16 },
 } as const satisfies Record<
   string,
   { frames: () => readonly ReactElement[]; w: number; h: number }

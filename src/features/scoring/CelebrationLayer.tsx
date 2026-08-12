@@ -89,9 +89,9 @@ const FAN = 22
 const SCENE_FRAME_MS = 170
 /**
  * A scene is sized in SCREEN PIXELS and the scale is derived from whatever grid
- * the sprite is drawn on — 5 for the wolf's 32, 10 for a 16-grid one. A fixed
- * scale would have been a constant that silently means a different size per
- * sprite, which is the trap this whole diff opened by making the grid
+ * the sprite is drawn on — 5 for the wolf's 32, and whatever the next one needs.
+ * A fixed scale would have been a constant that silently means a different size
+ * per sprite, which is the trap this whole diff opened by making the grid
  * per-sprite. Rounded, because the scale must stay an integer.
  */
 const SCENE_PX = 160
