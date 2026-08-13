@@ -498,24 +498,6 @@ describe('longDrive — carryovers', () => {
     expect(live.openBet).toBe('3 long drives riding · $18')
   })
 
-  /** LC6: an award outranks a missing score — these bets are decided on the
-   *  tee, so a designated hole with a recorded winner and no score is one
-   *  somebody played and never scored. See CTP's C11. */
-  it('LC6: a par 5 awarded but never scored still pays, and banks the carry', () => {
-    const round = carryRound()
-    const log = new EventLog()
-    scoreHoles(round, log, Array.from({ length: 14 }, (_, i) => i + 1))
-    award(log, 15, 'p-b') // tapped on the tee; nobody ever posts a score on 15
-    log.append({ type: 'round/completed' })
-    const ld = ldOf(round, log)
-
-    expect(ld.awards!(15).filter((a) => a.taken).map((a) => a.playerId)).toEqual(['p-b'])
-    expect(ld.holeResults[3]).toEqual({ hole: 15, kind: 'won', winnerId: 'p-b', units: 4 })
-    expect(ld.settlement.perPlayerCents['p-b']).toBe(2400)
-    assertZeroSum(ld.settlement)
-    expect(ld.carryDied).toBe(0)
-  })
-
   /** LC5: a legacy config with no `carryover` key still derives and does not
    *  carry — `deriveRound` makes a config its engine rejects INERT, so a
    *  required key would have emptied every stored Long Drive round. */

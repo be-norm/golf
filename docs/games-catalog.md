@@ -253,8 +253,14 @@ and the group may still be intending to record it. With carryovers on nothing is
 *unclaimed* (the value moved forward); only the final pile dies, and it dies on the last par 3
 the group actually PLAYED — not `ctx.lastPlayedHole`, which would put a CTP sentence on a par
 4's row, and not "the last par 3 on the card", which a round abandoned at the turn never
-reached. An award also outranks a missing score here: a par 3 with a recorded winner and no
-score is one somebody teed off on, so it settles rather than being skipped as unplayed.
+reached.
+**A score is the only evidence a hole was played**, and "an award is evidence too" was tried
+twice during review and reverted both times (see the comment on that gate in `awardPot.ts`).
+Unbounded it settles money on holes the group never reached; bounded to the frontier it moves
+the same silent void behind a bound and makes settled money depend on `ctx.lastPlayedHole`,
+so undoing an unrelated score un-pays an award. The affordance stays generous and the money
+stays conservative; the residual gap — a lit cell on a hole nobody scored — wants the
+affordance to say so, not the money to guess.
 The first `category: 'side'` and `family: 'award'` engine, so it is also what makes the
 picker's Side Bets section and its "Awards" heading real.
 

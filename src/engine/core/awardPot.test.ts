@@ -402,15 +402,18 @@ describe('deriveAwardPot — carryover', () => {
   })
 })
 
-describe('deriveAwardPot — an award outranks a missing score', () => {
+describe('deriveAwardPot — a score is the only evidence a hole was played', () => {
   /**
-   * These bets are decided ON THE TEE — you tap the grid standing there, before
-   * anybody writes a number down (MAI-46). So an eligible hole holding a
-   * recorded winner and no score is a hole somebody hit a shot on and never
-   * scored, not one the group never reached, and the MAI-38 skip must not
-   * swallow it: the grid keeps that cell LIT, so the money has to agree with it.
+   * THE AFFORDANCE IS GENEROUS, THE MONEY IS CONSERVATIVE, and the gap between
+   * them is deliberate. The grid offers a cell on any eligible hole until the
+   * round closes (MAI-46); the money requires somebody to have posted a score.
+   *
+   * "An award is evidence too" was tried twice and reverted both times — see
+   * the comment on this gate in `awardPot.ts`. This pins the rule that stands,
+   * so the next attempt starts by deleting a test rather than by discovering
+   * the same two regressions.
    */
-  it('settles an eligible hole that was awarded but never scored', () => {
+  it('ignores an award on an eligible hole nobody scored', () => {
     const round = potRound()
     const log = new EventLog()
     scoreHoles(round, log, [1]) // hole 2 is eligible and never scored
@@ -418,80 +421,59 @@ describe('deriveAwardPot — an award outranks a missing score', () => {
     log.append({ type: 'round/completed' })
     const pot = potOf(round, log)
 
-    expect(pot.holeResults[0]).toEqual({ hole: 2, kind: 'won', winnerId: 'p-b', units: 1 })
-    expect(pot.settlement.perPlayerCents['p-b']).toBe(600)
-    assertZeroSum(pot.settlement)
-    // …and the cell the money came from is the one the grid shows lit
+    expect(pot.holeResults).toEqual([])
+    expect(Object.values(pot.settlement.perPlayerCents).every((c) => c === 0)).toBe(true)
+    // …and the cell stays offered, and stays lit, so a mistap is still
+    // retractable. It is the MONEY that abstains, never the affordance.
     expect(pot.awards(2).filter((c) => c.taken).map((c) => c.playerId)).toEqual(['p-b'])
   })
 
-  /** …and it must not swallow the rule it sits beside: no score AND no award is
-   *  still a hole nobody played, absent from the results entirely. */
-  it('still skips an eligible hole with neither a score nor an award', () => {
+  /** The same rule is what stops a stray tap on a hole the group never reached
+   *  from settling anything — no separate bound needed, and no dependence on
+   *  `ctx.lastPlayedHole` that an unrelated score edit could move. */
+  it('ignores an award on a hole the group never reached, carry and all', () => {
     const round = potRound()
     const log = new EventLog()
-    scoreHoles(round, log, [1, 2, 3])
-    log.append({ type: 'round/completed' })
-
-    expect(potOf(round, log).holeResults).toEqual([{ hole: 2, kind: 'unclaimed' }])
-  })
-
-  /** An award naming a ghost is not evidence of anything — it stays inert
-   *  rather than resurrecting a hole nobody played. */
-  it('does not treat an award naming a non-player as evidence the hole was played', () => {
-    const round = potRound()
-    const log = new EventLog()
-    scoreHoles(round, log, [1])
-    award(log, 2, 'p-nobody')
-    log.append({ type: 'round/completed' })
-
-    expect(potOf(round, log).holeResults).toEqual([])
-  })
-})
-
-describe('deriveAwardPot — how far an award counts as evidence', () => {
-  /**
-   * THE BOUND, and it is the whole of the rule above. The award grid has no
-   * frontier gate by design (MAI-46) and the scoring screen walks to the last
-   * hole of the card, so a stray tap three holes ahead of the group is
-   * reachable. Unbounded, "an award means the hole was played" pays real money
-   * on a hole nobody ever stood on — and with carryovers it banks a pile that
-   * should have died there. That is MAI-38's claim about golf that never
-   * happened, arrived at from the opposite direction.
-   */
-  it('refuses an award on a hole the group never reached', () => {
-    const round = potRound()
-    const log = new EventLog()
-    scoreHoles(round, log, [1]) // they stopped on 1; hole 5 was never walked to
-    award(log, 5, 'p-b')
+    // played through 5, so eligible holes 2 and 5 both carry; hole 8 was never
+    // walked to, and the tap on it is the stray one
+    scoreHoles(round, log, [1, 2, 3, 4, 5])
+    award(log, 8, 'p-b')
     log.append({ type: 'round/completed' })
     const pot = carry(round, log)
 
-    expect(pot.holeResults.map((r) => r.hole)).not.toContain(5)
+    expect(pot.holeResults).toEqual([
+      { hole: 2, kind: 'carried', carryAfter: 1 },
+      { hole: 5, kind: 'carried', carryAfter: 2 },
+    ])
+    expect(pot.carryDied).toBe(2)
     expect(Object.values(pot.settlement.perPlayerCents).every((c) => c === 0)).toBe(true)
-    // …and the grid still offers the cell, because retracting a mistap has to
-    // stay possible — it is the MONEY that refuses, not the affordance
-    expect(pot.awards(5)).toHaveLength(4)
   })
 
   /**
-   * …while the hole they HAD walked to still counts. The difference is one
-   * position: `lastPlayedHole` plus the tee they were standing on. Scoring
-   * stops at hole 1, so hole 2 is that tee and its award is evidence; hole 5
-   * is two further on and is not.
+   * AND HOW FAR PLAY WENT PAST THE HOLE CHANGES NOTHING — which is what kills
+   * the frontier-bounded version specifically. That one asked whether the group
+   * had REACHED the hole (`ctx.lastPlayedHole` plus the tee they walked to), so
+   * an unscored hole 5 settled or not depending on whether hole 9 had a score
+   * on it. Undoing an unrelated entry then un-paid a settled award with no line
+   * or note saying where the money went, and retraction equivalence cannot see
+   * it because the retracted event is not the award.
+   *
+   * B is given hole 5, which nobody scores, and hole 8, which everybody does.
+   * Exactly one of them pays.
    */
-  it('accepts an award on the tee the group was standing on', () => {
+  it('pays nothing for an unscored hole however far play went past it', () => {
     const round = potRound()
     const log = new EventLog()
-    scoreHoles(round, log, [1])
-    award(log, 2, 'p-b')
+    scoreHoles(round, log, [1, 2, 3, 4, 6, 7, 8, 9]) // hole 5 skipped entirely
+    award(log, 5, 'p-b')
+    award(log, 8, 'p-b')
     log.append({ type: 'round/completed' })
+    // holes 2, 5 and 8 eligible, so hole 8 is a real award and hole 5 a void one
+    const pot = potOf(round, log, { eligible: CARRY_ELIGIBLE })
 
-    expect(carry(round, log).holeResults[0]).toEqual({
-      hole: 2,
-      kind: 'won',
-      winnerId: 'p-b',
-      units: 1,
-    })
+    expect(pot.holeResults.map((r) => r.hole)).toEqual([2, 8])
+    // ONE hole's worth: $2 from each of the other three, and nothing for hole 5
+    expect(pot.settlement.perPlayerCents['p-b']).toBe(600)
+    assertZeroSum(pot.settlement)
   })
 })
