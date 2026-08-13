@@ -251,17 +251,16 @@ function derive(
      *
      * `carrying + 1`, because that is `units` and `units` is what settles:
      * quoting the carried pile alone understates the hole the group is standing
-     * on. Dropped once it IS money and once it is dead. No "is there a hole
-     * left" guard of its own: the kit refuses to carry onto a hole that does
-     * not exist, so `carrying > 0` means the pile really is riding somewhere.
+     * on. `carrying > 0` is the whole guard — the kit zeroes it on a dead pile
+     * and refuses to carry off the last designated hole, so a reported pile is
+     * one some designated hole still holds, with its cell still tappable.
      */
-    ...(carrying > 0 &&
-      carryDied === 0 && {
-        openBet:
-          others > 0
-            ? `${driveLabel(carrying + 1)} riding · ${formatCents((carrying + 1) * stakeCents * others)}`
-            : `${driveLabel(carrying + 1)} riding`,
-      }),
+    ...(carrying > 0 && {
+      openBet:
+        others > 0
+          ? `${driveLabel(carrying + 1)} riding · ${formatCents((carrying + 1) * stakeCents * others)}`
+          : `${driveLabel(carrying + 1)} riding`,
+    }),
     holeSummary,
     requiredInputs: () => [],
     awards,

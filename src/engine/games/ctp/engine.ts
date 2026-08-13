@@ -214,18 +214,20 @@ function derive(
      * rode onto.
      *
      * Dropped the moment it IS money, and the moment it is dead: the aggregate
-     * reports the first itself, and `notes` reports the second. It needs no
-     * "is there a par 3 left" guard of its own, because the kit already
-     * refuses to carry onto a hole that does not exist — so `carrying > 0`
-     * means the pile really is riding somewhere.
+     * reports the first itself, and `notes` reports the second. `carrying > 0`
+     * is the whole guard — the kit zeroes it on a dead pile, and refuses to
+     * carry off the last par 3 at all, so a pile that is reported is a pile
+     * some par 3 still holds and whose cell is still tappable. (Not the same
+     * claim as "a par 3 is still to be PLAYED": once the card is walked and
+     * the round is not yet closed, the money is collected by recording the
+     * hole rather than by hitting a shot.)
      */
-    ...(carrying > 0 &&
-      carryDied === 0 && {
-        openBet:
-          others > 0
-            ? `${ctpLabel(carrying + 1)} riding · ${formatCents((carrying + 1) * stakeCents * others)}`
-            : `${ctpLabel(carrying + 1)} riding`,
-      }),
+    ...(carrying > 0 && {
+      openBet:
+        others > 0
+          ? `${ctpLabel(carrying + 1)} riding · ${formatCents((carrying + 1) * stakeCents * others)}`
+          : `${ctpLabel(carrying + 1)} riding`,
+    }),
     holeSummary,
     requiredInputs: () => [],
     awards,

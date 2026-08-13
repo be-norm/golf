@@ -112,7 +112,16 @@ export interface AwardPot {
    * money rather than the hole count.
    */
   wonByPlayer: Map<Uuid, number>
-  /** stakes riding on the next eligible hole; always 0 with carryover off */
+  /**
+   * Stakes riding on the next eligible hole; always 0 with carryover off, and
+   * ZEROED ONCE THE PILE IS DEAD — a dead pile is not riding anywhere, and
+   * `carryDied` is where it goes on being counted.
+   *
+   * Deliberately not "the pile, live or dead": the kit exists so a third award
+   * game inherits these answers, and a field whose correct use requires
+   * remembering to pair it with another one is a trap. Read alone it would have
+   * advertised a live bet on a settled round.
+   */
   carrying: number
   /**
    * Carried stakes that can never be won now — the round is over with the pile
@@ -195,6 +204,15 @@ export function deriveAwardPot(
     if (eligible(h)) lastEligibleIdx = i
   })
 
+  // THE TEE THE GROUP WAS STANDING ON when play stopped, as a position — the
+  // last hole anybody scored, plus the one they had walked to. It bounds how
+  // far an award counts as evidence that a hole was played; see the gate below.
+  // `-1` for a round with no scores at all leaves the first hole in bounds,
+  // which is where such a group is standing.
+  const lastPlayedIdx =
+    ctx.lastPlayedHole === undefined ? -1 : ctx.holesPlayed.indexOf(ctx.lastPlayedHole)
+  const reachedIdx = lastPlayedIdx + 1
+
   const settlement: Settlement = emptySettlement(playerIds)
   const wonByPlayer = new Map<Uuid, number>(playerIds.map((id) => [id, 0]))
   const holeResults: AwardHoleResult[] = []
@@ -216,14 +234,21 @@ export function deriveAwardPot(
     // either, for the same reason: no golf happened on it to leave money over.
     //
     // AN AWARD IS ITSELF EVIDENCE THE HOLE WAS PLAYED, though, and outranks a
-    // missing score. These bets are decided on the tee — you tap the grid
-    // standing there, before anybody writes a number down — so a hole carrying
-    // a recorded winner and no score is a hole somebody hit a shot on and then
-    // never scored, not one the group never reached. Without this the award
-    // grid keeps that cell LIT while the money silently ignores it, and (with
-    // carryovers) the whole pile dies reporting "no par 3 left to win them"
-    // while a par 3 with a named winner is sitting right there.
-    if (!ctx.anyScored(hole) && winnerId === undefined) return
+    // missing score AS FAR AS THE GROUP GOT. These bets are decided on the tee
+    // — you tap the grid standing there, before anybody writes a number down —
+    // so the hole they walked to and never scored is one somebody hit a shot
+    // on. Without this the award grid keeps that cell LIT while the money
+    // silently ignores it, and (with carryovers) the whole pile dies reporting
+    // "no par 3 left to win them" while a par 3 with a named winner sits there.
+    //
+    // BOUNDED BY THE FRONTIER, and the bound is the whole of it. The award grid
+    // has no frontier gate by design (MAI-46) and the scoring screen's arrow
+    // walks to the last hole of the card, so a stray tap three holes ahead is
+    // reachable — and unbounded, that tap settles real money on a hole the
+    // group never reached, banking a pile that should have died. Which is
+    // exactly the claim about golf that never happened that MAI-38 refuses.
+    // A POSITION, not a hole number: an 18 from 10 walks 12 before 4.
+    if (!ctx.anyScored(hole) && (winnerId === undefined || idx > reachedIdx)) return
     if (!ctx.finalized(hole)) {
       holeResults.push({ hole, kind: 'pending' })
       return
@@ -305,7 +330,8 @@ export function deriveAwardPot(
     holeResults,
     settlement,
     wonByPlayer,
-    carrying: carry,
+    // dead is not riding — see `carrying`'s docstring
+    carrying: carryDied > 0 ? 0 : carry,
     carryDied,
     ...(carryDied > 0 && carriedAt !== undefined && { diedAt: carriedAt }),
     awards,

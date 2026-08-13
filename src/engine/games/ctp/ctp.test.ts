@@ -712,6 +712,36 @@ describe('ctp — carryovers', () => {
     expect(ctp.notes).toBeUndefined()
   })
 
+  /**
+   * C11c — THE BOUND ON C11, and the reason it has one.
+   *
+   * The group quits after 9, so they are standing on the 10th tee. A stray tap
+   * on par 3 TWELVE is not evidence that anybody played it — nobody ever walked
+   * there. Unbounded, "an award means the hole was played" pays $18 on a hole
+   * with no scores at all, banks a pile that should have died, and grows a
+   * ledger row for golf that never happened.
+   */
+  it('C11c: an award on a par 3 the group never reached moves no money', () => {
+    const round = carryRound()
+    const log = new EventLog()
+    scoreHoles(round, log, [1, 2, 3, 4, 5, 6, 7, 8, 9])
+    award(log, 12, 'p-b')
+    log.append({ type: 'round/completed' })
+    const ctp = ctpOf(round, log)
+
+    expect(ctp.holeResults).toEqual([
+      { hole: 4, kind: 'carried', carryAfter: 1 },
+      { hole: 7, kind: 'carried', carryAfter: 2 },
+    ])
+    expect(Object.values(ctp.settlement.perPlayerCents).every((c) => c === 0)).toBe(true)
+    // the pile dies on 7, where it was actually sitting
+    expect(ctp.carryDied).toBe(2)
+    expect(ctp.notes).toEqual(['2 CTPs died unwon — no par 3 left to win them'])
+    // …and a dead pile is not riding, so the bar drops the open-bet row
+    expect(ctp.carrying).toBe(0)
+    expect(ctp.openBet).toBeUndefined()
+  })
+
   /** …and the rule it must NOT swallow: a par 3 with neither a score nor an
    *  award is still a hole nobody played, and stays out of the results
    *  entirely (MAI-38). C7 covers the carry side; this pins the boundary. */

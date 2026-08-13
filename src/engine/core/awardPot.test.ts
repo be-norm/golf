@@ -354,7 +354,12 @@ describe('deriveAwardPot — carryover', () => {
 
     log.append({ type: 'round/completed' })
     const done = carry(round, log)
-    expect(done.carrying).toBe(3)
+    // A DEAD PILE IS NOT RIDING. `carryDied` goes on counting it; `carrying`
+    // means "on offer on the next eligible hole" and nothing is. A third award
+    // game reading `carrying` alone must not advertise a live bet on a settled
+    // round, so the kit zeroes it rather than leaving each engine to remember
+    // to pair it with `carryDied`.
+    expect(done.carrying).toBe(0)
     expect(done.carryDied).toBe(3)
     expect(done.diedAt).toBe(8)
     // nothing was ever WON, so no line moved — dead money is the engine's to
@@ -441,5 +446,52 @@ describe('deriveAwardPot — an award outranks a missing score', () => {
     log.append({ type: 'round/completed' })
 
     expect(potOf(round, log).holeResults).toEqual([])
+  })
+})
+
+describe('deriveAwardPot — how far an award counts as evidence', () => {
+  /**
+   * THE BOUND, and it is the whole of the rule above. The award grid has no
+   * frontier gate by design (MAI-46) and the scoring screen walks to the last
+   * hole of the card, so a stray tap three holes ahead of the group is
+   * reachable. Unbounded, "an award means the hole was played" pays real money
+   * on a hole nobody ever stood on — and with carryovers it banks a pile that
+   * should have died there. That is MAI-38's claim about golf that never
+   * happened, arrived at from the opposite direction.
+   */
+  it('refuses an award on a hole the group never reached', () => {
+    const round = potRound()
+    const log = new EventLog()
+    scoreHoles(round, log, [1]) // they stopped on 1; hole 5 was never walked to
+    award(log, 5, 'p-b')
+    log.append({ type: 'round/completed' })
+    const pot = carry(round, log)
+
+    expect(pot.holeResults.map((r) => r.hole)).not.toContain(5)
+    expect(Object.values(pot.settlement.perPlayerCents).every((c) => c === 0)).toBe(true)
+    // …and the grid still offers the cell, because retracting a mistap has to
+    // stay possible — it is the MONEY that refuses, not the affordance
+    expect(pot.awards(5)).toHaveLength(4)
+  })
+
+  /**
+   * …while the hole they HAD walked to still counts. The difference is one
+   * position: `lastPlayedHole` plus the tee they were standing on. Scoring
+   * stops at hole 1, so hole 2 is that tee and its award is evidence; hole 5
+   * is two further on and is not.
+   */
+  it('accepts an award on the tee the group was standing on', () => {
+    const round = potRound()
+    const log = new EventLog()
+    scoreHoles(round, log, [1])
+    award(log, 2, 'p-b')
+    log.append({ type: 'round/completed' })
+
+    expect(carry(round, log).holeResults[0]).toEqual({
+      hole: 2,
+      kind: 'won',
+      winnerId: 'p-b',
+      units: 1,
+    })
   })
 })
