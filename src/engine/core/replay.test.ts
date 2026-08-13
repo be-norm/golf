@@ -194,6 +194,33 @@ describe('replay invariants (fast-check)', () => {
   })
 
   /**
+   * THE SAME QUESTION ASKED OF THE CARRY, and it needs asking separately because
+   * a carry is invisible in the two places you would look for it. It appends no
+   * event of its own — it is a CONFIG flag reinterpreting award events that were
+   * already being dealt — so the "deals every kind" check above cannot see it,
+   * and it moves money on a hole that was already moving money, so the "reaches
+   * a settlement" check above passes whether or not a single pile ever banked.
+   *
+   * A drawn `carryover` that never actually banked a multi-unit hole would leave
+   * every property in this file running over the carry path in name only, which
+   * is precisely the failure the two checks above were written to refuse. So the
+   * fuzz has to produce the thing itself: a hole worth more than one award.
+   */
+  it('the fuzz actually deals a carry that banks', () => {
+    for (const type of ['ctp', 'longDrive'] as const) {
+      const banked = fc.sample(arbitraryRoundAndEvents(), { numRuns: 200 }).some(({ round, log }) => {
+        const game = round.games.find((g) => g.type === type)
+        if (!game || (game.config as { carryover?: boolean }).carryover !== true) return false
+        const d = deriveRound(round, log.events).derivations.get(game.gameId)
+        const results = (d as { holeResults?: { kind: string; units?: number }[] } | undefined)
+          ?.holeResults
+        return (results ?? []).some((r) => r.kind === 'won' && (r.units ?? 1) > 1)
+      })
+      expect(banked, `the fuzz never banks a carried ${type}`).toBe(true)
+    }
+  })
+
+  /**
    * A KNOWN VIOLATION, asserted so it self-retires. Wolf itemises per-player
    * points ("A — 3 pts") rather than per-transaction money, so a player whose
    * points land on the average nets zero and still earns a settlement row.

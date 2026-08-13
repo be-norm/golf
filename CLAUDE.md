@@ -143,8 +143,15 @@ built the way it was.
 - `src/engine/core/` — events, replay, handicap allocation, money, plus the shared game kits
   (`match` for match play + the one `closeMargin`, `points` for rank-points/points-money,
   `standings`, `awardPot` for one-winner-per-eligible-hole bets — CTP and Long Drive, and the
-  place the pending/unclaimed rules live so a third award game inherits them rather than
-  rediscovering them); `src/engine/games/<game>/` —
+  place the pending/unclaimed AND carry rules live so a third award game inherits them rather
+  than rediscovering them. The carry is where those two rules pull opposite ways and both are
+  right: dead money waits for `ctx.completed` because an award is unclaimed exactly when it
+  can no longer be claimed, while a carry is declared on `finalized` because its whole value
+  is being known ON THE NEXT TEE — gate it on completion and you price it after the last
+  chance to play for it. What keeps that honest is that a hole carries only when a later
+  ELIGIBLE hole exists in the walk, by POSITION: otherwise the last par 3 announces a pile
+  riding onto a par 3 that doesn't exist, which is MAI-38's sentence, and on a round started
+  at 10 the last par 3 is 7, not 16); `src/engine/games/<game>/` —
   one engine per game + golden fixtures; `src/engine/catalog.ts` — GameEngine registry
 - `src/db/` — Dexie schema + repos; `src/features/` — screens; `src/components/` — primitives;
   `src/lib/` — app-layer helpers shared across features (`date.ts` is the fixed, locale-independent

@@ -173,15 +173,29 @@ const wolfFuzz: GameFuzz = {
  * others still lose (which would be zero-sum's first real counterexample).
  * The seeded hole is deliberately NOT filtered to par 3s: an award on a par 4
  * is inert, and the fuzz should keep proving it.
+ *
+ * CARRYOVER IS DRAWN, exactly as `skinsFuzz` draws its own, and it is not
+ * bookkeeping. A carry is a POSITIONAL question — which eligible hole comes
+ * next — and invariant #9 says positional bugs are invisible to every
+ * order-blind property here. The one thing that can see them is
+ * `arbitraryRotationPair`, which compares the LEDGER by position: from hole 10
+ * the par 3s walk 12, 16, 4, 7, so a carry off 16 must land on 4 and an engine
+ * reaching for `Math.max` of the numbers lands it on nothing. Leaving this at a
+ * constant config would run every property in the suite over the carry path
+ * exactly zero times.
+ *
+ * Safe for the rotation pair for the reason a nominated hole list is not (see
+ * `longDriveFuzz`): a boolean is the same on both cards, and the awards it
+ * interacts with are seeded by POSITION, so the two walks carry identically.
  */
 const ctpFuzz: GameFuzz = {
   type: 'ctp',
   eligible: (n) => n >= 2,
   arbitrary: () =>
     fc
-      .array(fc.integer({ min: 0, max: 5 }), { minLength: 18, maxLength: 18 })
-      .map((seeds) => (ids: readonly Uuid[]) => ({
-        config: { stakeCents: 200 },
+      .tuple(fc.boolean(), fc.array(fc.integer({ min: 0, max: 5 }), { minLength: 18, maxLength: 18 }))
+      .map(([carryover, seeds]) => (ids: readonly Uuid[]) => ({
+        config: { stakeCents: 200, carryover },
         events: (hole: number, idx: number) => {
           const seed = seeds[idx]!
           if (seed === 4) return []
@@ -213,9 +227,17 @@ const longDriveFuzz: GameFuzz = {
   eligible: (n) => n >= 2,
   arbitrary: () =>
     fc
-      .tuple(fc.boolean(), fc.array(fc.integer({ min: 0, max: 5 }), { minLength: 18, maxLength: 18 }))
-      .map(([everyHole, seeds]) => (ids: readonly Uuid[]) => ({
-        config: { stakeCents: 200, holes: everyHole ? 'all' : 'par5s' },
+      .tuple(
+        fc.boolean(),
+        // …and carryover, for `ctpFuzz`'s reason. `holes: 'all'` crossed with a
+        // carry is the degenerate end of the rule — every hole eligible, so the
+        // pile rolls hole to hole — which is worth dealing beside the sparse
+        // par-5 case rather than only in a golden.
+        fc.boolean(),
+        fc.array(fc.integer({ min: 0, max: 5 }), { minLength: 18, maxLength: 18 }),
+      )
+      .map(([everyHole, carryover, seeds]) => (ids: readonly Uuid[]) => ({
+        config: { stakeCents: 200, holes: everyHole ? 'all' : 'par5s', carryover },
         // one seed per hole: 0–3 award it to that player, 4 leave it
         // unawarded, 5 award it to somebody who ISN'T in the round — which
         // must move no money rather than pay a ghost. Not filtered to

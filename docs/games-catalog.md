@@ -240,18 +240,31 @@ the hole has no value. Modelling the throw as a prompt would nag on every hole.
 ### 30. Closest to the Pin (CTP) `[shipped]` — Inputs: one award per eligible hole (MAI-46).
 The most-played side bet in golf, and the award channel's first game. Par 3s only (the engine
 decides eligibility from `courseSnapshot` par, so the award grid simply doesn't offer it
-elsewhere). One winner per hole collects the stake from every other player. No carryover: each
-par 3 stands alone.
+elsewhere). One winner per hole collects the stake from every other player.
+**Carryover is config, default off.** On, an unclaimed par 3 rolls its stake onto the next
+PAR 3 — the par 4s and 5s in between are no part of this bet, however many there are, which
+falls out of the kit visiting only eligible holes. Off, each par 3 stands alone, which is
+what every round predating the option does: `carryover` is `.optional()` precisely because
+`deriveRound` makes a config its own engine rejects INERT, so a required key would have
+silently emptied every stored CTP round.
 **Dead money:** an unawarded par 3 goes on `notes`, never a $0 settlement line (MAI-40) — and
 only once the whole card is played out, because `finalized` is true from the next tee onwards
-and the group may still be intending to record it. The first `category: 'side'` and
-`family: 'award'` engine, so it is also what makes the picker's Side Bets section and its
-"Awards" heading real.
+and the group may still be intending to record it. With carryovers on nothing is ever
+*unclaimed* (the value moved forward); only the final pile dies, and it dies on the last par 3
+the group actually PLAYED — not `ctx.lastPlayedHole`, which would put a CTP sentence on a par
+4's row, and not "the last par 3 on the card", which a round abandoned at the turn never
+reached. An award also outranks a missing score here: a par 3 with a recorded winner and no
+score is one somebody teed off on, so it settles rather than being skipped as unplayed.
+The first `category: 'side'` and `family: 'award'` engine, so it is also what makes the
+picker's Side Bets section and its "Awards" heading real.
 
 ### 31. Long Drive `[shipped]` — Tier 1. Inputs: one award per eligible hole (MAI-57).
-One winner per designated hole collects the stake from every other player; nothing carries.
+One winner per designated hole collects the stake from every other player.
 Fairway-only is the common house rule and the app does not model it — the group judges, the
-app records who won.
+app records who won. **Carryover is config, default off**, identical to CTP's: on, an
+unclaimed hole rolls onto the next DESIGNATED one. `holes: 'all'` crossed with a carry is the
+degenerate end of that rule (every hole eligible, so the pile rolls hole to hole) and needs
+no special case.
 **Eligible holes are CONFIG, not derivable**, since the group picks them at the tee: `par5s`
 (par 5 *or longer*, so a par 6 counts), `all`, or a nominated `number[]`. That third option
 is what the `holes` `ConfigFieldSpec` kind exists for — presets declared by the engine plus a

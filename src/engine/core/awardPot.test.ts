@@ -29,16 +29,25 @@ function potRound(players = FOUR()) {
   return makeRound({ players, holes: 'front9', games: [{ type: 'probe', config: {} }] })
 }
 
-function potOf(round: ReturnType<typeof makeRound>, log: EventLog, stakeCents = 200): AwardPot {
+function potOf(
+  round: ReturnType<typeof makeRound>,
+  log: EventLog,
+  opts: { stakeCents?: number; carryover?: boolean; eligible?: readonly number[] } = {},
+): AwardPot {
+  const { stakeCents = 200, carryover = false, eligible = ELIGIBLE } = opts
   const effective = effectiveEvents(log.events)
   const ctx = buildRoundContext(round, effective)
   return deriveAwardPot(ctx, gameEventsFor(effective, 'game-1'), {
     gameId: 'game-1',
     stakeCents,
-    eligible: (hole) => (ELIGIBLE as readonly number[]).includes(hole),
+    eligible: (hole) => eligible.includes(hole),
     group: 'Prize',
     eventKind: 'probe/award',
-    lineLabel: (hole, winner) => `Hole ${hole} — ${winner}`,
+    carryover,
+    // the kit hands `units` to every game; this one spends it so the fixtures
+    // below can read the multiplier off the line rather than only off the money
+    lineLabel: (hole, winner, units) =>
+      units > 1 ? `Hole ${hole} — ${winner} ×${units}` : `Hole ${hole} — ${winner}`,
   })
 }
 
@@ -68,7 +77,7 @@ describe('deriveAwardPot — which holes report what', () => {
     scoreHoles(round, log, [1, 2, 3, 4, 5])
     award(log, 2, 'p-b')
     expect(potOf(round, log).holeResults).toEqual([
-      { hole: 2, kind: 'won', winnerId: 'p-b' },
+      { hole: 2, kind: 'won', winnerId: 'p-b', units: 1 },
       { hole: 5, kind: 'pending' },
     ])
   })
@@ -156,7 +165,7 @@ describe('deriveAwardPot — the money', () => {
     const pot = potOf(round, log)
 
     expect(pot.settlement.lines).toHaveLength(1)
-    expect(pot.holeResults[0]).toEqual({ hole: 2, kind: 'won', winnerId: 'p-d' })
+    expect(pot.holeResults[0]).toEqual({ hole: 2, kind: 'won', winnerId: 'p-d', units: 1 })
   })
 
   /**
@@ -176,7 +185,7 @@ describe('deriveAwardPot — the money', () => {
     log.append({ type: 'round/completed' })
     const pot = potOf(round, log)
 
-    expect(pot.holeResults[0]).toEqual({ hole: 2, kind: 'won', winnerId: 'p-a' })
+    expect(pot.holeResults[0]).toEqual({ hole: 2, kind: 'won', winnerId: 'p-a', units: 1 })
     expect(pot.settlement.lines).toHaveLength(0)
     expect(pot.settlement.perPlayerCents).toEqual({ 'p-a': 0 })
   })
@@ -259,5 +268,178 @@ describe('deriveAwardPot — the cells it offers', () => {
       data: { hole: 2, playerId: 'p-a' },
     })
     expect(potOf(round, log).awards(2).some((c) => c.taken)).toBe(false)
+  })
+})
+
+/**
+ * THE CARRY'S HALF OF THE CLASSIFICATION TABLE, stated against the kit for the
+ * same reason as the block at the top of this file: the next award game should
+ * inherit these answers rather than rediscover them by reading CTP.
+ *
+ * Three eligible holes on the front 9 — 2, 5 and 8 — with holes 3, 4, 6 and 7
+ * ineligible and in between, which is what makes "it only ever carries onto an
+ * eligible hole" a real assertion.
+ */
+const CARRY_ELIGIBLE = [2, 5, 8] as const
+const carry = (round: ReturnType<typeof makeRound>, log: EventLog) =>
+  potOf(round, log, { carryover: true, eligible: CARRY_ELIGIBLE })
+
+describe('deriveAwardPot — carryover', () => {
+  it('rolls an unawarded hole onto the next ELIGIBLE hole, never the next one', () => {
+    const round = potRound()
+    const log = new EventLog()
+    scoreHoles(round, log, [1, 2, 3, 4, 5])
+    award(log, 5, 'p-b')
+    const pot = carry(round, log)
+
+    // holes 3 and 4 are finalized and ineligible: they are not in the results
+    // at all, and they added nothing to the pile
+    expect(pot.holeResults).toEqual([
+      { hole: 2, kind: 'carried', carryAfter: 1 },
+      { hole: 5, kind: 'won', winnerId: 'p-b', units: 2 },
+    ])
+    expect(pot.settlement.lines.map((l) => l.label)).toEqual(['Hole 5 — B ×2'])
+    // 2 × $2 = $4 from each of the other three
+    expect(pot.settlement.perPlayerCents).toEqual({
+      'p-a': -400,
+      'p-b': 1200,
+      'p-c': -400,
+      'p-d': -400,
+    })
+    assertZeroSum(pot.settlement)
+    // the subtitle counts what the money counts, so a doubled hole reads as 2
+    expect(pot.wonByPlayer.get('p-b')).toBe(2)
+    expect(pot.carrying).toBe(0)
+  })
+
+  /**
+   * THE LOOKAHEAD. Hole 8 is the last eligible hole of the walk, so nothing can
+   * carry off it — the stake is sitting on hole 8 itself, whose cell is still
+   * lit. Saying "carried" here would promise a roll onto a hole that does not
+   * exist, which is MAI-38's exact sentence.
+   *
+   * Skins' gate for this (every hole finalized) is unavailable to an award
+   * game: it fires the moment one player picks up, which is the regression the
+   * block at the top of this file exists to prevent. Hence a positional
+   * question instead.
+   */
+  it('does not carry off the last eligible hole while the round is live', () => {
+    const round = potRound()
+    const log = new EventLog()
+    scoreHoles(round, log, [1, 2, 3, 4, 5, 6, 7, 8, 9])
+    for (const hole of [2, 5]) award(log, hole, 'p-a')
+    const live = carry(round, log)
+
+    expect(live.holeResults[2]).toEqual({ hole: 8, kind: 'pending' })
+    expect(live.carrying).toBe(0)
+    expect(live.carryDied).toBe(0)
+    expect(live.diedAt).toBeUndefined()
+
+    log.append({ type: 'round/completed' })
+    const done = carry(round, log)
+    expect(done.holeResults[2]).toEqual({ hole: 8, kind: 'carried', carryAfter: 1 })
+    expect(done.carryDied).toBe(1)
+    expect(done.diedAt).toBe(8)
+  })
+
+  /** Dead exactly when it can no longer be claimed — `ctx.completed`, the same
+   *  gate as `unclaimed`, and `diedAt` is the eligible hole it was sitting on. */
+  it('kills the pile only once the round is over, on the last eligible hole', () => {
+    const round = potRound()
+    const log = new EventLog()
+    scoreHoles(round, log, [1, 2, 3, 4, 5, 6, 7, 8, 9])
+    const live = carry(round, log)
+    expect(live.carrying).toBe(2) // holes 2 and 5; hole 8 has nowhere to go yet
+    expect(live.carryDied).toBe(0)
+
+    log.append({ type: 'round/completed' })
+    const done = carry(round, log)
+    expect(done.carrying).toBe(3)
+    expect(done.carryDied).toBe(3)
+    expect(done.diedAt).toBe(8)
+    // nothing was ever WON, so no line moved — dead money is the engine's to
+    // narrate on `notes`, never a $0 row (MAI-40)
+    expect(done.settlement.lines).toHaveLength(0)
+  })
+
+  /** An eligible hole nobody played leaves no money over, so it must not swell
+   *  the pile — the same rule that keeps it out of `unclaimed` (MAI-38). */
+  it('never carries a hole nobody played', () => {
+    const round = potRound()
+    const log = new EventLog()
+    scoreHoles(round, log, [1, 2, 3]) // holes 5 and 8 never reached
+    log.append({ type: 'round/completed' })
+    const pot = carry(round, log)
+
+    expect(pot.holeResults).toEqual([{ hole: 2, kind: 'carried', carryAfter: 1 }])
+    expect(pot.carryDied).toBe(1)
+    expect(pot.diedAt).toBe(2)
+  })
+
+  /** With carryover off nothing carries and every hole pays one unit — the
+   *  regression bar for the whole block above. */
+  it('carries nothing, and pays single units, when the flag is off', () => {
+    const round = potRound()
+    const log = new EventLog()
+    scoreHoles(round, log, [1, 2, 3, 4, 5, 6, 7, 8, 9])
+    award(log, 5, 'p-b')
+    log.append({ type: 'round/completed' })
+    const pot = potOf(round, log, { eligible: CARRY_ELIGIBLE })
+
+    expect(pot.holeResults).toEqual([
+      { hole: 2, kind: 'unclaimed' },
+      { hole: 5, kind: 'won', winnerId: 'p-b', units: 1 },
+      { hole: 8, kind: 'unclaimed' },
+    ])
+    expect(pot.carrying).toBe(0)
+    expect(pot.carryDied).toBe(0)
+    expect(pot.settlement.perPlayerCents['p-b']).toBe(600)
+  })
+})
+
+describe('deriveAwardPot — an award outranks a missing score', () => {
+  /**
+   * These bets are decided ON THE TEE — you tap the grid standing there, before
+   * anybody writes a number down (MAI-46). So an eligible hole holding a
+   * recorded winner and no score is a hole somebody hit a shot on and never
+   * scored, not one the group never reached, and the MAI-38 skip must not
+   * swallow it: the grid keeps that cell LIT, so the money has to agree with it.
+   */
+  it('settles an eligible hole that was awarded but never scored', () => {
+    const round = potRound()
+    const log = new EventLog()
+    scoreHoles(round, log, [1]) // hole 2 is eligible and never scored
+    award(log, 2, 'p-b')
+    log.append({ type: 'round/completed' })
+    const pot = potOf(round, log)
+
+    expect(pot.holeResults[0]).toEqual({ hole: 2, kind: 'won', winnerId: 'p-b', units: 1 })
+    expect(pot.settlement.perPlayerCents['p-b']).toBe(600)
+    assertZeroSum(pot.settlement)
+    // …and the cell the money came from is the one the grid shows lit
+    expect(pot.awards(2).filter((c) => c.taken).map((c) => c.playerId)).toEqual(['p-b'])
+  })
+
+  /** …and it must not swallow the rule it sits beside: no score AND no award is
+   *  still a hole nobody played, absent from the results entirely. */
+  it('still skips an eligible hole with neither a score nor an award', () => {
+    const round = potRound()
+    const log = new EventLog()
+    scoreHoles(round, log, [1, 2, 3])
+    log.append({ type: 'round/completed' })
+
+    expect(potOf(round, log).holeResults).toEqual([{ hole: 2, kind: 'unclaimed' }])
+  })
+
+  /** An award naming a ghost is not evidence of anything — it stays inert
+   *  rather than resurrecting a hole nobody played. */
+  it('does not treat an award naming a non-player as evidence the hole was played', () => {
+    const round = potRound()
+    const log = new EventLog()
+    scoreHoles(round, log, [1])
+    award(log, 2, 'p-nobody')
+    log.append({ type: 'round/completed' })
+
+    expect(potOf(round, log).holeResults).toEqual([])
   })
 })
