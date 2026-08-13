@@ -27,6 +27,16 @@ export const longDriveConfigSchema = z.object({
     z.literal('all'),
     z.array(z.number().int().min(1).max(18)).min(1),
   ]),
+  /**
+   * A designated hole nobody was given rolls its stake onto the NEXT DESIGNATED
+   * hole — never onto an undesignated one, which is no part of this bet. The
+   * mechanics live in `core/awardPot.ts`; every word about them lives here.
+   *
+   * OPTIONAL FOR DATA COMPATIBILITY, not indecision — see CTP's identical note.
+   * `deriveRound` makes a game whose config its own engine rejects inert, so a
+   * required key would silently empty every Long Drive round already stored.
+   */
+  carryover: z.boolean().optional(),
 })
 
 export type LongDriveConfig = z.infer<typeof longDriveConfigSchema>
@@ -39,6 +49,10 @@ export interface LongDriveDerivation extends GameDerivation {
   holeResults: LongDriveHoleResult[]
   /** designated holes this round actually plays — empty means the bet is inert */
   designated: number[]
+  /** long drives riding on the next designated hole, waiting to be won */
+  carrying: number
+  /** carried long drives that can never be won now — the round ended with them riding */
+  carryDied: number
 }
 
 /** The one group label — the award grid's row, and every sentence about it. */
@@ -53,9 +67,14 @@ function derive(
   ctx: RoundContext,
 ): LongDriveDerivation {
   const { stakeCents, holes } = game.config
+  // `=== true` rather than a truthiness read: the key is genuinely absent on
+  // every round written before it existed, and this is the one place that
+  // decides what absent means.
+  const carryover = game.config.carryover === true
   const players = ctx.round.players
   const playerIds = players.map((p) => p.playerId)
   const nameOf = new Map(players.map((p) => [p.playerId, p.name]))
+  const others = playerIds.length - 1
 
   /**
    * Which holes carry the bet.
@@ -75,19 +94,49 @@ function derive(
 
   const designated = ctx.holesPlayed.filter(eligible)
 
-  const { holeResults, settlement, wonByPlayer, awards } = deriveAwardPot(ctx, events, {
+  const {
+    holeResults,
+    settlement,
+    wonByPlayer,
+    awards,
+    carrying,
+    carryDied,
+    diedAt,
+    awardedUnscored,
+  } = deriveAwardPot(ctx, events, {
     gameId: game.gameId,
     stakeCents,
     eligible,
     group: GROUP,
     eventKind: 'longDrive/award',
+    carryover,
     // Just the hole and the name — the panel heading already says the game.
-    lineLabel: (hole, winner) => `Hole ${hole} — ${winner}`,
+    // The multiplier is the exception: without it a doubled hole reads as an
+    // ordinary one at twice the money.
+    lineLabel: (hole, winner, units) =>
+      units > 1 ? `Hole ${hole} — ${winner} (${driveLabel(units)})` : `Hole ${hole} — ${winner}`,
   })
 
   const unclaimed = holeResults.filter((r) => r.kind === 'unclaimed').map((r) => r.hole)
+
   /**
-   * TWO THINGS TO SAY, and only one of them is dead money.
+   * ONE PHRASING OF THE DEATH, shared by the note and the hole ledger — Skins'
+   * rule, and for its reason: a reader who meets the same event twice in two
+   * wordings has to work out whether they are the same event.
+   */
+  const them = carryDied === 1 ? 'it' : 'them'
+  const deadReason =
+    `${driveLabel(carryDied)} died unwon — ` +
+    // WITH A SCORE whenever a designated hole was given out and never scored —
+    // see CTP's identical note. The hole ledger renders `holeSummary` and not
+    // `notes`, and skips the unscored hole's row, so the plain form would stand
+    // there alone beside a grid still naming a winner.
+    (awardedUnscored.length > 0
+      ? `no designated hole with a score left to win ${them}`
+      : `no designated hole left to win ${them}`)
+
+  /**
+   * THREE THINGS TO SAY, and only one of them is dead money.
    *
    * INERT is structural and true from the first tee: there is no par 5 in the
    * holes being played, so this bet can never pay anything. It is deliberately
@@ -100,8 +149,15 @@ function derive(
    *
    * UNCLAIMED is the ordinary dead money, and follows CTP exactly.
    *
-   * Both ride `notes` rather than a $0 settlement line: `lines.length === 0` is
-   * the settle panel's "No money moved." signal, and a zero-cent row makes it
+   * A DEAD PILE is the carryover-on form of the same thing, and cannot coexist
+   * with it: with carryovers on nothing is ever `unclaimed` (an unawarded hole's
+   * value moved forward, and only the final pile is dead), and with them off
+   * nothing ever carries. Mutually exclusive by construction rather than by an
+   * `else`, so neither branch has to know about the other. INERT is orthogonal
+   * to both and can accompany either.
+   *
+   * All of them ride `notes` rather than a $0 settlement line: `lines.length === 0`
+   * is the settle panel's "No money moved." signal, and a zero-cent row makes it
    * false on precisely the round it was written for (MAI-40).
    */
   const notes: string[] = []
@@ -130,7 +186,22 @@ function derive(
       unclaimed.length > 4
         ? `${unclaimed.length} holes went unclaimed — nobody was given ${them}, so nothing was paid`
         : `Unclaimed on ${unclaimed.length === 1 ? 'hole' : 'holes'} ` +
-          `${unclaimed.join(', ')} — nobody was given ${them}, so nothing was paid`,
+            `${unclaimed.join(', ')} — nobody was given ${them}, so nothing was paid`,
+    )
+  }
+  if (carryDied > 0) notes.push(deadReason)
+  // WHY A TAP DID NOT PAY — see CTP's identical note. Counted past four for the
+  // same reason the unclaimed note is: `holes: 'all'` can leave eighteen of
+  // them, and a group using the app for the side bet alone scores nothing at
+  // all, which is exactly when this fires for every designated hole at once.
+  if (awardedUnscored.length > 0) {
+    const one = awardedUnscored.length === 1
+    notes.push(
+      awardedUnscored.length > 4
+        ? `${awardedUnscored.length} holes were given out but never scored — nothing was paid for them`
+        : `${one ? 'Hole' : 'Holes'} ${awardedUnscored.join(', ')} ` +
+            `${one ? 'was' : 'were'} given out but never scored — ` +
+            `nothing was paid for ${one ? 'it' : 'them'}`,
     )
   }
 
@@ -143,8 +214,17 @@ function derive(
     ctx.holesPlayed,
     (hole) => {
       const r = holeResults.find((h) => h.hole === hole)
-      if (r?.kind === 'won') return `${nameOf.get(r.winnerId)} longest`
+      if (r?.kind === 'won') {
+        const name = nameOf.get(r.winnerId)
+        return r.units > 1 ? `${name} longest · ${driveLabel(r.units)}` : `${name} longest`
+      }
       if (r?.kind === 'unclaimed') return 'nobody kept it'
+      if (r?.kind === 'carried') {
+        // "carried" would promise a roll onto a designated hole that no longer
+        // exists
+        if (hole === diedAt) return `nobody kept it · ${driveLabel(carryDied)} died unwon`
+        return `nobody kept it · ${r.carryAfter} carried`
+      }
       return null
     },
     designated.length === 0 ? 'no holes to play for' : 'no long drive yet',
@@ -159,23 +239,57 @@ function derive(
         '↳ nobody was given it by the end of the round, so the hole paid nothing',
       ]
     }
+    if (r.kind === 'carried') {
+      if (hole === diedAt) return ['Nobody kept it', `↳ ${deadReason}`]
+      // The ↳ line teaches the rule that is genuinely non-obvious: a carry
+      // walks past every hole this bet does not run on, however many there are.
+      return [
+        `Nobody kept it — ${r.carryAfter} carried`,
+        '↳ it rolls onto the next designated hole — the holes in between do not count',
+      ]
+    }
     // The non-obvious part is never who won it — it is what a small stake
     // actually swings once every other player pays it. With nobody to pay it
     // (a one-player round, which `importRound` accepts) there is no swing to
     // explain, and the settlement has no line either.
-    const others = playerIds.length - 1
-    if (others === 0) return [`${nameOf.get(r.winnerId)} longest`]
-    return [
-      `${nameOf.get(r.winnerId)} longest`,
-      `↳ ${formatCents(stakeCents)} from each of ${others} other player${others === 1 ? '' : 's'}` +
-        ` — ${formatCents(stakeCents * others)}`,
+    const fromEach = stakeCents * r.units
+    const lines = [
+      r.units > 1
+        ? `${nameOf.get(r.winnerId)} longest — ${driveLabel(r.units)}`
+        : `${nameOf.get(r.winnerId)} longest`,
     ]
+    // …and WHY it is worth more than one: designated holes nobody kept, earlier.
+    if (r.units > 1) lines.push(`↳ this designated hole + ${r.units - 1} carried in`)
+    if (others > 0) {
+      lines.push(
+        `↳ ${formatCents(fromEach)} from each of ${others} other player${others === 1 ? '' : 's'}` +
+          ` — ${formatCents(fromEach * others)}`,
+      )
+    }
+    return lines
   }
 
   return {
     standings,
     summary: summaryString(summaryParts),
     summaryParts,
+    /**
+     * WHAT THE PINNED BAR'S MONEY AGGREGATE CANNOT SAY — see CTP's identical
+     * note. A carry is worth nothing until somebody wins it, so a collapsed
+     * side-bets row would read "no money yet" with $24 riding on the next par 5.
+     *
+     * `carrying + 1`, because that is `units` and `units` is what settles:
+     * quoting the carried pile alone understates the hole the group is standing
+     * on. `carrying > 0` is the whole guard — the kit zeroes it on a dead pile
+     * and refuses to carry off the last designated hole, so a reported pile is
+     * one some designated hole still holds, with its cell still tappable.
+     */
+    ...(carrying > 0 && {
+      openBet:
+        others > 0
+          ? `${driveLabel(carrying + 1)} riding · ${formatCents((carrying + 1) * stakeCents * others)}`
+          : `${driveLabel(carrying + 1)} riding`,
+    }),
     holeSummary,
     requiredInputs: () => [],
     awards,
@@ -183,6 +297,8 @@ function derive(
     ...(notes.length > 0 && { notes }),
     holeResults,
     designated,
+    carrying,
+    carryDied,
   }
 }
 
@@ -209,18 +325,34 @@ export const longDriveEngine: GameEngine<LongDriveConfig> = {
         'On a designated hole, whoever hits the longest drive that stays in play wins it. In the fairway is the usual house rule, and the group calls it — the app records who won, not where the ball finished.',
         'Tap their name in the award grid under the scores. Record it whenever you like — on the tee, at the turn, or on the 18th green.',
         'Tap the lit name again to clear the hole; tap a different name to correct it.',
-        'Nobody given it by the end of the round? That hole pays nothing — it is reported, not settled.',
+        'With carryovers off, a designated hole nobody was given simply pays nothing — it is reported, not settled.',
+        'With carryovers on, that stake rolls onto the next designated hole instead, making it worth double. Only designated holes count: the ones in between are no part of this bet.',
+        'If the last designated hole also goes unclaimed, the whole pile dies unwon.',
       ],
       scoring: [
         'The winner of a designated hole collects the stake from every other player. At $2 in a foursome that is $6 to them and $2 from each of the others.',
         'Handicaps do not apply — it is a contest of one swing, not of scores.',
-        'Every designated hole stands on its own. Nothing carries.',
+        'Carryovers off: every designated hole stands on its own.',
+        'Carryovers on: an unclaimed hole doubles the next designated one, and two in a row treble the one after.',
         '“Par 5s” means par 5 or longer, so a par 6 counts. If the holes you are playing hold none, the bet is inert and says so at the first tee.',
       ],
       terms: [
-        { term: 'Long drive', def: 'The longest tee shot on a designated hole — usually only counted if it finishes in the fairway.' },
-        { term: 'Designated hole', def: 'A hole this bet runs on: every par 5, every hole, or the ones you picked.' },
-        { term: 'Unclaimed', def: 'A designated hole nobody was given — the hole simply pays nothing.' },
+        {
+          term: 'Long drive',
+          def: 'The longest tee shot on a designated hole — usually only counted if it finishes in the fairway.',
+        },
+        {
+          term: 'Designated hole',
+          def: 'A hole this bet runs on: every par 5, every hole, or the ones you picked.',
+        },
+        {
+          term: 'Unclaimed',
+          def: 'A designated hole nobody was given — the hole simply pays nothing.',
+        },
+        {
+          term: 'Carryover',
+          def: 'An unclaimed hole’s stake rolling onto the next designated hole — never onto one this bet does not run on.',
+        },
       ],
     },
   },
@@ -245,8 +377,14 @@ export const longDriveEngine: GameEngine<LongDriveConfig> = {
       customLabel: 'Pick them',
       hint: 'Which holes carry the bet',
     },
+    {
+      key: 'carryover',
+      kind: 'boolean',
+      label: 'Carryovers',
+      hint: 'Unclaimed holes roll to the next designated one',
+    },
   ],
-  defaultConfig: () => ({ stakeCents: 200, holes: 'par5s' }),
+  defaultConfig: () => ({ stakeCents: 200, holes: 'par5s', carryover: false }),
   // GROSS, and not a default anyone should flip: a drive is measured against
   // the other drives, not against a handicap. It also keeps Long Drive out of
   // `strokeGame`, so a cheap side bet can never capture the scoring screen's

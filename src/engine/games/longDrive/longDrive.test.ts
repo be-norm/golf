@@ -77,7 +77,7 @@ describe('longDrive — golden fixtures (hand-verified)', () => {
 
     expect(ld.designated).toEqual([3, 8])
     expect(ld.holeResults).toEqual([
-      { hole: 3, kind: 'won', winnerId: 'p-b' },
+      { hole: 3, kind: 'won', winnerId: 'p-b', units: 1 },
       { hole: 8, kind: 'unclaimed' },
     ])
     expect(ld.notes).toEqual([
@@ -110,7 +110,7 @@ describe('longDrive — golden fixtures (hand-verified)', () => {
 
     expect(ld.holeResults).toEqual([
       { hole: 3, kind: 'pending' },
-      { hole: 8, kind: 'won', winnerId: 'p-c' },
+      { hole: 8, kind: 'won', winnerId: 'p-c', units: 1 },
     ])
     expect(ld.notes).toBeUndefined()
 
@@ -335,5 +335,202 @@ describe('longDrive — setup', () => {
     expect(validate({ stakeCents: 200, holes: 'par5s' })).toEqual([])
     expect(validate({ stakeCents: 200, holes: 'all' })).toEqual([])
     expect(validate({ stakeCents: 200, holes: [3, 8] })).toEqual([])
+  })
+})
+
+/**
+ * FULL 18 pars: 4 4 5 3 4 4 3 5 4 · 4 5 3 4 4 5 3 4 4.
+ * PAR 5s ARE 3, 8, 11 AND 15 — four designated holes, separated by four, two
+ * and three holes this bet does not run on.
+ */
+describe('longDrive — carryovers', () => {
+  const carryRound = (config: Partial<LongDriveConfig> = {}) =>
+    makeRound({
+      players: FOUR(),
+      holes: 'full18',
+      games: [
+        { type: 'longDrive', config: { stakeCents: 200, holes: 'par5s', carryover: true, ...config } },
+      ],
+    })
+
+  /**
+   * LC1 — the point of the feature, in Long Drive's own words. Nobody keeps
+   * hole 3, so its $2 rolls onto hole 8 and C wins a double: 2 × $2 = $4 from
+   * each of the other three, +$12. Holes 4–7 are par 3/4/4/3 — no part of this
+   * bet, and they contribute nothing.
+   */
+  it('LC1: an unclaimed par 5 doubles the next one, and the holes between do nothing', () => {
+    const round = carryRound()
+    const log = new EventLog()
+    scoreHoles(round, log, [1, 2, 3, 4, 5, 6, 7, 8])
+    award(log, 8, 'p-c')
+    const ld = ldOf(round, log)
+
+    expect(ld.holeResults).toEqual([
+      { hole: 3, kind: 'carried', carryAfter: 1 },
+      { hole: 8, kind: 'won', winnerId: 'p-c', units: 2 },
+    ])
+    expect(ld.settlement.perPlayerCents).toEqual({
+      'p-a': -400,
+      'p-b': -400,
+      'p-c': 1200,
+      'p-d': -400,
+    })
+    assertZeroSum(ld.settlement)
+    expect(ld.settlement.lines).toHaveLength(1)
+    expect(ld.settlement.lines[0]!.label).toBe('Hole 8 — C (2 long drives)')
+    expect(ld.holeSummary(3)).toEqual([
+      'Nobody kept it — 1 carried',
+      '↳ it rolls onto the next designated hole — the holes in between do not count',
+    ])
+    expect(ld.holeSummary(8)).toEqual([
+      'C longest — 2 long drives',
+      '↳ this designated hole + 1 carried in',
+      '↳ $4 from each of 3 other players — $12',
+    ])
+    expect(ld.summaryParts).toEqual([{ label: 'H8', value: 'C longest · 2 long drives' }])
+    expect(ld.standings[0]).toMatchObject({ label: 'C', detail: '2 long drives' })
+  })
+
+  /**
+   * LC2 — THE LAST DESIGNATED HOLE HAS NOWHERE TO CARRY. Hole 15 is the last
+   * par 5; once play reaches 16 it is finalized, but nothing has rolled
+   * anywhere and the money is still claimable on 15 itself. `pending` until the
+   * round ends — see the kit's `carryover` note and MAI-38.
+   */
+  it('LC2: the last par 5 never reads as carried while the round is live', () => {
+    const round = carryRound()
+    const log = new EventLog()
+    scoreHoles(round, log, Array.from({ length: 16 }, (_, i) => i + 1))
+    for (const hole of [3, 8, 11]) award(log, hole, 'p-a')
+    const live = ldOf(round, log)
+
+    expect(live.holeResults[3]).toEqual({ hole: 15, kind: 'pending' })
+    expect(live.carrying).toBe(0)
+    expect(live.openBet).toBeUndefined()
+    expect(live.notes).toBeUndefined()
+
+    log.append({ type: 'round/completed' })
+    const done = ldOf(round, log)
+    expect(done.holeResults[3]).toEqual({ hole: 15, kind: 'carried', carryAfter: 1 })
+    expect(done.notes).toEqual(['1 long drive died unwon — no designated hole left to win it'])
+  })
+
+  /** LC3: nobody keeps any of the four, so the whole pile dies on hole 15 —
+   *  the last designated hole, not hole 18. */
+  it('LC3: an unclaimed last par 5 kills the pile, on the last designated row', () => {
+    const round = carryRound()
+    const log = new EventLog()
+    scoreHoles(round, log, Array.from({ length: 18 }, (_, i) => i + 1))
+
+    // the bar prices THE HOLE, not the pile carried into it: 4 × $2 = $8 from
+    // each of the other three, $24 to whoever wins hole 15
+    const live = ldOf(round, log)
+    expect(live.carrying).toBe(3)
+    expect(live.openBet).toBe('4 long drives riding · $24')
+
+    log.append({ type: 'round/completed' })
+    const ld = ldOf(round, log)
+
+    expect(ld.holeResults).toEqual([
+      { hole: 3, kind: 'carried', carryAfter: 1 },
+      { hole: 8, kind: 'carried', carryAfter: 2 },
+      { hole: 11, kind: 'carried', carryAfter: 3 },
+      { hole: 15, kind: 'carried', carryAfter: 4 },
+    ])
+    expect(ld.carryDied).toBe(4)
+    expect(ld.settlement.lines).toHaveLength(0)
+    expect(ld.notes).toEqual([
+      '4 long drives died unwon — no designated hole left to win them',
+    ])
+    expect(ld.holeSummary(15)).toEqual([
+      'Nobody kept it',
+      '↳ 4 long drives died unwon — no designated hole left to win them',
+    ])
+    expect(ld.holeSummary(18)).toEqual([])
+    expect(ld.openBet).toBeUndefined()
+  })
+
+  /**
+   * LC4 — `holes: 'all'` IS THE DEGENERATE END OF THE SAME RULE: every hole is
+   * designated, so "the next designated hole" is simply the next hole, and the
+   * pile rolls one at a time. Nothing about the mechanic is special-cased for
+   * it, which is the thing worth pinning.
+   */
+  it('LC4: every hole designated makes the carry roll hole to hole', () => {
+    const round = carryRound({ holes: 'all' })
+    const log = new EventLog()
+    scoreHoles(round, log, [1, 2, 3, 4])
+    award(log, 4, 'p-d')
+    const ld = ldOf(round, log)
+
+    expect(ld.holeResults).toEqual([
+      { hole: 1, kind: 'carried', carryAfter: 1 },
+      { hole: 2, kind: 'carried', carryAfter: 2 },
+      { hole: 3, kind: 'carried', carryAfter: 3 },
+      { hole: 4, kind: 'won', winnerId: 'p-d', units: 4 },
+    ])
+    // 4 × $2 = $8 from each of the other three = +$24
+    expect(ld.settlement.perPlayerCents).toEqual({
+      'p-a': -800,
+      'p-b': -800,
+      'p-c': -800,
+      'p-d': 2400,
+    })
+    assertZeroSum(ld.settlement)
+  })
+
+  /** LC5b: the bar's quote is the money that gets paid — see CTP's C10. The
+   *  pile alone understates the hole by exactly one unit. */
+  it('LC5b: the open bet quotes what the next par 5 actually pays', () => {
+    const round = carryRound()
+    const log = new EventLog()
+    scoreHoles(round, log, Array.from({ length: 15 }, (_, i) => i + 1))
+    award(log, 3, 'p-a') // banked, so exactly two carry into hole 15
+    const live = ldOf(round, log)
+    expect(live.carrying).toBe(2)
+
+    const before = live.settlement.perPlayerCents['p-b']!
+    award(log, 15, 'p-b')
+    const after = ldOf(round, log).settlement.perPlayerCents['p-b']!
+
+    expect(after - before).toBe(3 * 200 * 3) // 3 units × $2 × 3 others = $18
+    expect(live.openBet).toBe('3 long drives riding · $18')
+  })
+
+  /** LC6: a designated hole given out that nobody scored says so and pays
+   *  nothing — see CTP's C11. Long Drive counts them past four, because
+   *  `holes: 'all'` plus a group who scored nothing fires this for every hole
+   *  at once. */
+  it('LC6: designated holes given out but never scored are counted, not listed', () => {
+    const round = carryRound({ holes: 'all' })
+    const log = new EventLog()
+    // nobody scores anything — the group is using the app for the side bet only
+    for (const hole of [1, 2, 3, 4, 5, 6]) award(log, hole, 'p-b')
+    log.append({ type: 'round/completed' })
+    const ld = ldOf(round, log)
+
+    expect(ld.holeResults).toEqual([])
+    expect(Object.values(ld.settlement.perPlayerCents).every((c) => c === 0)).toBe(true)
+    expect(ld.notes).toEqual([
+      '6 holes were given out but never scored — nothing was paid for them',
+    ])
+  })
+
+  /** LC5: a legacy config with no `carryover` key still derives and does not
+   *  carry — `deriveRound` makes a config its engine rejects INERT, so a
+   *  required key would have emptied every stored Long Drive round. */
+  it('LC5: a legacy config with no carryover key still plays, and does not carry', () => {
+    const round = ldRound(FOUR(), {}) // `{ stakeCents, holes }` — no carryover key
+    const log = new EventLog()
+    scoreHoles(round, log, [1, 2, 3, 4, 5, 6, 7, 8])
+    award(log, 8, 'p-c')
+    const ld = ldOf(round, log)
+
+    expect(ld.holeResults).toEqual([
+      { hole: 3, kind: 'pending' },
+      { hole: 8, kind: 'won', winnerId: 'p-c', units: 1 },
+    ])
+    expect(ld.settlement.perPlayerCents['p-c']).toBe(600)
   })
 })
