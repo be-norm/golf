@@ -77,21 +77,21 @@ function derive(
     diedAt,
     awardedUnscored,
   } = deriveAwardPot(ctx, events, {
-      gameId: game.gameId,
-      stakeCents,
-      eligible: (hole) => ctx.par(hole) === 3,
-      group: GROUP,
-      eventKind: 'ctp/award',
-      carryover,
-      // JUST THE HOLE AND THE NAME. Every surface that renders a settlement
-      // line puts the game's own label directly above it — the settle panel and
-      // the share card both head the block with `gameLabel` — so spelling the
-      // game out again gave three lines reading "closest to the pin" under a
-      // heading reading CLOSEST TO THE PIN. The multiplier is the exception:
-      // without it a doubled hole reads as an ordinary one at twice the money.
-      lineLabel: (hole, winner, units) =>
-        units > 1 ? `Hole ${hole} — ${winner} (${ctpLabel(units)})` : `Hole ${hole} — ${winner}`,
-    })
+    gameId: game.gameId,
+    stakeCents,
+    eligible: (hole) => ctx.par(hole) === 3,
+    group: GROUP,
+    eventKind: 'ctp/award',
+    carryover,
+    // JUST THE HOLE AND THE NAME. Every surface that renders a settlement
+    // line puts the game's own label directly above it — the settle panel and
+    // the share card both head the block with `gameLabel` — so spelling the
+    // game out again gave three lines reading "closest to the pin" under a
+    // heading reading CLOSEST TO THE PIN. The multiplier is the exception:
+    // without it a doubled hole reads as an ordinary one at twice the money.
+    lineLabel: (hole, winner, units) =>
+      units > 1 ? `Hole ${hole} — ${winner} (${ctpLabel(units)})` : `Hole ${hole} — ${winner}`,
+  })
 
   /**
    * ONE PHRASING OF THE DEATH, shared by the note and the hole ledger — Skins'
@@ -102,9 +102,19 @@ function derive(
    * hit the green", which is why any hole carries and would give the same
    * explanation for the opposite outcome.
    */
+  const them = carryDied === 1 ? 'it' : 'them'
   const deadReason =
-    `${ctpLabel(carryDied)} died unwon — no par 3 left to win ` +
-    `${carryDied === 1 ? 'it' : 'them'}`
+    `${ctpLabel(carryDied)} died unwon — ` +
+    // WITH A SCORE, whenever a par 3 was given out and never scored. The plain
+    // form asserts no par 3 was left, and the hole ledger shows THAT sentence
+    // and not `notes` (`buildHoleLedger` renders `holeSummary` alone, and skips
+    // the unscored hole's row entirely) — so on the scorecard the claim would
+    // stand unaccompanied beside a grid still naming a winner on it. Precise
+    // only where the precision is load-bearing: with nothing tapped, "no par 3
+    // left" is the plainer true sentence and stays.
+    (awardedUnscored.length > 0
+      ? `no par 3 with a score left to win ${them}`
+      : `no par 3 left to win ${them}`)
 
   /**
    * TWO DEATHS, AND THEY CANNOT BOTH HAPPEN. With carryovers on nothing is ever
@@ -140,14 +150,20 @@ function derive(
   // used, and the kit only reports these once the round is over.
   if (awardedUnscored.length > 0) {
     const one = awardedUnscored.length === 1
+    // COUNTED PAST FOUR, unlike the unclaimed note above. That one leans on a
+    // card holding about four par 3s; this one cannot, because the case it
+    // exists for is a group scoring nothing at all — which fires it for every
+    // tapped par 3 at once, and on a par-3 course (cards are user-imported,
+    // so par distribution is arbitrary) that is an eighteen-number sentence
+    // wrapped over four lines of the PAINTED share card.
     notes.push(
-      `${one ? 'Hole' : 'Holes'} ${awardedUnscored.join(', ')} ` +
-        `${one ? 'was' : 'were'} given out but never scored — ` +
-        `nothing was paid for ${one ? 'it' : 'them'}`,
+      awardedUnscored.length > 4
+        ? `${awardedUnscored.length} par 3s were given out but never scored — nothing was paid for them`
+        : `${one ? 'Hole' : 'Holes'} ${awardedUnscored.join(', ')} ` +
+            `${one ? 'was' : 'were'} given out but never scored — ` +
+            `nothing was paid for ${one ? 'it' : 'them'}`,
     )
   }
-  // No count-instead-of-list branch here, unlike Long Drive: a card holds about
-  // four par 3s, so the list is always short enough to read.
 
   const standings = standingsFromSettlement(players, settlement, (p) =>
     ctpLabel(wonByPlayer.get(p.playerId) ?? 0),
@@ -298,7 +314,10 @@ export const ctpEngine: GameEngine<CtpConfig> = {
         'Carryovers on: an unclaimed par 3 doubles the next one, and two in a row treble the one after. Winning a 3-CTP hole at $2 in a foursome is $6 from each of the others — an $18 swing.',
       ],
       terms: [
-        { term: 'CTP', def: 'Closest to the pin — the shortest putt left after the tee shot on a par 3.' },
+        {
+          term: 'CTP',
+          def: 'Closest to the pin — the shortest putt left after the tee shot on a par 3.',
+        },
         {
           term: 'On the green',
           def: 'The usual house rule: the ball has to finish on the putting surface to count.',

@@ -317,7 +317,10 @@ export function deriveAwardPot(
       // the line names the winner, so the money it shows is what they made
       headlineCents: fromEach * (playerIds.length - 1),
       perPlayerCents: Object.fromEntries(
-        playerIds.map((id) => [id, id === winnerId ? fromEach * (playerIds.length - 1) : -fromEach]),
+        playerIds.map((id) => [
+          id,
+          id === winnerId ? fromEach * (playerIds.length - 1) : -fromEach,
+        ]),
       ),
     })
     holeResults.push({ hole, kind: 'won', winnerId, units })

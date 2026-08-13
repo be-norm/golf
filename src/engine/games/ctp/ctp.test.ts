@@ -710,9 +710,23 @@ describe('ctp — carryovers', () => {
     // BOTH sentences: the pile died, AND the tap that would have won it was
     // never backed by a score. Either alone misleads.
     expect(ctp.notes).toEqual([
-      '3 CTPs died unwon — no par 3 left to win them',
+      '3 CTPs died unwon — no par 3 with a score left to win them',
       'Hole 16 was given out but never scored — nothing was paid for it',
     ])
+    /**
+     * …AND THE LEDGER ROW CARRIES THE QUALIFIER, because the scorecard is a
+     * surface `notes` never reaches: `buildHoleLedger` renders `holeSummary`
+     * alone, and hole 16 gets no row at all (nobody scored it). So the bare
+     * "no par 3 left to win them" would stand there unaccompanied, next to a
+     * grid still naming a winner on 16 — the one place the corrective sentence
+     * cannot follow it.
+     */
+    expect(ctp.holeSummary(12)).toEqual([
+      'Nobody inside',
+      '↳ 3 CTPs died unwon — no par 3 with a score left to win them',
+    ])
+    // and hole 16 really does produce no ledger row to put it on
+    expect(ctp.holeSummary(16)).toEqual([])
   })
 
   /** …and mid-round it stays quiet: tapping the tee before anybody writes a

@@ -104,18 +104,18 @@ function derive(
     diedAt,
     awardedUnscored,
   } = deriveAwardPot(ctx, events, {
-      gameId: game.gameId,
-      stakeCents,
-      eligible,
-      group: GROUP,
-      eventKind: 'longDrive/award',
-      carryover,
-      // Just the hole and the name — the panel heading already says the game.
-      // The multiplier is the exception: without it a doubled hole reads as an
-      // ordinary one at twice the money.
-      lineLabel: (hole, winner, units) =>
-        units > 1 ? `Hole ${hole} — ${winner} (${driveLabel(units)})` : `Hole ${hole} — ${winner}`,
-    })
+    gameId: game.gameId,
+    stakeCents,
+    eligible,
+    group: GROUP,
+    eventKind: 'longDrive/award',
+    carryover,
+    // Just the hole and the name — the panel heading already says the game.
+    // The multiplier is the exception: without it a doubled hole reads as an
+    // ordinary one at twice the money.
+    lineLabel: (hole, winner, units) =>
+      units > 1 ? `Hole ${hole} — ${winner} (${driveLabel(units)})` : `Hole ${hole} — ${winner}`,
+  })
 
   const unclaimed = holeResults.filter((r) => r.kind === 'unclaimed').map((r) => r.hole)
 
@@ -124,9 +124,16 @@ function derive(
    * rule, and for its reason: a reader who meets the same event twice in two
    * wordings has to work out whether they are the same event.
    */
+  const them = carryDied === 1 ? 'it' : 'them'
   const deadReason =
-    `${driveLabel(carryDied)} died unwon — no designated hole left to win ` +
-    `${carryDied === 1 ? 'it' : 'them'}`
+    `${driveLabel(carryDied)} died unwon — ` +
+    // WITH A SCORE whenever a designated hole was given out and never scored —
+    // see CTP's identical note. The hole ledger renders `holeSummary` and not
+    // `notes`, and skips the unscored hole's row, so the plain form would stand
+    // there alone beside a grid still naming a winner.
+    (awardedUnscored.length > 0
+      ? `no designated hole with a score left to win ${them}`
+      : `no designated hole left to win ${them}`)
 
   /**
    * THREE THINGS TO SAY, and only one of them is dead money.
@@ -179,7 +186,7 @@ function derive(
       unclaimed.length > 4
         ? `${unclaimed.length} holes went unclaimed — nobody was given ${them}, so nothing was paid`
         : `Unclaimed on ${unclaimed.length === 1 ? 'hole' : 'holes'} ` +
-          `${unclaimed.join(', ')} — nobody was given ${them}, so nothing was paid`,
+            `${unclaimed.join(', ')} — nobody was given ${them}, so nothing was paid`,
     )
   }
   if (carryDied > 0) notes.push(deadReason)
@@ -193,8 +200,8 @@ function derive(
       awardedUnscored.length > 4
         ? `${awardedUnscored.length} holes were given out but never scored — nothing was paid for them`
         : `${one ? 'Hole' : 'Holes'} ${awardedUnscored.join(', ')} ` +
-          `${one ? 'was' : 'were'} given out but never scored — ` +
-          `nothing was paid for ${one ? 'it' : 'them'}`,
+            `${one ? 'was' : 'were'} given out but never scored — ` +
+            `nothing was paid for ${one ? 'it' : 'them'}`,
     )
   }
 
@@ -330,9 +337,18 @@ export const longDriveEngine: GameEngine<LongDriveConfig> = {
         '“Par 5s” means par 5 or longer, so a par 6 counts. If the holes you are playing hold none, the bet is inert and says so at the first tee.',
       ],
       terms: [
-        { term: 'Long drive', def: 'The longest tee shot on a designated hole — usually only counted if it finishes in the fairway.' },
-        { term: 'Designated hole', def: 'A hole this bet runs on: every par 5, every hole, or the ones you picked.' },
-        { term: 'Unclaimed', def: 'A designated hole nobody was given — the hole simply pays nothing.' },
+        {
+          term: 'Long drive',
+          def: 'The longest tee shot on a designated hole — usually only counted if it finishes in the fairway.',
+        },
+        {
+          term: 'Designated hole',
+          def: 'A hole this bet runs on: every par 5, every hole, or the ones you picked.',
+        },
+        {
+          term: 'Unclaimed',
+          def: 'A designated hole nobody was given — the hole simply pays nothing.',
+        },
         {
           term: 'Carryover',
           def: 'An unclaimed hole’s stake rolling onto the next designated hole — never onto one this bet does not run on.',
