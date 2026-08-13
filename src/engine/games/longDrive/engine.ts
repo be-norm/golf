@@ -94,8 +94,16 @@ function derive(
 
   const designated = ctx.holesPlayed.filter(eligible)
 
-  const { holeResults, settlement, wonByPlayer, awards, carrying, carryDied, diedAt } =
-    deriveAwardPot(ctx, events, {
+  const {
+    holeResults,
+    settlement,
+    wonByPlayer,
+    awards,
+    carrying,
+    carryDied,
+    diedAt,
+    awardedUnscored,
+  } = deriveAwardPot(ctx, events, {
       gameId: game.gameId,
       stakeCents,
       eligible,
@@ -175,6 +183,20 @@ function derive(
     )
   }
   if (carryDied > 0) notes.push(deadReason)
+  // WHY A TAP DID NOT PAY — see CTP's identical note. Counted past four for the
+  // same reason the unclaimed note is: `holes: 'all'` can leave eighteen of
+  // them, and a group using the app for the side bet alone scores nothing at
+  // all, which is exactly when this fires for every designated hole at once.
+  if (awardedUnscored.length > 0) {
+    const one = awardedUnscored.length === 1
+    notes.push(
+      awardedUnscored.length > 4
+        ? `${awardedUnscored.length} holes were given out but never scored — nothing was paid for them`
+        : `${one ? 'Hole' : 'Holes'} ${awardedUnscored.join(', ')} ` +
+          `${one ? 'was' : 'were'} given out but never scored — ` +
+          `nothing was paid for ${one ? 'it' : 'them'}`,
+    )
+  }
 
   const standings = standingsFromSettlement(players, settlement, (p) =>
     driveLabel(wonByPlayer.get(p.playerId) ?? 0),

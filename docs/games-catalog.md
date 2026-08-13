@@ -260,7 +260,10 @@ Unbounded it settles money on holes the group never reached; bounded to the fron
 the same silent void behind a bound and makes settled money depend on `ctx.lastPlayedHole`,
 so undoing an unrelated score un-pays an award. The affordance stays generous and the money
 stays conservative; the residual gap — a lit cell on a hole nobody scored — wants the
-affordance to say so, not the money to guess.
+affordance to say so, not the money to guess. Until it does, the kit reports those holes
+(`awardedUnscored`, once the round is over) and each engine puts them on `notes`, so the
+abstention is stated rather than silent — which matters most under carryover, where the
+skipped hole takes the whole pile with it while the dead-pile sentence says the holes ran out.
 The first `category: 'side'` and `family: 'award'` engine, so it is also what makes the
 picker's Side Bets section and its "Awards" heading real.
 

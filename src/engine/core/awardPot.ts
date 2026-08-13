@@ -141,7 +141,8 @@ export interface AwardPot {
    * copy of the rule can't strand the sentence on a different row from the hole
    * it explains. Undefined unless `carryDied > 0`.
    *
-   * DELIBERATELY NOT `ctx.lastPlayedHole`, which is what Skins' dead carry uses.
+   * DELIBERATELY NOT `ctx.lastPlayedHole`, which is what Skins' dead carry uses
+   * (see the note under `awardedUnscored` for the other half of this).
    * For Skins the two coincide, because every hole is eligible there — an award
    * game is the case that separates them, and `lastPlayedHole` would put "3 CTPs
    * died unwon" on a par 4's ledger row, narrating a hole this game has no
@@ -149,6 +150,26 @@ export interface AwardPot {
    * whose `holeSummary` says something and which somebody scored.
    */
   diedAt?: number
+  /**
+   * Eligible holes holding a recorded winner that NOBODY EVER SCORED, once the
+   * round is over — the residual gap left by "a score is the only evidence a
+   * hole was played", handed to the engine so the gap is SAID rather than
+   * silent.
+   *
+   * The money abstains on these holes, and it is right to (the gate above says
+   * why). What it must not do is abstain quietly: the grid lit that cell, the
+   * group watched somebody tap it, and after `round/completed` the grid is gone
+   * — so without this the stake simply is not there and nothing anywhere
+   * accounts for it. Carryovers make that worse than it sounds, because the
+   * hole is skipped entirely and takes the whole pile down with it while the
+   * dead-pile note says "no par 3 left to win them".
+   *
+   * ONLY ONCE THE ROUND IS OVER, for the `unclaimed` gate's reason exactly: mid
+   * round, an award tapped on the tee before anybody writes a number down is
+   * the NORMAL way this channel is used, and reporting it would fire on every
+   * such tap.
+   */
+  awardedUnscored: number[]
   awards(hole: number): Award[]
 }
 
@@ -213,6 +234,7 @@ export function deriveAwardPot(
   const settlement: Settlement = emptySettlement(playerIds)
   const wonByPlayer = new Map<Uuid, number>(playerIds.map((id) => [id, 0]))
   const holeResults: AwardHoleResult[] = []
+  const awardedUnscored: number[] = []
 
   // The pile riding onto the next eligible hole. Stays 0 for a game that does
   // not carry, which is what keeps every `units` below equal to 1 there.
@@ -249,8 +271,13 @@ export function deriveAwardPot(
     // eligible hole, any time until the round closes) and the MONEY is
     // conservative (somebody has to have posted a score). The residual gap — a
     // lit cell on a hole nobody ever scored — needs the affordance to say so,
-    // not the money to guess.
-    if (!ctx.anyScored(hole)) return
+    // not the money to guess — and, until it does, `awardedUnscored` so the
+    // abstention is at least stated out loud instead of leaving a stake that
+    // simply is not there once the grid is gated off.
+    if (!ctx.anyScored(hole)) {
+      if (roundOver && winnerId !== undefined) awardedUnscored.push(hole)
+      return
+    }
     if (!ctx.finalized(hole)) {
       holeResults.push({ hole, kind: 'pending' })
       return
@@ -335,6 +362,7 @@ export function deriveAwardPot(
     // dead is not riding — see `carrying`'s docstring
     carrying: carryDied > 0 ? 0 : carry,
     carryDied,
+    awardedUnscored,
     ...(carryDied > 0 && carriedAt !== undefined && { diedAt: carriedAt }),
     awards,
   }

@@ -67,8 +67,16 @@ function derive(
   // Everything else — last-write-wins, when a hole is decided, when an unawarded
   // one is dead, where a carry goes and when it dies, what an undo retracts — is
   // the shared kit's (core/awardPot.ts).
-  const { holeResults, settlement, wonByPlayer, awards, carrying, carryDied, diedAt } =
-    deriveAwardPot(ctx, events, {
+  const {
+    holeResults,
+    settlement,
+    wonByPlayer,
+    awards,
+    carrying,
+    carryDied,
+    diedAt,
+    awardedUnscored,
+  } = deriveAwardPot(ctx, events, {
       gameId: game.gameId,
       stakeCents,
       eligible: (hole) => ctx.par(hole) === 3,
@@ -121,6 +129,21 @@ function derive(
       `Unclaimed on ${unclaimed.length === 1 ? 'hole' : 'holes'} ` +
         `${unclaimed.join(', ')} — nobody was given ` +
         `${unclaimed.length === 1 ? 'it' : 'them'}, so nothing was paid`,
+    )
+  }
+  // WHY A TAP DID NOT PAY. A par 3 given to somebody that nobody ever scored
+  // is skipped by the money on purpose (see the kit's gate), and after the
+  // round closes the award grid is gated off — so without this the stake is
+  // simply absent and nothing accounts for it, while the dead-pile note above
+  // may be saying no par 3 was left to win. Never mid-round: tapping the tee
+  // before anybody writes a number down is how this channel is meant to be
+  // used, and the kit only reports these once the round is over.
+  if (awardedUnscored.length > 0) {
+    const one = awardedUnscored.length === 1
+    notes.push(
+      `${one ? 'Hole' : 'Holes'} ${awardedUnscored.join(', ')} ` +
+        `${one ? 'was' : 'were'} given out but never scored — ` +
+        `nothing was paid for ${one ? 'it' : 'them'}`,
     )
   }
   // No count-instead-of-list branch here, unlike Long Drive: a card holds about

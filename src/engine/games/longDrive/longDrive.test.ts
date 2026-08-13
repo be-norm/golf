@@ -498,6 +498,25 @@ describe('longDrive — carryovers', () => {
     expect(live.openBet).toBe('3 long drives riding · $18')
   })
 
+  /** LC6: a designated hole given out that nobody scored says so and pays
+   *  nothing — see CTP's C11. Long Drive counts them past four, because
+   *  `holes: 'all'` plus a group who scored nothing fires this for every hole
+   *  at once. */
+  it('LC6: designated holes given out but never scored are counted, not listed', () => {
+    const round = carryRound({ holes: 'all' })
+    const log = new EventLog()
+    // nobody scores anything — the group is using the app for the side bet only
+    for (const hole of [1, 2, 3, 4, 5, 6]) award(log, hole, 'p-b')
+    log.append({ type: 'round/completed' })
+    const ld = ldOf(round, log)
+
+    expect(ld.holeResults).toEqual([])
+    expect(Object.values(ld.settlement.perPlayerCents).every((c) => c === 0)).toBe(true)
+    expect(ld.notes).toEqual([
+      '6 holes were given out but never scored — nothing was paid for them',
+    ])
+  })
+
   /** LC5: a legacy config with no `carryover` key still derives and does not
    *  carry — `deriveRound` makes a config its engine rejects INERT, so a
    *  required key would have emptied every stored Long Drive round. */

@@ -678,6 +678,55 @@ describe('ctp — carryovers', () => {
     }
   })
 
+  /**
+   * C11 — A PAR 3 GIVEN OUT THAT NOBODY SCORED, which is the residual gap the
+   * kit's gate leaves and the one place the user can see it.
+   *
+   * The money abstains (a score is the only evidence a hole was played — see
+   * that gate for the two rejected alternatives), the cell stays lit, and the
+   * carry it was holding dies with it. What must NOT happen is silence: the
+   * grid is gated off once the round closes, so without a note the stake is
+   * simply absent and the dead-pile sentence beside it reads as the whole
+   * story. Both sentences, together, are the whole story.
+   *
+   * This is also the test that should fail the day the affordance takes the
+   * job over, which is where the commit reverting the money-side fix says it
+   * belongs.
+   */
+  it('C11: a par 3 given out but never scored says so, and pays nothing', () => {
+    const round = carryRound()
+    const log = new EventLog()
+    // every hole but the par 3 at 16 gets a score; B is given 16 on the tee
+    scoreHoles(round, log, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 17, 18])
+    award(log, 16, 'p-b')
+    log.append({ type: 'round/completed' })
+    const ctp = ctpOf(round, log)
+
+    // hole 16 is absent from the results, and no money moved
+    expect(ctp.holeResults.map((r) => r.hole)).toEqual([4, 7, 12])
+    expect(Object.values(ctp.settlement.perPlayerCents).every((c) => c === 0)).toBe(true)
+    // the cell the group tapped is still lit, so the note has something to explain
+    expect(ctp.awards!(16).filter((a) => a.taken).map((a) => a.playerId)).toEqual(['p-b'])
+    // BOTH sentences: the pile died, AND the tap that would have won it was
+    // never backed by a score. Either alone misleads.
+    expect(ctp.notes).toEqual([
+      '3 CTPs died unwon — no par 3 left to win them',
+      'Hole 16 was given out but never scored — nothing was paid for it',
+    ])
+  })
+
+  /** …and mid-round it stays quiet: tapping the tee before anybody writes a
+   *  number down is how this channel is meant to be used (MAI-46), so the note
+   *  waits for `ctx.completed` exactly as the unclaimed one does. */
+  it('C11a: a tap ahead of the scores is not narrated while the round is live', () => {
+    const round = carryRound()
+    const log = new EventLog()
+    scoreHoles(round, log, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15])
+    award(log, 16, 'p-b') // tapped on the 16th tee, scores not in yet
+
+    expect(ctpOf(round, log).notes).toBeUndefined()
+  })
+
   /** …and the rule it must NOT swallow: a par 3 with neither a score nor an
    *  award is still a hole nobody played, and stays out of the results
    *  entirely (MAI-38). C7 covers the carry side; this pins the boundary. */
