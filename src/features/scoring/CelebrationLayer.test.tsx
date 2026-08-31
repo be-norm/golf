@@ -34,7 +34,10 @@ function skinsRound(): Round {
 }
 
 function viewOf(round: Round, events: RoundEvent[]): RoundView {
-  return { round, events: [...events], ...deriveRound(round, events) }
+  // `deriveRound` returns the AMENDED round and it wins, exactly as it does in
+  // `useRound` — spelling `round` twice here is now a type error rather than a
+  // silent disagreement between this fixture and the real hook.
+  return { events: [...events], ...deriveRound(round, events) }
 }
 
 /** A wins hole 1 outright; everyone else ties it. */

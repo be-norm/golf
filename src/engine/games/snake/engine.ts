@@ -364,6 +364,12 @@ export const snakeEngine: GameEngine<SnakeConfig> = {
   },
   configSchema: snakeConfigSchema,
   configFields: [
+    // Both editable, and this pair is the case that motivated amendments at all
+    // (MAI-100): a group played the pot at the wrong value with doubling off and
+    // noticed on the ninth green. A bite records who took the snake on a hole,
+    // never what it was worth — the pot is computed from the config over the
+    // bites in walk order — so changing either re-prices the chain that already
+    // happened, which is what "we were playing $2 doubling all along" means.
     {
       key: 'potCents',
       kind: 'money',
@@ -371,12 +377,14 @@ export const snakeEngine: GameEngine<SnakeConfig> = {
       min: 25,
       step: 25,
       hint: 'The last three-putter pays this to every other player',
+      midRound: 'editable',
     },
     {
       key: 'doubling',
       kind: 'boolean',
       label: 'Doubling pot',
       hint: 'Out at the stake, then doubles on every three-putt after that',
+      midRound: 'editable',
     },
   ],
   // A dollar, and not doubling. The doubling pot is uncapped by design — that

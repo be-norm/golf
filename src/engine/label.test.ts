@@ -127,9 +127,14 @@ describe('gameLabel', () => {
       // rather than relying on vitest's per-file isolation
       type: LABEL_PROBE_ENGINE_TYPE,
       configFields: [
-        { key: 'stakeCents', kind: 'money', label: 'Stake' },
+        { key: 'stakeCents', kind: 'money', label: 'Stake', midRound: 'editable' },
         // the shape of label this codebase actually writes (nassau ships one)
-        { key: 'carryover', kind: 'boolean', label: 'Carryovers · rollover' },
+        {
+          key: 'carryover',
+          kind: 'boolean',
+          label: 'Carryovers · rollover',
+          midRound: 'editable',
+        },
       ],
     })
     const a: GameConfig = {

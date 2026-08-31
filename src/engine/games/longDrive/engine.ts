@@ -365,7 +365,18 @@ export const longDriveEngine: GameEngine<LongDriveConfig> = {
       min: 25,
       step: 25,
       hint: 'The winner collects this from every other player',
+      midRound: 'editable',
     },
+    /**
+     * EDITABLE, though it is the only field in the catalog that names holes.
+     *
+     * Un-designating a hole makes an award already recorded on it inert rather
+     * than misattributed — the award still says who hit the longest drive
+     * there, the bet just no longer runs on that hole, and re-designating it
+     * brings the money straight back. That is the test `midRound` asks (is a
+     * recorded event REINTERPRETED?), and the answer here is no, unlike Wolf's
+     * rotation.
+     */
     {
       key: 'holes',
       kind: 'holes',
@@ -376,12 +387,14 @@ export const longDriveEngine: GameEngine<LongDriveConfig> = {
       ],
       customLabel: 'Pick them',
       hint: 'Which holes carry the bet',
+      midRound: 'editable',
     },
     {
       key: 'carryover',
       kind: 'boolean',
       label: 'Carryovers',
       hint: 'Unclaimed holes roll to the next designated one',
+      midRound: 'editable',
     },
   ],
   defaultConfig: () => ({ stakeCents: 200, holes: 'par5s', carryover: false }),

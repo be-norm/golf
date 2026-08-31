@@ -24,6 +24,15 @@ export interface HoleImpact {
  * Snake its ledger, where it would have looked like Snake's bug rather than
  * this function's. A new hole-scoped event kind belongs here the moment it is
  * added, not when its first consumer arrives.
+ *
+ * SETTINGS AMENDMENTS ARE THE OPPOSITE CASE, and null is the point rather than
+ * an oversight (MAI-100). `game/configured` re-prices the WHOLE round — "the
+ * stake was always $2" — so it has to reach every prefix, which is exactly what
+ * answering null does. Hole 3's ledger row then shows the amended stake and
+ * agrees with the settle screen. Do not "complete" this function by teaching it
+ * to read a hole off an amendment: that would price the early holes at the old
+ * stake while the settlement used the new one, and the rows would stop summing
+ * to the total.
  */
 export function eventHole(e: RoundEvent): number | null {
   if (

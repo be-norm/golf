@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import type { Uuid } from './types'
+import type { HandicapSettings, Uuid } from './types'
 
 export interface EventEnvelope {
   id: Uuid
@@ -58,6 +58,46 @@ export type ScorePuttsClearEvent = EventEnvelope & {
   hole: number
 }
 
+/**
+ * ONE GAME'S SETTINGS, CHANGED FOR THE WHOLE ROUND (MAI-100/101).
+ *
+ * A stake set wrong, a carryover nobody switched on, a doubling pot the group
+ * meant to play — noticed on the ninth green, with eight holes already scored.
+ * Before this the only remedy was to abandon the round, because settings live on
+ * the round DOCUMENT (`round.games[].config`), outside the log, and `deriveRound`
+ * reads them wholesale: changing one rewrote every settled hole's money silently,
+ * which is what invariant #2 exists to prevent.
+ *
+ * So the change becomes an event, and gets everything the log already gives:
+ * undo is `meta/retract`, sync and export carry it (archives are a
+ * `{round, events}` blob), and the round says what happened to it rather than
+ * quietly disagreeing with the numbers people remember.
+ *
+ * IT RE-PRICES THE WHOLE ROUND — "it was always $2" — and that is the only
+ * reading the engine contract can express: `derive` takes ONE config, so
+ * "from here on" would mean rewriting all nine engines, and it has no defined
+ * answer anyway (a skin carried at $1 and banked at $2 is worth what?). The
+ * editor states it in as many words, and shows the money swing before you commit.
+ *
+ * THE WHOLE CONFIG, NOT A PATCH. A partial payload would need merge rules per
+ * key, and a merge that dropped one would leave a config its own engine rejects
+ * — which `deriveRound` makes INERT, i.e. a mistyped stake silently deleting a
+ * live bet. `amendRound` refuses an amendment the engine won't accept for the
+ * same reason (catalog.ts).
+ *
+ * `role` is absent in the normal case, and absent means DERIVE IT rather than
+ * 'main' — `GameConfig.role`'s own rule. Since this replaces wholesale, an
+ * amendment that omits it clears a stamp the round was carrying, which is
+ * correct: the editor re-runs `reconcileRoles` and sends what that decides.
+ */
+export type GameConfiguredEvent = EventEnvelope & {
+  type: 'game/configured'
+  gameId: Uuid
+  config: unknown
+  handicap: HandicapSettings
+  role?: 'main' | 'side'
+}
+
 export type RoundCompletedEvent = EventEnvelope & { type: 'round/completed' }
 export type RoundReopenedEvent = EventEnvelope & { type: 'round/reopened' }
 
@@ -77,6 +117,7 @@ export type RoundEvent =
   | ScoreClearEvent
   | ScorePuttsEvent
   | ScorePuttsClearEvent
+  | GameConfiguredEvent
   | RoundCompletedEvent
   | RoundReopenedEvent
   | RetractEvent
@@ -86,6 +127,26 @@ type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K>
 
 /** Event payload without its envelope — what callers hand to EventStore.append. */
 export type EventDraft = DistributiveOmit<RoundEvent, keyof EventEnvelope>
+
+/**
+ * A game's handicap policy, as it travels in an amendment payload.
+ *
+ * BOUNDED, and the allowance is the reason: it reaches `applyAllowance`, so an
+ * unbounded number produces negative playing handicaps for every hole of the
+ * round — wrong money that looks like arithmetic rather than corruption. The
+ * same 0–200 window `importSchema` repairs an imported game into
+ * (exportRound.ts), stated once here now that a second path carries one.
+ *
+ * Strict where `importSchema` is forgiving, and deliberately: an import is a
+ * RESTORE of a file we did not write, so it repairs what it can; this is a
+ * write THIS app is making right now, and a payload it cannot form correctly is
+ * a bug to surface rather than round off.
+ */
+export const handicapSettingsSchema: z.ZodType<HandicapSettings> = z.object({
+  mode: z.enum(['gross', 'net']),
+  allowancePct: z.number().min(0).max(200),
+  reference: z.enum(['absolute', 'offLow']),
+})
 
 export const eventDraftSchema = z.discriminatedUnion('type', [
   z.object({
@@ -111,6 +172,18 @@ export const eventDraftSchema = z.discriminatedUnion('type', [
     type: z.literal('score/puttsClear'),
     playerId: z.string(),
     hole: z.number().int().min(1).max(18),
+  }),
+  z.object({
+    type: z.literal('game/configured'),
+    gameId: z.string(),
+    // NOT validated here, and that is the same call `importSchema` makes about
+    // a game's config: only the engine knows its own shape, so the check that
+    // matters happens in `amendRound`, against `configSchema`. Validating a
+    // guess at it here would refuse an amendment to a game type a NEWER build
+    // ships and this one doesn't.
+    config: z.unknown(),
+    handicap: handicapSettingsSchema,
+    role: z.enum(['main', 'side']).optional(),
   }),
   z.object({ type: z.literal('round/completed') }),
   z.object({ type: z.literal('round/reopened') }),

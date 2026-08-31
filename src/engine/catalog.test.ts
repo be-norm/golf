@@ -147,6 +147,34 @@ describe('engine registry invariants', () => {
     }
   })
 
+  /**
+   * WHICH SETTINGS CAN BE CHANGED ONCE PLAY HAS STARTED (MAI-100).
+   *
+   * The type already forces every field to answer — that is why `midRound` is
+   * required rather than optional. What the type cannot judge is whether the
+   * answer is RIGHT, and the two ways to get it wrong are not symmetrical:
+   *
+   * - Locking a field that didn't need it is a nuisance: the group can't fix a
+   *   stake they set wrong, which is the bug this whole feature exists to end.
+   * - NOT locking one that did is silent and permanent — recorded golf gets
+   *   reinterpreted and the money simply comes out different.
+   *
+   * So the lock list is pinned by name. A new lock is a deliberate act with a
+   * reason, and this test is where the reason gets written down; a lock that
+   * appears without one fails here rather than shipping unnoticed.
+   */
+  it('locks only the fields recorded events are attributed through', () => {
+    const locked = shippedEngines().flatMap((e) =>
+      e.configFields.filter((f) => f.midRound === 'locked').map((f) => `${e.type}.${f.key}`),
+    )
+    // Wolf's rotation decides who the WOLF was on each hole, and every pick is
+    // read against it — re-order it after picks exist and hole 3's "I'll take
+    // Cal" is handed to whoever the new order puts on that tee. Nothing else in
+    // the catalog reinterprets a recorded event: a stake changes what the same
+    // golf was worth, which is the point of amending one.
+    expect(locked).toEqual(['wolf.rotation'])
+  })
+
   it('every game declares where it belongs', () => {
     for (const engine of shippedEngines()) {
       expect(CATEGORIES, `${engine.type} category`).toContain(engine.meta.category)

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import fc from 'fast-check'
 import '../games/index'
-import { deriveRound, getEngine, listEngines } from '../catalog'
+import { amendRound, deriveRound, getEngine, listEngines } from '../catalog'
 import { EventLog, makePlayers, makeRound, TEST_ONLY_ENGINE_TYPES } from '../test/harness'
 import { arbitraryRotationPair, arbitraryRoundAndEvents, GAME_FUZZ } from '../test/arbitraries'
 import { buildHoleLedger } from '../ledger'
@@ -191,6 +191,75 @@ describe('replay invariants (fast-check)', () => {
         return Object.values(d?.settlement.perPlayerCents ?? {}).some((c) => c !== 0)
       })
     expect(settled, 'the fuzz never makes a putt-driven game settle').toBe(true)
+  })
+
+  /**
+   * AND THE SAME QUESTION ASKED OF AMENDMENTS, which needs asking hardest of
+   * all — because the mechanism is designed to fail SILENTLY (MAI-100).
+   *
+   * `amendRound` drops an amendment whose config its own engine rejects, and it
+   * is right to: letting one through would make the game inert and delete a live
+   * bet's money over a typo. But that means a fuzz entry carrying a config the
+   * engine refuses is inert on every single run, with zero-sum, determinism,
+   * retraction equivalence and the rotation pair all "covering" amendments by
+   * running over rounds where nothing was ever amended — green, and worthless.
+   *
+   * The check above ("deals every kind") cannot see it either: the event IS in
+   * the log, dealt exactly as asked. What matters is whether it LANDED, so that
+   * is what this asks — the amended round must actually differ from the stored
+   * one, and every amended config must be one its engine accepts, which is the
+   * check `every fuzzed config is one its engine would actually accept` makes of
+   * the document, asked here of the thing that really reaches `derive`.
+   */
+  it('the fuzz actually deals amendments, and they land', () => {
+    for (const [name, arb] of [
+      ['rounds', arbitraryRoundAndEvents()],
+      // the rotation pair carries its own copy of the generator, so it can drift
+      ['rotation pair', arbitraryRotationPair().map((p) => p.wrapped)],
+    ] as const) {
+      const samples = fc.sample(arb, { numRuns: 200 })
+      const amended = samples.filter(({ round, log }) => {
+        const after = amendRound(round, effectiveEvents(log.events))
+        return after !== round
+      })
+      expect(amended.length, `${name} never land an amendment`).toBeGreaterThan(0)
+
+      // …every landed config is one the engine accepts. A rejected one would be
+      // silently skipped, which is exactly the invisible-zero-coverage case.
+      for (const { round, log } of amended) {
+        for (const game of amendRound(round, effectiveEvents(log.events)).games) {
+          const engine = getEngine(game.type)!
+          expect(
+            engine.configSchema.safeParse(game.config).success,
+            `${name}: amended ${game.type} config`,
+          ).toBe(true)
+        }
+      }
+
+      // …and not ALWAYS amended, or the un-amended half — every round the app
+      // has today — stops being covered.
+      expect(
+        samples.some(({ round, log }) => amendRound(round, effectiveEvents(log.events)) === round),
+        `${name} always amend`,
+      ).toBe(true)
+    }
+
+    /**
+     * …and an amendment that lands must actually MOVE money, or it is a config
+     * change the settlement never noticed — the vacuous-coverage failure the
+     * putts check above refuses, in its own shape here.
+     */
+    const moved = fc.sample(arbitraryRoundAndEvents(), { numRuns: 200 }).some(({ round, log }) => {
+      const stripped = log.events.filter((e) => e.type !== 'game/configured')
+      if (stripped.length === log.events.length) return false
+      const before = deriveRound(round, stripped)
+      const after = deriveRound(round, log.events)
+      return [...after.derivations].some(([gameId, d]) => {
+        const was = before.derivations.get(gameId)?.settlement.perPlayerCents ?? {}
+        return Object.entries(d.settlement.perPlayerCents).some(([id, c]) => c !== (was[id] ?? 0))
+      })
+    })
+    expect(moved, 'the fuzz never lands an amendment that changes the money').toBe(true)
   })
 
   /**

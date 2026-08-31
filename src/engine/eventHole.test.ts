@@ -58,6 +58,23 @@ describe('eventHole covers every hole-scoped event kind', () => {
     expect(
       eventHole({ ...base, type: 'meta/retract', targetEventId: 'x' } as RoundEvent),
     ).toBeNull()
+    /**
+     * A SETTINGS AMENDMENT IS THE INVERSE CASE, and null is the mechanism rather
+     * than an oversight (MAI-100). It re-prices the WHOLE round — "the stake was
+     * always $2" — so it has to reach every prefix, which is what null does.
+     * Teaching this function to read a hole off one (the plausible-looking
+     * "fix") would price the early holes at the old stake while the settlement
+     * used the new one, and the ledger rows would stop summing to the total.
+     */
+    expect(
+      eventHole({
+        ...base,
+        type: 'game/configured',
+        gameId: 'g',
+        config: {},
+        handicap: { mode: 'gross', allowancePct: 100, reference: 'absolute' },
+      } as RoundEvent),
+    ).toBeNull()
   })
 
   it('reads a game event’s hole out of its payload', () => {

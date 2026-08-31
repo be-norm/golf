@@ -243,8 +243,18 @@ export const skinsEngine: GameEngine<SkinsConfig> = {
   },
   configSchema: skinsConfigSchema,
   configFields: [
-    { key: 'stakeCents', kind: 'money', label: 'Skin value', min: 25, step: 25 },
-    { key: 'carryover', kind: 'boolean', label: 'Carryovers', hint: 'Tied holes roll over' },
+    // Both editable mid-round: nothing recorded is read through either, so a
+    // change is a clean re-derive of every hole (MAI-100). Turning carryovers on
+    // late re-settles the ties behind you, which is exactly what a group means
+    // by "we were meant to be playing carryovers".
+    { key: 'stakeCents', kind: 'money', label: 'Skin value', min: 25, step: 25, midRound: 'editable' },
+    {
+      key: 'carryover',
+      kind: 'boolean',
+      label: 'Carryovers',
+      hint: 'Tied holes roll over',
+      midRound: 'editable',
+    },
   ],
   defaultConfig: () => ({ stakeCents: 100, carryover: true }),
   defaultHandicap: (): HandicapSettings => ({
