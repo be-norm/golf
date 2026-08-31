@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { eventStore } from '../../db/eventStore'
 import { getEngine, roleOf } from '../../engine/catalog'
+import { effectiveEvents } from '../../engine/core/replay'
 import { formatCentsSigned } from '../../engine/core/money'
 import { gameLabel } from '../../engine/label'
 import type { GameConfig } from '../../engine/core/types'
@@ -126,7 +127,12 @@ function Editor({
   // Locked ONCE ANYTHING IS SCORED, which is `amendRound`'s own boundary — so
   // the control disappears exactly when the write would be refused, rather than
   // the screen offering something the fold will silently drop.
-  const scored = events.some((e) => e.type === 'score/set')
+  //
+  // EFFECTIVE events, not raw, because that is the log the fold reads. Score a
+  // hole and undo it and the round has never been scored: the engine would take
+  // a rotation amendment, while a raw read still showed the field locked with a
+  // reason that had stopped being true.
+  const scored = effectiveEvents(events).some((e) => e.type === 'score/set')
   const locked = scored
     ? engine.configFields.filter((f) => f.midRound === 'locked').map((f) => f.key)
     : []

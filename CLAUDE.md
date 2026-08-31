@@ -33,7 +33,8 @@ built the way it was.
    `Round.games`, outside the log, and `deriveRound` reads them wholesale — so changing one
    after tee-off used to mean silently rewriting every settled hole's money, and the app
    simply refused: a wrong stake could only be fixed by abandoning the round. `game/configured`
-   carries a game's WHOLE settings (never a patch) and `amendRound` (catalog.ts) folds it onto
+   carries a game's WHOLE settings (never a patch), `player/handicap` carries one player's
+   course handicap, and `amendRound` (catalog.ts) folds both onto
    the round ahead of `buildRoundContext`, so `deriveRound` returns the AMENDED round and
    `useRound` hands that to every screen — one amendment site, and no surface that can show a
    stale stake. Undo, sync and export all come free: a retract drops it out of
@@ -45,10 +46,9 @@ built the way it was.
    amendment would price early holes at the old stake while the settlement used the new one.
    Four rules, each enforced rather than stated: an amendment its own engine's `configSchema`
    rejects is SKIPPED (letting it through hits `deriveRound`'s inert-config guard, i.e. a
-   mistyped stake silently deleting a live bet); the fold is idempotent, because
-   `buildHoleLedger` hands its output back to `deriveRound` once per hole with the amendments
-   still in the prefix; an un-amended round returns the SAME object, so it costs what it always
-   did; and a field the engine declares `midRound: 'locked'` is refused once anything is scored
+   mistyped stake silently deleting a live bet); the fold is idempotent, because the screens
+   hand `view.round` — its own output — to `buildHoleLedger`, which folds it again; an
+   un-amended round returns the SAME object, so it costs what it always did; and a field the engine declares `midRound: 'locked'` is refused once anything is scored
    — dropping the whole amendment, not merging the key away. `ConfigFieldSpec.midRound` is
    REQUIRED so the next engine's author decides rather than inheriting "editable" by silence.
    Lock a field when RECORDED EVENTS ARE INTERPRETED THROUGH IT: Wolf's `rotation` is the only
@@ -58,11 +58,17 @@ built the way it was.
    Editing stops at `round/completed`, read off the EVENTS so a reopened round is editable
    again — not for symmetry, but because nothing re-pushes a round because its log grew, so an
    amendment after Finish moves money on that phone alone.
-   Two sanctioned exceptions, both outside a live log rather than edits within one:
+   **The ledger folds ONCE, against the whole log** (`buildHoleLedger`), never per prefix: a
+   prefix is a different log, and the locked-field rule asks a question about the log, so
+   re-folding let hole 1's replay accept an amendment the round refuses. `deriveAmended` is
+   the entry point that skips the fold for exactly that reason.
+   ONE sanctioned exception, outside a live log rather than an edit within one:
    round IMPORT (`importRound`) atomically replaces an entire round's validated log — a
-   restore; and a first-tee handicap adjustment (`roundRepo.setCourseHandicap`) rewrites
-   `Round.players` only while the log is EMPTY, enforced in the transaction, so nothing
-   derived can change under it.
+   restore. There used to be a second — a first-tee handicap adjustment rewriting
+   `Round.players` while the log was EMPTY — and it is GONE (MAI-102). It existed only
+   because there was no honest way to change a handicap under a live log; `player/handicap`
+   is that way, so the document is now written exactly twice in a round's life: at tee-off,
+   and by `roundRepo.setStatus` when it finishes or reopens.
    Game-event payloads are validated against each engine's `eventKinds` schema in
    `deriveRound`; events that fail validation are inert.
 3. **Money is integer cents.** Every game settlement must be zero-sum (asserted in tests).
@@ -539,7 +545,17 @@ change, use a 6-digit code (`{{ .Token }}` + `verifyOtp`) rather than a link.
   preview cannot promise a swing the save doesn't deliver. A locked field is
   SHOWN, not hidden: the real control inside a disabled `<fieldset>` (so no
   third renderer of these specs exists) plus the reason, because the wolf order
-  is exactly what a group goes hunting for when they think it is wrong.
+  is exactly what a group goes hunting for when they think it is wrong. No ⚙ on any
+  of it: Press Start 2P has no glyph for one and renders a speck of dirt, the same trap
+  as ▾ ▸ ✓.
+  **Course handicaps sit on the same screen and follow the same rule** (MAI-102), in two
+  modes: commit-on-blur while nothing is scored — no money to preview, so a Save step
+  would be ceremony — and pending-edits-plus-one-Save once anything is, with a single
+  swing covering everyone changed. They no longer lock, because a change is an event now
+  rather than a document rewrite. **A preview reports two things, not one**: money that
+  would MOVE, and `openBet` positions that would change. A bet that settles at the end —
+  the snake, a live carry — has a real position and zero settlement, so reporting only the
+  swing said "No change to the money" about the very edit just made.
 - **The share card is painted, not screenshotted.** `Share` on the settle screen
   produces a PNG drawn by hand onto a canvas (`paintSummaryCard.ts`), never a
   DOM capture — rasterising the live screen means `foreignObject`, and so means

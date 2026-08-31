@@ -87,8 +87,12 @@ export type ScorePuttsClearEvent = EventEnvelope & {
  *
  * `role` is absent in the normal case, and absent means DERIVE IT rather than
  * 'main' — `GameConfig.role`'s own rule. Since this replaces wholesale, an
- * amendment that omits it clears a stamp the round was carrying, which is
- * correct: the editor re-runs `reconcileRoles` and sends what that decides.
+ * amendment that omits it clears a stamp the round was carrying, so the writer
+ * has to send whatever the round should still hold. Today's editor changes only
+ * one game's settings and re-sends the stamp it found, which is right because
+ * `roleOf` keys off SIBLING categories and an amendment cannot change those.
+ * Adding or removing a game can (MAI-103), and that writer will have to
+ * reconcile the roles it disturbs.
  */
 export type GameConfiguredEvent = EventEnvelope & {
   type: 'game/configured'
@@ -96,6 +100,31 @@ export type GameConfiguredEvent = EventEnvelope & {
   config: unknown
   handicap: HandicapSettings
   role?: 'main' | 'side'
+}
+
+/**
+ * ONE PLAYER'S COURSE HANDICAP, CHANGED FOR THE WHOLE ROUND (MAI-100/102).
+ *
+ * The same shape as `game/configured` and for the same reason — the number
+ * lives on the round DOCUMENT, so before this it could only be edited while the
+ * log was EMPTY, enforced inside `roundRepo.setCourseHandicap`'s own
+ * transaction. That rule was right while there was no honest way to change a
+ * handicap under a live log: it silently re-derives every settled hole.
+ *
+ * Now there is one, so the exception is gone and this replaces it on every
+ * path, the first tee included. What made document-rewriting dishonest was that
+ * it was SILENT; an amendment is stated, previewed, undoable, and carried by
+ * sync and export like everything else in the log.
+ *
+ * `courseHandicap` and NOT `handicapIndex`: the index records what the player
+ * reported and is never re-derived, while this is the number the engine
+ * consumes (`RoundPlayer.courseHandicap`). Correcting a round is not a claim
+ * about anybody's WHS record.
+ */
+export type PlayerHandicapEvent = EventEnvelope & {
+  type: 'player/handicap'
+  playerId: Uuid
+  courseHandicap: number
 }
 
 export type RoundCompletedEvent = EventEnvelope & { type: 'round/completed' }
@@ -118,6 +147,7 @@ export type RoundEvent =
   | ScorePuttsEvent
   | ScorePuttsClearEvent
   | GameConfiguredEvent
+  | PlayerHandicapEvent
   | RoundCompletedEvent
   | RoundReopenedEvent
   | RetractEvent
@@ -137,10 +167,17 @@ export type EventDraft = DistributiveOmit<RoundEvent, keyof EventEnvelope>
  * same 0–200 window `importSchema` repairs an imported game into
  * (exportRound.ts), stated once here now that a second path carries one.
  *
- * Strict where `importSchema` is forgiving, and deliberately: an import is a
- * RESTORE of a file we did not write, so it repairs what it can; this is a
- * write THIS app is making right now, and a payload it cannot form correctly is
- * a bug to surface rather than round off.
+ * NOTE THAT `eventDraftSchema` IS SHARED WITH IMPORT, so this bound is a
+ * refusal there rather than a repair: `importRound` parses every event and
+ * throws, while the same field on `round.games[].handicap` is repaired to 100
+ * three lines away in `importSchema`. That asymmetry is the event log's
+ * existing policy, not a new one — a `score/set` of 40 already aborts a restore
+ * — but it is worth knowing that a hand-edited export can fail to import on a
+ * value the document half would have quietly fixed.
+ *
+ * It is also NOT the last line of defence, because the sync path validates
+ * nothing at all (`applyRemoteRound` bulk-puts pulled events). `amendRound`
+ * re-checks this before letting a handicap reach stroke allocation.
  */
 export const handicapSettingsSchema: z.ZodType<HandicapSettings> = z.object({
   mode: z.enum(['gross', 'net']),
@@ -184,6 +221,21 @@ export const eventDraftSchema = z.discriminatedUnion('type', [
     config: z.unknown(),
     handicap: handicapSettingsSchema,
     role: z.enum(['main', 'side']).optional(),
+  }),
+  z.object({
+    type: z.literal('player/handicap'),
+    playerId: z.string(),
+    /**
+     * THE FAT-FINGER BOUND, and the one place it lives (MAI-102).
+     *
+     * The upper bound sits above any real WHS course handicap — a 54.0 index on
+     * a steep slope lands in the low 70s — so a legitimate value is never
+     * clipped, while "142" is refused. It used to be `clampHandicap` in
+     * `RoundStartScreen`; it belongs here now that the number travels as an
+     * event, for `score/set`'s reason: the log is forever, and the sync path
+     * validates nothing.
+     */
+    courseHandicap: z.number().int().min(-10).max(74),
   }),
   z.object({ type: z.literal('round/completed') }),
   z.object({ type: z.literal('round/reopened') }),

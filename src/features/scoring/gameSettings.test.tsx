@@ -217,6 +217,36 @@ describe('GameSettingsSheet', () => {
   })
 
   /**
+   * …and it unlocks again when the score that locked it is undone.
+   *
+   * The screen has to ask the question the FOLD asks, which is over EFFECTIVE
+   * events: a retracted score never happened, so `amendRound` would take the
+   * amendment while a raw read of the log still showed the field locked, under
+   * a reason ("the round has been scored against it") that had stopped being
+   * true.
+   */
+  it('unlocks the wolf order again when the only score is undone', async () => {
+    const roundId = await seed(
+      [
+        {
+          gameId: 'game-1',
+          type: 'wolf',
+          handicap: { mode: 'gross', allowancePct: 100, reference: 'absolute' },
+          config: { pointCents: 100, rotation: ['p-ann', 'p-bo', 'p-cal', 'p-dee'] },
+        },
+      ],
+      [{ type: 'score/set', playerId: 'p-ann', hole: 1, gross: 4 }],
+    )
+    const [score] = await eventStore.list(roundId)
+    await eventStore.append(roundId, [{ type: 'meta/retract', targetEventId: score!.id }])
+
+    renderStart(roundId)
+    await openEditor()
+    expect(screen.getByRole('button', { name: /move Bo up/i })).toBeEnabled()
+    expect(screen.queryByText(/Set at the first tee/)).toBeNull()
+  })
+
+  /**
    * A SETTLED ROUND STATES ITS SETTINGS AND DOES NOT CHANGE THEM, for a sharper
    * reason than symmetry: nothing re-pushes a round because its log grew, so an
    * amendment made after Finish moves money on this phone and never reaches

@@ -1,4 +1,5 @@
 import type { z } from 'zod'
+import { handicapSettingsSchema } from './core/events'
 import type { GameScopedEvent, RoundEvent } from './core/events'
 import { buildRoundContext, type RoundContext } from './core/context'
 import { effectiveEvents, gameEventsFor } from './core/replay'
@@ -564,8 +565,9 @@ export function listEngines(): GameEngine[] {
 }
 
 /**
- * THE ROUND AS ITS LOG SAYS IT NOW — the document with every settings amendment
- * folded on (MAI-100).
+ * THE ROUND AS ITS LOG SAYS IT NOW — the document with every amendment folded
+ * on: a game's settings (`game/configured`) and a player's course handicap
+ * (`player/handicap`) alike (MAI-100).
  *
  * Settings live on the round document rather than in the log, and `deriveRound`
  * reads them wholesale, so before this a stake set wrong at tee-off could only
@@ -587,10 +589,11 @@ export function listEngines(): GameEngine[] {
  *    its previous settings. Letting one through would instead hit `deriveRound`'s
  *    `configSchema` guard below and make the game INERT — a mistyped stake
  *    silently deleting a live bet, which is the worst failure available here.
- * 2. IDEMPOTENT. `buildHoleLedger` hands this function's own output back to
- *    `deriveRound` once per hole, each time with a prefix that still contains
- *    the amendments — so folding an amended round again must change nothing.
- *    That is why `game/added` puts BY gameId rather than appending.
+ * 2. IDEMPOTENT. `buildHoleLedger` is handed this function's own output (the
+ *    screens pass `view.round`) and folds it again against the full log, so
+ *    folding an amended round must change nothing. It folds ONCE rather than
+ *    per prefix, deliberately — a prefix is a different log, and the locked
+ *    rule below asks a question about the log. See `deriveAmended`.
  * 3. IDENTITY-STABLE. A round with no amendments — every round today — comes
  *    back as the same object, so `useRound`'s memo and every downstream identity
  *    comparison behave exactly as they did before this existed.
@@ -600,6 +603,7 @@ export function listEngines(): GameEngine[] {
  */
 export function amendRound(round: Round, effective: readonly RoundEvent[]): Round {
   let games: GameConfig[] | undefined
+  let players: RoundPlayer[] | undefined
   // Has anything been scored YET — walked in seq order, so it answers "at the
   // moment this amendment was made", not "by the end of the round". A locked
   // field is editable on the first tee, which is when a wrong wolf order is
@@ -611,6 +615,18 @@ export function amendRound(round: Round, effective: readonly RoundEvent[]): Roun
       scored = true
       continue
     }
+    if (e.type === 'player/handicap') {
+      // The number the engine consumes, replaced for the whole round — the
+      // index is left alone, because it records what the player reported
+      // (RoundPlayer.courseHandicap). A name that isn't in this round is inert,
+      // like every other amendment naming something absent.
+      const current = players ?? round.players
+      const idx = current.findIndex((p) => p.playerId === e.playerId)
+      if (idx === -1) continue
+      players = [...current]
+      players[idx] = { ...current[idx]!, courseHandicap: e.courseHandicap }
+      continue
+    }
     if (e.type !== 'game/configured') continue
     const current = games ?? round.games
     const idx = current.findIndex((g) => g.gameId === e.gameId)
@@ -620,6 +636,19 @@ export function amendRound(round: Round, effective: readonly RoundEvent[]): Roun
     if (idx === -1) continue
     const game = current[idx]!
     if (!acceptsConfig(game.type, e.config)) continue
+    /**
+     * AND THE HANDICAP HALF, which `acceptsConfig` does not cover.
+     *
+     * `handicapSettingsSchema` bounds `allowancePct` because it reaches
+     * `applyAllowance`, which has no guard of its own — an out-of-range value
+     * mis-allocates strokes for every hole of the round, silently. That bound
+     * runs on the local append and on import, but NOT on the sync path:
+     * `applyRemoteRound` bulk-puts pulled events with no validation at all, so
+     * a corrupt archive row would otherwise walk straight into stroke
+     * allocation. Same rule as the config: an amendment we cannot read is
+     * inert, and the game keeps the settings it had.
+     */
+    if (!handicapSettingsSchema.safeParse(e.handicap).success) continue
     if (scored && changesLockedField(game, e.config)) continue
     // Spread FIRST so a field added to `GameConfig` later reaches the amended
     // round instead of being silently dropped by an enumerating rebuild — the
@@ -634,7 +663,8 @@ export function amendRound(round: Round, effective: readonly RoundEvent[]): Roun
     games[idx] = next
   }
 
-  return games ? { ...round, games } : round
+  if (!games && !players) return round
+  return { ...round, ...(games && { games }), ...(players && { players }) }
 }
 
 /**
@@ -680,7 +710,28 @@ export function deriveRound(
   const effective = effectiveEvents(events)
   // Before anything else reads the round: `ctx.round` is the AMENDED round, and
   // so is what `useRound` hands every screen (see amendRound).
-  round = amendRound(round, effective)
+  return deriveAmended(amendRound(round, effective), effective)
+}
+
+/**
+ * The derivation proper, for a round whose amendments are ALREADY folded in.
+ *
+ * Split out for `buildHoleLedger`, and the reason is not tidiness. The ledger
+ * replays PREFIXES, and the locked-field rule asks a question about the log —
+ * "had anything been scored when this amendment was made?" — whose answer
+ * differs between a prefix and the whole thing. Re-folding per prefix therefore
+ * let hole 1's replay ACCEPT a rotation amendment the full log correctly
+ * refuses, on a round whose first hole is unscored: the same full-vs-prefix
+ * divergence `eventHole`'s note in ledger.ts warns about, and it would stop the
+ * rows summing to the total for any engine that settles before a score.
+ *
+ * So the fold happens ONCE, against the complete log, and every prefix derives
+ * against that one answer.
+ */
+export function deriveAmended(
+  round: Round,
+  effective: readonly RoundEvent[],
+): { round: Round; ctx: RoundContext; derivations: Map<Uuid, GameDerivation> } {
   const ctx = buildRoundContext(round, effective)
   const derivations = new Map<Uuid, GameDerivation>()
   for (const game of round.games) {

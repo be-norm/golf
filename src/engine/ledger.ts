@@ -1,4 +1,5 @@
-import { deriveRound, type GameDerivation } from './catalog'
+import { amendRound, deriveAmended, type GameDerivation } from './catalog'
+import { effectiveEvents } from './core/replay'
 import type { RoundContext } from './core/context'
 import type { RoundEvent } from './core/events'
 import type { Round, Uuid } from './core/types'
@@ -64,8 +65,19 @@ export function buildHoleLedger(
   full: ReadonlyMap<Uuid, GameDerivation>,
 ): Map<Uuid, HoleImpact[]> {
   const holesPlayed = ctx.holesPlayed
-  const ledger = new Map<Uuid, HoleImpact[]>(round.games.map((g) => [g.gameId, []]))
-  let prev = new Map<Uuid, Record<Uuid, number>>(round.games.map((g) => [g.gameId, {}]))
+  /**
+   * AMENDED ONCE, AGAINST THE WHOLE LOG — never per prefix (MAI-100).
+   *
+   * A prefix is a different log, and the locked-field rule asks a question about
+   * the log: "had anything been scored when this amendment was made?". Folding
+   * inside each prefix replay therefore answered it differently on hole 1 than
+   * on the full round, so a rotation amendment the round refuses could be
+   * accepted by the first row. Every row now derives against the same settings
+   * the settle screen does, which is the whole contract of this function.
+   */
+  const amended = amendRound(round, effectiveEvents(events))
+  const ledger = new Map<Uuid, HoleImpact[]>(amended.games.map((g) => [g.gameId, []]))
+  let prev = new Map<Uuid, Record<Uuid, number>>(amended.games.map((g) => [g.gameId, {}]))
 
   // A hole earns a ledger row only once it exists in play: money moved, or the
   // game has something to say about a hole somebody actually scored. Keeps
@@ -104,12 +116,12 @@ export function buildHoleLedger(
       // nothing — and the last ledger row has to agree with the settle screen.
       return eh === null || (positionOf.get(eh) ?? -1) <= idx
     })
-    const { derivations } = deriveRound(round, prefix)
+    const { derivations } = deriveAmended(amended, effectiveEvents(prefix))
     const next = new Map<Uuid, Record<Uuid, number>>()
-    for (const game of round.games) {
+    for (const game of amended.games) {
       const cents = derivations.get(game.gameId)?.settlement.perPlayerCents ?? {}
       const before = prev.get(game.gameId) ?? {}
-      const deltas = round.players
+      const deltas = amended.players
         .map((p) => ({
           playerId: p.playerId,
           cents: (cents[p.playerId] ?? 0) - (before[p.playerId] ?? 0),

@@ -179,6 +179,34 @@ describe('amendRound — a settings change re-prices the whole round', () => {
   })
 
   /**
+   * A4b: THE HANDICAP HALF IS GUARDED TOO, and it needs its own check because
+   * `configSchema` says nothing about it.
+   *
+   * `allowancePct` reaches `applyAllowance`, which has no guard of its own, so
+   * an out-of-range value mis-allocates strokes for every hole of the round —
+   * silently, as arithmetic rather than as corruption. The local append and
+   * `importRound` both bound it, but the SYNC path does not: `applyRemoteRound`
+   * bulk-puts pulled events with no validation, so this is the only thing
+   * standing between a corrupt archive row and the money.
+   */
+  it('A4b: an amendment with an unusable handicap is inert', () => {
+    const round = makeRound({
+      players: FOUR(),
+      holes: 'front9',
+      games: [{ type: 'skins', config: { stakeCents: 100, carryover: true }, handicap: GROSS }],
+    })
+    const log = new EventLog()
+    log.append({
+      type: 'game/configured',
+      gameId: 'game-1',
+      config: { stakeCents: 100, carryover: true },
+      // what a pulled archive row could carry, since nothing validates it
+      handicap: { mode: 'net', allowancePct: 900, reference: 'offLow' } as HandicapSettings,
+    })
+    expect(amendRound(round, effectiveEvents(log.events)).games[0]!.handicap).toEqual(GROSS)
+  })
+
+  /**
    * A5: an amendment naming a game the round doesn't hold conjures nothing.
    * Adding a game is `game/added`'s job and carries a type; this one couldn't
    * know what engine to run.
@@ -197,6 +225,77 @@ describe('amendRound — a settings change re-prices the whole round', () => {
       potCents: 100,
       doubling: false,
     })
+  })
+})
+
+describe('amendRound — a player\'s course handicap', () => {
+  const netRound = () =>
+    makeRound({
+      players: makePlayers([
+        { name: 'A', ch: 0 },
+        { name: 'B', ch: 18 },
+        { name: 'C', ch: 0 },
+        { name: 'D', ch: 0 },
+      ]),
+      holes: 'front9',
+      games: [
+        {
+          type: 'skins',
+          config: { stakeCents: 100, carryover: true },
+          handicap: { mode: 'net', allowancePct: 100, reference: 'offLow' },
+        },
+      ],
+    })
+
+  /**
+   * H1: the number the engine consumes moves, and the strokes follow — the
+   * whole point of retiring `setCourseHandicap`'s empty-log rule (MAI-102).
+   * Nine of eighteen halves the allowance, so B's 18 gives 9 strokes over the
+   * front nine and 0 once corrected to scratch.
+   */
+  it('H1: re-allocates every net game\'s strokes', () => {
+    const round = netRound()
+    const log = new EventLog()
+    scoreHoles(round, log, [1, 2, 3])
+    const before = deriveRound(round, log.events)
+    expect(before.ctx.strokesFor('game-1', 'p-b', 1)).toBe(1)
+
+    log.append({ type: 'player/handicap', playerId: 'p-b', courseHandicap: 0 })
+    const after = deriveRound(round, log.events)
+    expect(after.ctx.strokesFor('game-1', 'p-b', 1)).toBe(0)
+    // and the amended round is what every screen reads, not the stored document
+    expect(after.round.players[1]!.courseHandicap).toBe(0)
+    expect(round.players[1]!.courseHandicap).toBe(18)
+  })
+
+  /**
+   * H2: the INDEX is left alone. It records what the player reported and is
+   * never re-derived; correcting a round is not a claim about a WHS record.
+   */
+  it('H2: leaves the reported handicap index untouched', () => {
+    const round = netRound()
+    round.players[1]!.handicapIndex = 20.4
+    const log = new EventLog()
+    log.append({ type: 'player/handicap', playerId: 'p-b', courseHandicap: 4 })
+    const amended = amendRound(round, effectiveEvents(log.events))
+    expect(amended.players[1]).toMatchObject({ courseHandicap: 4, handicapIndex: 20.4 })
+  })
+
+  /** H3: a name the round doesn't hold is inert, like every other amendment. */
+  it('H3: ignores a handicap for somebody who is not in the round', () => {
+    const round = netRound()
+    const log = new EventLog()
+    log.append({ type: 'player/handicap', playerId: 'p-nobody', courseHandicap: 4 })
+    expect(amendRound(round, effectiveEvents(log.events))).toBe(round)
+  })
+
+  /** H4: last write wins, the rule every reducer here follows. */
+  it('H4: takes the newest of several corrections', () => {
+    const round = netRound()
+    const log = new EventLog()
+    log.append({ type: 'player/handicap', playerId: 'p-b', courseHandicap: 12 })
+    log.append({ type: 'player/handicap', playerId: 'p-b', courseHandicap: 6 })
+    expect(amendRound(round, effectiveEvents(log.events)).players[1]!.courseHandicap).toBe(6)
   })
 })
 
