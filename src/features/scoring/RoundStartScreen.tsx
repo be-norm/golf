@@ -288,7 +288,7 @@ export function RoundStartScreen() {
                     onClick={() => setEditing(game.gameId)}
                     className="font-display text-[10px] uppercase text-coin-400"
                   >
-                    ⚙ Edit
+                    Edit ▶
                   </button>
                   <button
                     aria-label={`${label} rules`}

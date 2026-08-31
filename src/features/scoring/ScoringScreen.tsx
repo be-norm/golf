@@ -873,7 +873,7 @@ export function ScoringScreen() {
               to={`/round/${round.id}/start`}
               className="pixel-press font-display block border-stone-700 bg-stone-900/70 px-4 py-3 text-center text-[10px] uppercase text-stone-300"
             >
-              ⚙ Edit bets ▶
+              Edit bets ▶
             </Link>
           </div>
           {/* When the bar collapses the side bets, this is where they expand —

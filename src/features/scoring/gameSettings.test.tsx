@@ -136,6 +136,39 @@ describe('GameSettingsSheet', () => {
   })
 
   /**
+   * A BET THAT HASN'T SETTLED STILL CHANGED, and the preview has to say so.
+   *
+   * Snake pays only on a completed round, so mid-round its settlement swing is
+   * genuinely zero — and reporting only the swing said "No change to the money"
+   * about the very edit just made, which reads as "that did nothing". This was
+   * found smoke-testing the reported case, not by a test, because it is a
+   * sentence rather than a number.
+   *
+   * `openBet` is the channel for it ("a live bet the money cannot show yet"),
+   * so the preview asks the same one the pinned bar does.
+   */
+  it('states what is riding when a bet has not settled yet', async () => {
+    const roundId = await seed(snakeGames(), [
+      ...[1, 2, 3].flatMap((hole) =>
+        ['p-ann', 'p-bo', 'p-cal', 'p-dee'].map((playerId) => ({
+          type: 'score/set' as const,
+          playerId,
+          hole,
+          gross: 4,
+        })),
+      ),
+      { type: 'game/event', gameId: 'game-1', kind: 'snake/bite', data: { hole: 2, playerId: 'p-ann' } },
+    ])
+    renderStart(roundId)
+    await openEditor()
+
+    fireEvent.click(screen.getByRole('button', { name: /increase Pot/i }))
+    // Ann is carrying it at the new pot against three others — not "no change"
+    expect(await screen.findByText(/Now riding: Ann · -\$1\.25 x 3/)).toBeInTheDocument()
+    expect(screen.queryByText(/Nothing settled yet/)).toBeNull()
+  })
+
+  /**
    * A LOCKED FIELD IS SHOWN, NOT HIDDEN — and it is the round's state that locks
    * it, not the field. Before the first score Wolf's order is fully editable,
    * which is when a mis-entered one is actually noticed.

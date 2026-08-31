@@ -4,7 +4,7 @@ import { getEngine, roleOf } from '../../engine/catalog'
 import { formatCentsSigned } from '../../engine/core/money'
 import { gameLabel } from '../../engine/label'
 import type { GameConfig } from '../../engine/core/types'
-import { settingsChanged, settlementSwing } from '../../lib/roundSettings'
+import { amendmentImpact, settingsChanged } from '../../lib/roundSettings'
 import { BigButton } from '../../components/BigButton'
 import { Sheet } from '../../components/Sheet'
 import { GameConfigCard, type GameDraft } from '../setup/GameConfigCard'
@@ -139,7 +139,9 @@ function Editor({
     ...(draft.role ? { role: draft.role } : {}),
   }
   const changed = settingsChanged(game, draft)
-  const swing = changed ? settlementSwing(round, events, [amendment]) : []
+  const impact = changed
+    ? amendmentImpact(round, events, [amendment])
+    : { swing: [], riding: [] }
 
   const save = () => {
     // Nothing to say, so say nothing. An amendment that changes no setting is
@@ -195,11 +197,23 @@ function Editor({
       {!readOnly && changed && (
         <div className="pixel border-coin-500/40 bg-coin-500/10 px-4 py-3">
           <p className="font-display text-[10px] uppercase text-coin-400">Re-prices the round</p>
-          <p className="mt-1 text-stone-300">
-            {swing.length === 0
-              ? 'No change to the money.'
-              : swing.map((s) => `${s.name} ${formatCentsSigned(s.cents)}`).join(' · ')}
-          </p>
+          {impact.swing.length > 0 && (
+            <p className="mt-1 text-stone-300">
+              {impact.swing.map((s) => `${s.name} ${formatCentsSigned(s.cents)}`).join(' · ')}
+            </p>
+          )}
+          {/* A BET THAT HASN'T SETTLED STILL CHANGED. The snake is worth
+              something to somebody all round and settles only at the end, so
+              editing its pot moves no money yet — and reporting only the swing
+              said "No change to the money" about the very edit just made. */}
+          {impact.riding.map((position) => (
+            <p key={position} className="mt-1 text-stone-300">
+              Now riding: {position}
+            </p>
+          ))}
+          {impact.swing.length === 0 && impact.riding.length === 0 && (
+            <p className="mt-1 text-stone-300">Nothing settled yet — no money moves.</p>
+          )}
         </div>
       )}
 
