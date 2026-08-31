@@ -44,8 +44,8 @@ function scoreHoles(round: Round, log: EventLog, holes: number[]) {
   )
 }
 
-const bite = (log: EventLog, hole: number, playerId: string) =>
-  log.append({ type: 'game/event', gameId: 'game-1', kind: 'snake/bite', data: { hole, playerId } })
+const bite = (log: EventLog, hole: number, playerId: string, gameId = 'game-1') =>
+  log.append({ type: 'game/event', gameId, kind: 'snake/bite', data: { hole, playerId } })
 
 /** The editor's write: this game's settings, whole, from now back to hole 1. */
 const configure = (log: EventLog, config: unknown, handicap: HandicapSettings = GROSS) =>
@@ -352,6 +352,155 @@ describe('amendRound — the fold properties', () => {
     configure(log, { potCents: 200, doubling: false })
     const amended = amendRound(round, effectiveEvents(log.events))
     expect('role' in amended.games[0]!).toBe(false)
+  })
+})
+
+describe('amendRound — adding and removing a game', () => {
+  const skinsAndSnake = () =>
+    makeRound({
+      players: FOUR(),
+      holes: 'front9',
+      games: [
+        { type: 'skins', config: { stakeCents: 100, carryover: true }, handicap: GROSS },
+        { type: 'snake', config: { potCents: 100, doubling: false }, handicap: GROSS },
+      ],
+    })
+
+  const added = (game: unknown): EventDraft => ({ type: 'game/added', game } as EventDraft)
+
+  /**
+   * G1: "we forgot the snake" — added on the 8th, and it scores the holes
+   * already behind you. Same retroactive reading as an amended stake, which is
+   * what a group means when they say they were playing it all along.
+   */
+  it('G1: a game added mid-round settles the holes already played', () => {
+    const round = makeRound({
+      players: FOUR(),
+      holes: 'front9',
+      games: [{ type: 'skins', config: { stakeCents: 100, carryover: true }, handicap: GROSS }],
+    })
+    const log = new EventLog()
+    scoreHoles(round, log, [1, 2, 3])
+    log.append(
+      added({
+        gameId: 'game-late',
+        type: 'snake',
+        handicap: GROSS,
+        config: { potCents: 100, doubling: false },
+      }),
+    )
+    log.append({
+      type: 'game/event',
+      gameId: 'game-late',
+      kind: 'snake/bite',
+      data: { hole: 1, playerId: 'p-a' },
+    })
+    log.append({ type: 'round/completed' })
+
+    const { round: amended, derivations } = deriveRound(round, log.events)
+    expect(amended.games.map((g) => g.type)).toEqual(['skins', 'snake'])
+    // …and the bite on hole 1 counts, though the game joined after it
+    expect(derivations.get('game-late')!.settlement.perPlayerCents['p-a']).toBe(-300)
+  })
+
+  /**
+   * G2: removing takes the money off the card — and leaves the game's own
+   * events alone, which is what makes G3 possible.
+   */
+  it('G2: a removed game stops deriving', () => {
+    const round = skinsAndSnake()
+    const log = new EventLog()
+    scoreHoles(round, log, [1, 2, 3])
+    bite(log, 2, 'p-a', 'game-2')
+    log.append({ type: 'game/removed', gameId: 'game-2' })
+    log.append({ type: 'round/completed' })
+
+    const { round: amended, derivations } = deriveRound(round, log.events)
+    expect(amended.games.map((g) => g.gameId)).toEqual(['game-1'])
+    expect(derivations.has('game-2')).toBe(false)
+  })
+
+  /**
+   * G3: RESTORE — and it is the reason `game/added` puts by id rather than
+   * appending. The bite recorded before the removal comes back with the game,
+   * because nothing was ever deleted; only the game it belonged to stopped
+   * being in the round.
+   */
+  it('G3: re-adding a removed game brings its own events back with it', () => {
+    const round = skinsAndSnake()
+    const log = new EventLog()
+    scoreHoles(round, log, [1, 2, 3])
+    bite(log, 2, 'p-a', 'game-2')
+    log.append({ type: 'game/removed', gameId: 'game-2' })
+    log.append(
+      added({
+        gameId: 'game-2',
+        type: 'snake',
+        handicap: GROSS,
+        config: { potCents: 100, doubling: false },
+      }),
+    )
+    log.append({ type: 'round/completed' })
+
+    const snake = deriveRound(round, log.events).derivations.get('game-2') as SnakeDerivation
+    expect(snake.holderId).toBe('p-a')
+    expect(snake.settlement.perPlayerCents['p-a']).toBe(-300)
+  })
+
+  /**
+   * G4: a different GAME under an id the round already holds would re-interpret
+   * the first one's recorded events as the second's — the same lie the locked
+   * rotation refuses, arriving by another door.
+   */
+  it('G4: refuses to swap one game for another under the same id', () => {
+    const round = skinsAndSnake()
+    const log = new EventLog()
+    log.append(
+      added({
+        gameId: 'game-2',
+        type: 'skins',
+        handicap: GROSS,
+        config: { stakeCents: 500, carryover: false },
+      }),
+    )
+    expect(amendRound(round, effectiveEvents(log.events)).games[1]).toMatchObject({
+      type: 'snake',
+      config: { potCents: 100 },
+    })
+  })
+
+  /** G5: a game whose config its engine rejects is never admitted — it would
+   *  join the round only to be made inert by `deriveRound`, which is a game on
+   *  the card that pays nothing and says nothing about why. */
+  it('G5: refuses a game whose config its engine rejects', () => {
+    const round = skinsAndSnake()
+    const log = new EventLog()
+    log.append(added({ gameId: 'game-broken', type: 'snake', handicap: GROSS, config: { potCents: 500 } }))
+    expect(amendRound(round, effectiveEvents(log.events)).games).toHaveLength(2)
+  })
+
+  /** G6: order in the fold is what decides — remove-then-add restores, and
+   *  add-then-remove drops. Both are just the log read top to bottom. */
+  it('G6: reads add and remove in log order', () => {
+    const round = skinsAndSnake()
+    const log = new EventLog()
+    log.append({ type: 'game/removed', gameId: 'game-2' })
+    log.append(added({ gameId: 'game-2', type: 'snake', handicap: GROSS, config: { potCents: 100, doubling: false } }))
+    log.append({ type: 'game/removed', gameId: 'game-1' })
+    expect(amendRound(round, effectiveEvents(log.events)).games.map((g) => g.gameId)).toEqual([
+      'game-2',
+    ])
+  })
+
+  /** G7: a restored game keeps its POSITION, which `roleOf`, `gameLabel` and
+   *  `primaryGame` all read — an append would silently promote a side bet. */
+  it('G7: keeps a re-added game in its original place in the round', () => {
+    const round = skinsAndSnake()
+    const log = new EventLog()
+    log.append(added({ gameId: 'game-1', type: 'skins', handicap: GROSS, config: { stakeCents: 500, carryover: true } }))
+    const amended = amendRound(round, effectiveEvents(log.events))
+    expect(amended.games.map((g) => g.gameId)).toEqual(['game-1', 'game-2'])
+    expect(amended.games[0]!.config).toEqual({ stakeCents: 500, carryover: true })
   })
 })
 

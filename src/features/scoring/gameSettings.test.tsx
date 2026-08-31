@@ -266,6 +266,89 @@ describe('GameSettingsSheet', () => {
   })
 
   /**
+   * "We forgot to add the snake", on the 8th (MAI-103). It joins through the
+   * SAME editor a game gets at setup, so it arrives configured rather than at
+   * whatever the defaults happened to be.
+   */
+  it('adds a game mid-round, through the same editor', async () => {
+    const roundId = await seed(
+      [
+        {
+          gameId: 'game-1',
+          type: 'skins',
+          handicap: { mode: 'gross', allowancePct: 100, reference: 'absolute' },
+          config: { stakeCents: 100, carryover: true },
+        },
+      ],
+      [{ type: 'score/set', playerId: 'p-ann', hole: 1, gross: 4 }],
+    )
+    renderStart(roundId)
+
+    fireEvent.click(await screen.findByRole('button', { name: '+ Add a side bet' }))
+    fireEvent.click(await screen.findByRole('button', { name: /Snake/ }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Add' }))
+
+    await waitFor(async () => {
+      const events = await eventStore.list(roundId)
+      expect(events.filter((e) => e.type === 'game/added')).toHaveLength(1)
+    })
+    // …and the round now derives it, on the holes already behind them
+    expect(await screen.findByText(/Snake/)).toBeInTheDocument()
+  })
+
+  /**
+   * REMOVING CONFIRMS, and what it promises is that the bet can come back. Its
+   * own events are never deleted, so Restore brings them with it — which is
+   * the whole reason a confirm is enough and an undo-only escape is not (the
+   * header Undo reaches the log's tail and nothing further).
+   */
+  it('removes a game behind a confirm, and puts it back with its events', async () => {
+    const roundId = await seed(
+      [
+        {
+          gameId: 'game-1',
+          type: 'skins',
+          handicap: { mode: 'gross', allowancePct: 100, reference: 'absolute' },
+          config: { stakeCents: 100, carryover: true },
+        },
+        {
+          gameId: 'game-2',
+          type: 'snake',
+          handicap: { mode: 'gross', allowancePct: 100, reference: 'absolute' },
+          config: { potCents: 100, doubling: false },
+        },
+      ],
+      [
+        ...['p-ann', 'p-bo', 'p-cal', 'p-dee'].map((playerId) => ({
+          type: 'score/set' as const,
+          playerId,
+          hole: 1,
+          gross: 4,
+        })),
+        { type: 'game/event', gameId: 'game-2', kind: 'snake/bite', data: { hole: 1, playerId: 'p-ann' } },
+      ],
+    )
+    renderStart(roundId)
+
+    // the snake's own settings sheet
+    fireEvent.click((await screen.findAllByRole('button', { name: /settings$/i }))[1]!)
+    fireEvent.click(await screen.findByRole('button', { name: /Remove from this round/i }))
+    // it says what it costs and what survives, rather than just doing it
+    expect(await screen.findByText(/its own record stays with the round/i)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Remove' }))
+
+    // gone from the round…
+    expect(await screen.findByText(/Removed from this round/i)).toBeInTheDocument()
+
+    // …and back, bite intact
+    fireEvent.click(screen.getByRole('button', { name: /Restore/i }))
+    await waitFor(() => expect(screen.queryByText(/Removed from this round/i)).toBeNull())
+    const events = await eventStore.list(roundId)
+    expect(events.filter((e) => e.type === 'game/event')).toHaveLength(1)
+    expect(events.filter((e) => e.type === 'game/added')).toHaveLength(1)
+  })
+
+  /**
    * `validateSetup` decides what is legal here exactly as it does in setup —
    * reused rather than re-stated, so a rule can never hold at tee-off and lapse
    * mid-round.

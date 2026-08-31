@@ -274,6 +274,11 @@ export interface Round {
    * declaration and switches this on, and the group is told which game asked
    * rather than being offered a question they have no way to answer.
    *
+   * AMENDED, NOT ONLY FROZEN (MAI-103). A game can join a round mid-way now, so
+   * `amendRound` ORs this on when an added game declares `meta.reads` — never
+   * off, since putts already entered stay entered. The round still FREEZES the
+   * tee-off answer here; the fold is what keeps it current.
+   *
    * NOTHING DECLARES IT TODAY. Snake was to be the first reader and moved to
    * the award channel instead (MAI-58) — the snake is a judgement about who
    * three-putted LAST, which a count cannot express — so this whole path is

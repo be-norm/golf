@@ -627,6 +627,29 @@ export function amendRound(round: Round, effective: readonly RoundEvent[]): Roun
       players[idx] = { ...current[idx]!, courseHandicap: e.courseHandicap }
       continue
     }
+    if (e.type === 'game/added') {
+      const current = games ?? round.games
+      const idx = current.findIndex((g) => g.gameId === e.game.gameId)
+      // Never admit a game that cannot derive — the same rule an amendment
+      // follows, applied to a game arriving whole.
+      if (!acceptsConfig(e.game.type, e.game.config)) continue
+      // A different game under an id already in the round would re-interpret
+      // the first one's recorded events as the second's.
+      if (idx !== -1 && current[idx]!.type !== e.game.type) continue
+      games = [...current]
+      // PUT, not push: replacing in place keeps the fold idempotent (the ledger
+      // re-folds an already-amended round) and keeps `round.games` ORDER stable,
+      // which `roleOf`, `gameLabel` and `primaryGame` all read.
+      if (idx === -1) games.push(e.game)
+      else games[idx] = e.game
+      continue
+    }
+    if (e.type === 'game/removed') {
+      const current = games ?? round.games
+      if (!current.some((g) => g.gameId === e.gameId)) continue
+      games = current.filter((g) => g.gameId !== e.gameId)
+      continue
+    }
     if (e.type !== 'game/configured') continue
     const current = games ?? round.games
     const idx = current.findIndex((g) => g.gameId === e.gameId)
@@ -664,7 +687,23 @@ export function amendRound(round: Round, effective: readonly RoundEvent[]): Roun
   }
 
   if (!games && !players) return round
-  return { ...round, ...(games && { games }), ...(players && { players }) }
+  const amended: Round = { ...round, ...(games && { games }), ...(players && { players }) }
+  /**
+   * A ROUND COLLECTS A SHARED FACT BECAUSE A GAME IN IT READS ONE (MAI-90), and
+   * a game can now join mid-round — so the answer has to be re-asked rather than
+   * frozen at tee-off.
+   *
+   * ORed, never turned off: putts already recorded stay recorded, and a game
+   * removed after somebody entered them shouldn't retract the entry control from
+   * under a half-filled card. Dormant today — nothing declares `meta.reads` —
+   * but it is the difference between a future Dots added on the 8th collecting
+   * putts and silently collecting nothing, which is the exact hole CLAUDE.md
+   * flags on `Round.trackPutts`.
+   */
+  if (!amended.trackPutts && games?.some((g) => (getEngine(g.type)?.meta.reads?.length ?? 0) > 0)) {
+    amended.trackPutts = true
+  }
+  return amended
 }
 
 /**

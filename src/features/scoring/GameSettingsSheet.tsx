@@ -4,11 +4,13 @@ import { getEngine, roleOf } from '../../engine/catalog'
 import { effectiveEvents } from '../../engine/core/replay'
 import { formatCentsSigned } from '../../engine/core/money'
 import { gameLabel } from '../../engine/label'
-import type { GameConfig } from '../../engine/core/types'
+import type { EventDraft } from '../../engine/core/events'
+import type { GameConfig, HandicapSettings } from '../../engine/core/types'
 import { amendmentImpact, settingsChanged } from '../../lib/roundSettings'
 import { BigButton } from '../../components/BigButton'
 import { Sheet } from '../../components/Sheet'
 import { GameConfigCard, type GameDraft } from '../setup/GameConfigCard'
+import { reconcileRoles } from '../setup/roles'
 import type { RoundView } from './useRound'
 
 /**
@@ -33,6 +35,7 @@ import type { RoundView } from './useRound'
 export function GameSettingsSheet({
   view,
   gameId,
+  adding,
   readOnly,
   onClose,
   onRules,
@@ -40,6 +43,13 @@ export function GameSettingsSheet({
   view: RoundView
   /** the game being edited, or undefined when the sheet is closed */
   gameId: string | undefined
+  /**
+   * A game being ADDED rather than edited (MAI-103) — the picker's choice, with
+   * its defaults, not yet in the round. It runs through the same editor, so a
+   * game joining on the 8th is configured exactly as it would have been at the
+   * first tee.
+   */
+  adding?: { game: GameConfig; section: 'main' | 'side' }
   /**
    * A COMPLETED ROUND STATES ITS SETTINGS AND DOES NOT CHANGE THEM, and the
    * reason is sharper than consistency with the award grid: nothing re-pushes a
@@ -53,7 +63,8 @@ export function GameSettingsSheet({
   onClose: () => void
   onRules: (type: string) => void
 }) {
-  const game = view.round.games.find((g) => g.gameId === gameId)
+  const existing = view.round.games.find((g) => g.gameId === gameId)
+  const game = adding?.game ?? existing
   return (
     <Sheet open={game !== undefined} onClose={onClose}>
       {game && (
@@ -64,6 +75,8 @@ export function GameSettingsSheet({
           key={game.gameId}
           view={view}
           game={game}
+          isNew={adding !== undefined}
+          section={adding?.section}
           readOnly={readOnly}
           onClose={onClose}
           onRules={onRules}
@@ -73,15 +86,26 @@ export function GameSettingsSheet({
   )
 }
 
+/** The settings half of a `game/configured` payload — one spelling, three writers. */
+const roleFields = (d: { config: unknown; handicap: HandicapSettings; role?: 'main' | 'side' }) => ({
+  config: d.config,
+  handicap: d.handicap,
+  ...(d.role ? { role: d.role } : {}),
+})
+
 function Editor({
   view,
   game,
+  isNew,
+  section,
   readOnly,
   onClose,
   onRules,
 }: {
   view: RoundView
   game: GameConfig
+  isNew: boolean
+  section?: 'main' | 'side'
   readOnly: boolean
   onClose: () => void
   onRules: (type: string) => void
@@ -109,6 +133,7 @@ function Editor({
     ...(game.role ? { role: game.role } : {}),
   })
   const [failed, setFailed] = useState(false)
+  const [confirming, setConfirming] = useState(false)
 
   if (!engine) {
     return (
@@ -137,31 +162,97 @@ function Editor({
     ? engine.configFields.filter((f) => f.midRound === 'locked').map((f) => f.key)
     : []
 
-  const amendment = {
-    type: 'game/configured' as const,
-    gameId: game.gameId,
-    config: draft.config,
-    handicap: draft.handicap,
-    ...(draft.role ? { role: draft.role } : {}),
+  /**
+   * What Save would write. Adding a game and re-configuring one are different
+   * events but the same editor, because a game joining on the 8th should be set
+   * up exactly as it would have been on the first tee.
+   *
+   * `reconcileRoles` runs on an ADD, and on a REMOVE below, exactly as setup
+   * runs it on both: an "either" game's role is a fact about the whole round, so
+   * a round that just gained or lost a game can need a stamp moved on a game
+   * nobody touched. `roleOf` keys off sibling categories, which is why plain
+   * re-configuring never needs it.
+   */
+  const drafts = (): EventDraft[] => {
+    const asConfig = (d: GameDraft): GameConfig => ({
+      gameId: d.gameId,
+      type: d.type,
+      handicap: d.handicap,
+      config: d.config,
+      ...(d.role ? { role: d.role } : {}),
+    })
+    if (!isNew) {
+      return [{ type: 'game/configured', gameId: game.gameId, ...roleFields(draft) } as EventDraft]
+    }
+    const sections: GameDraft[] = [
+      ...round.games.map((g) => ({
+        gameId: g.gameId,
+        type: g.type,
+        handicap: g.handicap,
+        config: g.config,
+        section: roleOf(g, round.games),
+        ...(g.role ? { role: g.role } : {}),
+      })),
+      { ...draft, section: section ?? 'main' },
+    ]
+    const reconciled = reconcileRoles(sections)
+    const newcomer = reconciled[reconciled.length - 1]!
+    // …and any sibling whose stamp the newcomer disturbed rides along in the
+    // same append, so the round is never momentarily inconsistent.
+    const moved = reconciled.slice(0, -1).flatMap((g, i) =>
+      g.role === round.games[i]!.role
+        ? []
+        : [{ type: 'game/configured', gameId: g.gameId, ...roleFields(g) } as EventDraft],
+    )
+    return [{ type: 'game/added', game: asConfig(newcomer) } as EventDraft, ...moved]
   }
-  const changed = settingsChanged(game, draft)
-  const impact = changed
-    ? amendmentImpact(round, events, [amendment])
-    : { swing: [], riding: [] }
+
+  const changed = isNew || settingsChanged(game, draft)
+  const pending = changed ? drafts() : []
+  const impact = changed ? amendmentImpact(round, events, pending) : { swing: [], riding: [] }
+
+  const write = (next: EventDraft[]) => {
+    setFailed(false)
+    void eventStore
+      .append(round.id, next)
+      .then(onClose)
+      // `EventStore.append` validates with `eventDraftSchema.parse`, which
+      // THROWS. Without this the sheet would sit there looking live with the
+      // change silently unwritten.
+      .catch(() => setFailed(true))
+  }
 
   const save = () => {
     // Nothing to say, so say nothing. An amendment that changes no setting is
     // still permanent in an append-only log that syncs and exports — the rule
     // the scoring screen's input channel follows for the same reason.
     if (!changed) return onClose()
-    setFailed(false)
-    void eventStore
-      .append(round.id, [amendment])
-      .then(onClose)
-      // `EventStore.append` validates with `eventDraftSchema.parse`, which
-      // THROWS. Without this the sheet would sit there looking live with the
-      // change silently unwritten.
-      .catch(() => setFailed(true))
+    write(pending)
+  }
+
+  /**
+   * Removing takes this bet's money off the card. Its own events stay in the
+   * log, so the round-settings screen can put it back with them intact — which
+   * is why this needs a confirm rather than an undo-only escape: the header Undo
+   * reaches the log's tail and nothing further.
+   */
+  const remove = () => {
+    const kept = round.games.filter((g) => g.gameId !== game.gameId)
+    const sections: GameDraft[] = kept.map((g) => ({
+      gameId: g.gameId,
+      type: g.type,
+      handicap: g.handicap,
+      config: g.config,
+      section: roleOf(g, round.games),
+      ...(g.role ? { role: g.role } : {}),
+    }))
+    const reconciled = reconcileRoles(sections)
+    const moved = reconciled.flatMap((g, i) =>
+      g.role === kept[i]!.role
+        ? []
+        : [{ type: 'game/configured', gameId: g.gameId, ...roleFields(g) } as EventDraft],
+    )
+    write([{ type: 'game/removed', gameId: game.gameId }, ...moved])
   }
 
   return (
@@ -235,8 +326,40 @@ function Editor({
             Cancel
           </BigButton>
           <BigButton className="flex-1" disabled={problems.length > 0} onClick={save}>
-            Save
+            {isNew ? 'Add' : 'Save'}
           </BigButton>
+        </div>
+      )}
+
+      {/* REMOVING IS ITS OWN STEP, and it confirms — this takes a bet's money
+          off the card, and the header Undo only reaches the log's tail, so the
+          escape hatch afterwards is Restore on the settings screen rather than
+          one tap back. Never for a game that isn't in the round yet. */}
+      {!readOnly && !isNew && (
+        <div className="border-t border-stone-800 pt-4">
+          {confirming ? (
+            <div className="space-y-2.5">
+              <p className="text-stone-300">
+                Remove {label}? Its money comes off the card. You can put it back — its
+                own record stays with the round.
+              </p>
+              <div className="flex gap-2.5">
+                <BigButton variant="outline" className="flex-1" onClick={() => setConfirming(false)}>
+                  Keep it
+                </BigButton>
+                <BigButton className="flex-1" onClick={remove}>
+                  Remove
+                </BigButton>
+              </div>
+            </div>
+          ) : (
+            <button
+              onClick={() => setConfirming(true)}
+              className="font-display text-[10px] uppercase text-flag-500"
+            >
+              Remove from this round
+            </button>
+          )}
         </div>
       )}
     </div>

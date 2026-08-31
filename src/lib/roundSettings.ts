@@ -1,5 +1,6 @@
-import { deriveRound } from '../engine/catalog'
+import { amendRound, deriveRound } from '../engine/catalog'
 import { canonicalJson } from '../engine/core/setup'
+import { effectiveEvents } from '../engine/core/replay'
 import { combineSettlements } from '../engine/core/money'
 import type { EventDraft, RoundEvent } from '../engine/core/events'
 import type { GameConfig, Round, Uuid } from '../engine/core/types'
@@ -118,4 +119,31 @@ export function settingsChanged(before: GameConfig, after: GameConfig): boolean 
   const key = (g: GameConfig) =>
     canonicalJson({ config: g.config, handicap: g.handicap, role: g.role })
   return key(before) !== key(after)
+}
+
+/**
+ * Games this round used to hold — what a `game/removed` took out, with the
+ * settings it had at the moment it went (MAI-103).
+ *
+ * RECOVERED BY RE-FOLDING THE PREFIX before each removal, rather than carried
+ * on the removal event. A payload holding its own copy of the game would be a
+ * second source of those settings, free to disagree with the fold about what
+ * was actually in the round — and the fold is the authority everywhere else.
+ *
+ * Only games still absent at the end are returned, so a bet removed and put
+ * back doesn't linger in the "removed" list.
+ */
+export function removedGames(round: Round, events: readonly RoundEvent[]): GameConfig[] {
+  const effective = effectiveEvents(events)
+  const out = new Map<Uuid, GameConfig>()
+  effective.forEach((e, i) => {
+    if (e.type !== 'game/removed') return
+    const before = amendRound(round, effective.slice(0, i))
+    const game = before.games.find((g) => g.gameId === e.gameId)
+    if (game) out.set(e.gameId, game)
+  })
+  // …minus anything that came back. `amendRound` over the whole log is the one
+  // answer to "what is in this round now".
+  for (const game of amendRound(round, effective).games) out.delete(game.gameId)
+  return [...out.values()]
 }

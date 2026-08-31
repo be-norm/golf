@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import type { HandicapSettings, Uuid } from './types'
+import type { GameConfig, HandicapSettings, Uuid } from './types'
 
 export interface EventEnvelope {
   id: Uuid
@@ -127,6 +127,42 @@ export type PlayerHandicapEvent = EventEnvelope & {
   courseHandicap: number
 }
 
+/**
+ * A GAME JOINING THE ROUND MID-WAY, or coming back after a removal (MAI-103).
+ *
+ * "We forgot to add the snake" — noticed on the 8th. It scores holes 1–7 the
+ * same way an amended stake re-prices them: retroactively, because that is what
+ * the group means. An awards game (CTP, Long Drive, Snake) arrives with those
+ * holes unrecorded, which the grid lets them fill in — awards never expire
+ * before `round/completed`.
+ *
+ * PUT BY `gameId`, not appended, and that is what keeps `amendRound` idempotent
+ * for `buildHoleLedger`'s re-fold. It also makes RESTORE fall out: re-adding a
+ * removed game under its original id brings its own recorded events back to
+ * life with it, since they were never deleted — only the game they belong to
+ * stopped being in the round.
+ *
+ * Ignored when that id is already present with a DIFFERENT `type`: swapping a
+ * Skins for a Wolf under one id would re-interpret the first game's events as
+ * the second's, which is the same class of lie the locked-field rule refuses.
+ */
+export type GameAddedEvent = EventEnvelope & {
+  type: 'game/added'
+  game: GameConfig
+}
+
+/**
+ * A GAME LEAVING THE ROUND — "we're not actually playing the Nassau" (MAI-103).
+ *
+ * Its money comes off the card entirely. Its own recorded events STAY in the
+ * log, untouched: nothing is ever deleted here, and that is exactly what lets
+ * `game/added` put it back with its presses, awards and bites intact.
+ */
+export type GameRemovedEvent = EventEnvelope & {
+  type: 'game/removed'
+  gameId: Uuid
+}
+
 export type RoundCompletedEvent = EventEnvelope & { type: 'round/completed' }
 export type RoundReopenedEvent = EventEnvelope & { type: 'round/reopened' }
 
@@ -147,6 +183,8 @@ export type RoundEvent =
   | ScorePuttsEvent
   | ScorePuttsClearEvent
   | GameConfiguredEvent
+  | GameAddedEvent
+  | GameRemovedEvent
   | PlayerHandicapEvent
   | RoundCompletedEvent
   | RoundReopenedEvent
@@ -237,6 +275,20 @@ export const eventDraftSchema = z.discriminatedUnion('type', [
      */
     courseHandicap: z.number().int().min(-10).max(74),
   }),
+  z.object({
+    type: z.literal('game/added'),
+    // The game's SHAPE only, exactly as `importSchema` validates one: `config`
+    // is the engine's business (checked in `amendRound`), and a `type` this
+    // build doesn't ship must still round-trip rather than abort a restore.
+    game: z.looseObject({
+      gameId: z.string(),
+      type: z.string(),
+      handicap: handicapSettingsSchema,
+      config: z.unknown(),
+      role: z.enum(['main', 'side']).optional(),
+    }),
+  }),
+  z.object({ type: z.literal('game/removed'), gameId: z.string() }),
   z.object({ type: z.literal('round/completed') }),
   z.object({ type: z.literal('round/reopened') }),
   z.object({ type: z.literal('meta/retract'), targetEventId: z.string() }),

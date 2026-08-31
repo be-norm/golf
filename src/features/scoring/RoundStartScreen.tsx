@@ -6,10 +6,14 @@ import { gameLabel } from '../../engine/label'
 import { teedOffAway } from '../../engine/core/holes'
 import { formatCents } from '../../engine/core/money'
 import { effectiveEvents, isCompleted } from '../../engine/core/replay'
+import { newId } from '../../db/ids'
+import { eventStore } from '../../db/eventStore'
+import { removedGames } from '../../lib/roundSettings'
 import type { GameConfig, HandicapSettings } from '../../engine/core/types'
 import { BigButton } from '../../components/BigButton'
 import { CourseBanner } from '../../components/CourseBanner'
 import { RulesSheet } from '../games/RulesSheet'
+import { GamePickerSheet } from '../setup/GamePickerSheet'
 import { GameSettingsSheet } from './GameSettingsSheet'
 import { HandicapSection } from './HandicapSection'
 import { useRound } from './useRound'
@@ -70,6 +74,10 @@ export function RoundStartScreen() {
   const view = useRound(roundId)
   const [rulesFor, setRulesFor] = useState<string>()
   const [editing, setEditing] = useState<string>()
+  // which section the picker is choosing into, or undefined when it is closed
+  const [picking, setPicking] = useState<'main' | 'side'>()
+  // the game the picker chose, with its defaults, on its way through the editor
+  const [adding, setAdding] = useState<{ game: GameConfig; section: 'main' | 'side' }>()
   /**
    * WAS THE LOG EMPTY WHEN WE ARRIVED — captured once, and deliberately not the
    * same question as `logStarted` below.
@@ -116,6 +124,15 @@ export function RoundStartScreen() {
   const roundOver = isCompleted(round, effectiveEvents(view.events))
   // The ceremony belongs to a round that hadn't started when we walked in.
   const arrivedAtFirstTee = firstTee === true
+  /**
+   * BETS THIS ROUND USED TO HOLD — recovered by folding the log up to each
+   * removal, which is where that game's settings last existed.
+   *
+   * From the STORED round, not the amended one: a game the removal already
+   * dropped cannot be recovered by folding a prefix over a round that no longer
+   * holds it (see RoundView.storedRound).
+   */
+  const removed = removedGames(view.storedRound, view.events)
 
   const goToCard = () => navigate(`/round/${round.id}`, { replace: true })
 
@@ -283,6 +300,52 @@ export function RoundStartScreen() {
         })}
       </section>
 
+      {/* Adding a bet mid-round, and putting one back. Both are hidden on a
+          settled round for the reason every other edit is: nothing re-pushes a
+          round because its log grew. */}
+      {!roundOver && (
+        <div className="flex justify-center gap-4">
+          <button
+            onClick={() => setPicking('main')}
+            className="font-display text-[10px] uppercase text-felt-400"
+          >
+            + Add a game
+          </button>
+          <button
+            onClick={() => setPicking('side')}
+            className="font-display text-[10px] uppercase text-felt-400"
+          >
+            + Add a side bet
+          </button>
+        </div>
+      )}
+
+      {/* REMOVED, NOT GONE. A removed bet's own events stay in the log, so
+          putting it back restores its presses, awards and bites with it — and
+          without this list the only way back is the header Undo, which reaches
+          the log's tail and nothing further. Restored under its ORIGINAL id,
+          which is what reunites it with those events. */}
+      {removed.length > 0 && !roundOver && (
+        <section className="pixel border-stone-800 bg-stone-900/40 p-4">
+          <h2 className="font-display text-[10px] uppercase text-stone-500">
+            Removed from this round
+          </h2>
+          <ul className="mt-2 space-y-1.5">
+            {removed.map((game) => (
+              <li key={game.gameId} className="flex items-center justify-between gap-3">
+                <span className="text-stone-400">{gameLabel(game, [...round.games, game])}</span>
+                <button
+                  onClick={() => void eventStore.append(round.id, [{ type: 'game/added', game }])}
+                  className="font-display text-[10px] uppercase text-felt-400"
+                >
+                  Restore ▶
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       <div className="mt-auto pb-2">
         <BigButton className="w-full" onClick={goToCard}>
           {anyScored ? 'Back to the card ⛳' : 'Start scoring ⛳'}
@@ -292,9 +355,39 @@ export function RoundStartScreen() {
       <GameSettingsSheet
         view={view}
         gameId={editing}
+        adding={adding}
         readOnly={roundOver}
-        onClose={() => setEditing(undefined)}
+        onClose={() => {
+          setEditing(undefined)
+          setAdding(undefined)
+        }}
         onRules={setRulesFor}
+      />
+
+      {/* The SETUP picker, reused unchanged — the list of games, their blurbs,
+          the player-count filtering and the grouping are all already right, and
+          a second one would drift the first time a game is added. */}
+      <GamePickerSheet
+        open={picking !== undefined}
+        section={picking ?? 'main'}
+        playerCount={round.players.length}
+        chosenCounts={round.games.reduce(
+          (counts, g) => counts.set(g.type, (counts.get(g.type) ?? 0) + 1),
+          new Map<string, number>(),
+        )}
+        onPick={(engine) => {
+          setAdding({
+            game: {
+              gameId: newId(),
+              type: engine.type,
+              handicap: engine.defaultHandicap(),
+              config: engine.defaultConfig(round.players),
+            },
+            section: picking ?? 'main',
+          })
+          setPicking(undefined)
+        }}
+        onClose={() => setPicking(undefined)}
       />
 
       <RulesSheet type={rulesFor} onClose={() => setRulesFor(undefined)} />

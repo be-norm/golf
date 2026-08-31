@@ -25,7 +25,8 @@ built the way it was.
    only relative engine imports + `zod`. Enforced by ESLint (`no-restricted-imports`/`globals`)
    and by the `engine` vitest project running in node environment.
 2. **Event sourcing.** A round is an append-only event log (`score/set`, `score/clear`,
-   `game/event`, `game/configured`, `round/completed`, `round/reopened`, `meta/retract`).
+   `game/event`, `game/configured`, `game/added`, `game/removed`, `player/handicap`,
+   `round/completed`, `round/reopened`, `meta/retract`).
    Standings are derived
    by full replay through pure reducers. Never mutate or delete events — undo is a
    `meta/retract` compensation event. `EventStore.append` is the only write path for events.
@@ -34,7 +35,8 @@ built the way it was.
    after tee-off used to mean silently rewriting every settled hole's money, and the app
    simply refused: a wrong stake could only be fixed by abandoning the round. `game/configured`
    carries a game's WHOLE settings (never a patch), `player/handicap` carries one player's
-   course handicap, and `amendRound` (catalog.ts) folds both onto
+   course handicap, `game/added`/`game/removed` bring a bet into a round or take it out
+   (MAI-103), and `amendRound` (catalog.ts) folds them all onto
    the round ahead of `buildRoundContext`, so `deriveRound` returns the AMENDED round and
    `useRound` hands that to every screen — one amendment site, and no surface that can show a
    stale stake. Undo, sync and export all come free: a retract drops it out of
@@ -62,6 +64,13 @@ built the way it was.
    prefix is a different log, and the locked-field rule asks a question about the log, so
    re-folding let hole 1's replay accept an amendment the round refuses. `deriveAmended` is
    the entry point that skips the fold for exactly that reason.
+   **`game/added` PUTS BY `gameId`**, never appends — that is what keeps the fold idempotent,
+   keeps `round.games` ORDER stable (`roleOf`, `gameLabel` and `primaryGame` all read it), and
+   makes RESTORE fall out: a removed game's own events are never deleted, so re-adding it under
+   its original id brings its presses, awards and bites back with it. An id already present with
+   a DIFFERENT `type` is refused, since that would re-interpret one game's events as another's.
+   Recovering what a removal took out is the one question the amended round cannot answer, so
+   `RoundView.storedRound` exists for it and for nothing else.
    ONE sanctioned exception, outside a live log rather than an edit within one:
    round IMPORT (`importRound`) atomically replaces an entire round's validated log — a
    restore. There used to be a second — a first-tee handicap adjustment rewriting
@@ -556,6 +565,13 @@ change, use a 6-digit code (`{{ .Token }}` + `verifyOtp`) rather than a link.
   would MOVE, and `openBet` positions that would change. A bet that settles at the end —
   the snake, a live carry — has a real position and zero settlement, so reporting only the
   swing said "No change to the money" about the very edit just made.
+  **Games can join and leave a round the same way** (MAI-103), through setup's own
+  `GamePickerSheet` and the same editor — so a bet added on the 8th is configured
+  exactly as it would have been at the first tee, and scores the holes behind it.
+  Removing confirms, because it takes money off the card and the header Undo only
+  reaches the log's tail; what the confirm promises is Restore, which works because
+  a removed game's events were never deleted. `reconcileRoles` runs on both, as
+  setup runs it on both: an "either" game's role is a fact about the whole round.
 - **The share card is painted, not screenshotted.** `Share` on the settle screen
   produces a PNG drawn by hand onto a canvas (`paintSummaryCard.ts`), never a
   DOM capture — rasterising the live screen means `foreignObject`, and so means
