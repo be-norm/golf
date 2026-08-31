@@ -11,6 +11,63 @@ import { eventStore } from '../../db/eventStore'
 import { routes } from '../../app/routes'
 
 describe('ScoringScreen', () => {
+  /**
+   * THE DOCUMENT MEANS "AS TEED OFF", and finishing must not quietly rewrite it
+   * (MAI-100/101).
+   *
+   * `view.round` is the AMENDED round — the document with every
+   * `game/configured` folded on — so the old `roundRepo.put({ ...round, status })`
+   * would have written those amendments straight back into `db.rounds`. Nothing
+   * would look wrong: `amendRound` is idempotent, so the money stays right. But
+   * the round would stop meaning what it says, and the log would no longer be
+   * the only record of what the group changed.
+   *
+   * It was also a stale write in its own right — whatever the screen held in
+   * memory won — which is why `setStatus` is a read-modify-write.
+   */
+  it('finishing an amended round leaves the document as it teed off', async () => {
+    const round = makeRound({
+      players: makePlayers([{ name: 'Ben' }, { name: 'Alice' }]),
+      holes: 'front9',
+      games: [{ type: 'skins', config: { stakeCents: 100, carryover: true } }],
+    })
+    round.id = 'round-amended-finish'
+    await db.rounds.put(round)
+    await eventStore.append(round.id, [
+      // every hole scored, so the bar offers Finish
+      ...[1, 2, 3, 4, 5, 6, 7, 8, 9].flatMap((hole) =>
+        ['p-ben', 'p-alice'].map((playerId) => ({
+          type: 'score/set' as const,
+          playerId,
+          hole,
+          gross: 4,
+        })),
+      ),
+      {
+        type: 'game/configured',
+        gameId: round.games[0]!.gameId,
+        config: { stakeCents: 500, carryover: true },
+        handicap: round.games[0]!.handicap,
+      },
+    ])
+
+    render(
+      <RouterProvider
+        router={createMemoryRouter(routes, { initialEntries: [`/round/${round.id}`] })}
+      />,
+    )
+    fireEvent.click(await screen.findByRole('button', { name: /Finish round/ }))
+
+    await waitFor(async () => {
+      expect((await db.rounds.get(round.id))?.status).toBe('completed')
+    })
+    // the stake the round teed off with, not the amended one
+    expect((await db.rounds.get(round.id))?.games[0]!.config).toEqual({
+      stakeCents: 100,
+      carryover: true,
+    })
+  })
+
   it('confirms par with one tap and shows it on the chip', async () => {
     const round = makeRound({
       players: makePlayers([{ name: 'Ben' }, { name: 'Alice' }]),

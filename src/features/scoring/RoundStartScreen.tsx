@@ -5,12 +5,14 @@ import { getEngine, type GameEngine } from '../../engine/catalog'
 import { gameLabel } from '../../engine/label'
 import { teedOffAway } from '../../engine/core/holes'
 import { formatCents } from '../../engine/core/money'
+import { effectiveEvents, isCompleted } from '../../engine/core/replay'
 import type { GameConfig, HandicapSettings } from '../../engine/core/types'
 import { roundRepo } from '../../db/repos'
 import { BigButton } from '../../components/BigButton'
 import { CourseBanner } from '../../components/CourseBanner'
 import { selectOnFocus } from '../../components/inputs'
 import { RulesSheet } from '../games/RulesSheet'
+import { GameSettingsSheet } from './GameSettingsSheet'
 import { useRound } from './useRound'
 
 const HOLES_LABEL: Record<string, string> = {
@@ -109,15 +111,40 @@ function HandicapField({
 }
 
 /**
- * First-tee summary shown once after tee-off and re-openable from the scoring
- * screen. Its job: make the otherwise-invisible handicap allocation legible —
- * how many strokes each player gets, per game, before a single hole is scored.
+ * First-tee summary, and the round's SETTINGS SCREEN thereafter.
+ *
+ * Its original job — make the otherwise-invisible handicap allocation legible,
+ * how many strokes each player gets per game before a hole is scored — is why
+ * it already lists every game with its config chips. That made it the obvious
+ * home for editing them once settings became amendable (MAI-100/101): the
+ * information was already here, and it is one tap from the scoring header.
  */
 export function RoundStartScreen() {
   const { roundId } = useParams()
   const navigate = useNavigate()
   const view = useRound(roundId)
   const [rulesFor, setRulesFor] = useState<string>()
+  const [editing, setEditing] = useState<string>()
+  /**
+   * WAS THE LOG EMPTY WHEN WE ARRIVED — captured once, and deliberately not the
+   * same question as `logStarted` below.
+   *
+   * The flag-plant ceremony plays only on a round that hasn't started, and
+   * "hasn't started" has to be judged on ARRIVAL now that this screen can append
+   * events. Recomputing it per render meant saving a settings change made the
+   * banner vanish mid-visit, as though teeing off had just happened while you
+   * were looking at it.
+   *
+   * Captured on the first render that HAS a view, since `useRound` returns
+   * undefined while Dexie loads — seeding on mount would record nothing, the
+   * same trap `CelebrationLayer`'s seen-set has to avoid. STATE rather than a
+   * ref, as a render-phase adjustment: this is read during render, which is
+   * precisely what a ref may not be, and it is the shape `ScoringScreen`
+   * already uses for `derivedHole` (react.dev, "storing information from
+   * previous renders").
+   */
+  const [firstTee, setFirstTee] = useState<boolean>()
+  if (view && firstTee === undefined) setFirstTee(view.events.length === 0)
 
   if (view === undefined) return <main className="p-6 text-stone-400">Loading…</main>
   if (view === null)
@@ -150,6 +177,13 @@ export function RoundStartScreen() {
    * which is an ordinary thing to do (MAI-90, review round 1).
    */
   const logStarted = view.events.length > 0
+  // Editing is refused on a settled round for the reason `GameSettingsSheet`
+  // spells out: nothing re-pushes a round because its log grew. Read off the
+  // EVENTS, not `round.status`, so a reopened round is editable again — the same
+  // gate the award grid takes.
+  const roundOver = isCompleted(round, effectiveEvents(view.events))
+  // The ceremony belongs to a round that hadn't started when we walked in.
+  const arrivedAtFirstTee = firstTee === true
 
   const goToCard = () => navigate(`/round/${round.id}`, { replace: true })
 
@@ -167,12 +201,16 @@ export function RoundStartScreen() {
             not started. Coming BACK to this screen mid-round (the header link
             is live all the way until the first event) is not a first tee, and
             replaying the ceremony would say it was. */}
-        {!logStarted && (
+        {arrivedAtFirstTee && (
           <span className="mb-3 block">
             <CourseBanner intro="flag-plant" />
           </span>
         )}
-        <h1 className="font-display text-sm uppercase text-coin-400">★ First tee ★</h1>
+        {/* Coming back to this screen on the 12th is not a first tee, and saying
+            so was a small lie the screen told every time. */}
+        <h1 className="font-display text-sm uppercase text-coin-400">
+          {arrivedAtFirstTee ? '★ First tee ★' : 'Round settings'}
+        </h1>
         <p className="mt-2 text-xl font-bold">{round.courseSnapshot.name}</p>
         <p className="mt-1 text-sm text-stone-400">
           {tee ? `${tee.name} ${tee.rating}/${tee.slope} · ` : ''}
@@ -236,15 +274,30 @@ export function RoundStartScreen() {
 
           return (
             <div key={game.gameId} className="pixel border-felt-500 bg-felt-900/60 p-4">
-              <div className="flex items-baseline justify-between">
-                <h2 className="font-display text-sm uppercase text-felt-300">{label}</h2>
-                <button
-                  aria-label={`${label} rules`}
-                  onClick={() => setRulesFor(game.type)}
-                  className="font-display text-[10px] uppercase text-felt-400"
-                >
-                  Rules ▶
-                </button>
+              <div className="flex items-baseline justify-between gap-3">
+                <h2 className="font-display min-w-0 truncate text-sm uppercase text-felt-300">
+                  {label}
+                </h2>
+                <div className="flex shrink-0 items-baseline gap-3">
+                  {/* THE WAY OUT OF A BET SET UP WRONG (MAI-100). Offered on a
+                      settled round too, where it opens read-only and says to
+                      reopen — a control that simply vanished would leave the
+                      group hunting for a screen that no longer exists. */}
+                  <button
+                    aria-label={`${label} settings`}
+                    onClick={() => setEditing(game.gameId)}
+                    className="font-display text-[10px] uppercase text-coin-400"
+                  >
+                    ⚙ Edit
+                  </button>
+                  <button
+                    aria-label={`${label} rules`}
+                    onClick={() => setRulesFor(game.type)}
+                    className="font-display text-[10px] uppercase text-felt-400"
+                  >
+                    Rules ▶
+                  </button>
+                </div>
               </div>
 
               {chips.length > 0 && (
@@ -324,6 +377,14 @@ export function RoundStartScreen() {
           {anyScored ? 'Back to the card ⛳' : 'Start scoring ⛳'}
         </BigButton>
       </div>
+
+      <GameSettingsSheet
+        view={view}
+        gameId={editing}
+        readOnly={roundOver}
+        onClose={() => setEditing(undefined)}
+        onRules={setRulesFor}
+      />
 
       <RulesSheet type={rulesFor} onClose={() => setRulesFor(undefined)} />
     </main>

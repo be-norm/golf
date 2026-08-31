@@ -70,7 +70,8 @@ export function SettleScreen() {
 
   const reopen = async () => {
     await eventStore.append(round.id, [{ type: 'round/reopened' }])
-    await roundRepo.put({ ...round, status: 'live' })
+    // see ScoringScreen.finish — `round` is the amended round, not the document
+    await roundRepo.setStatus(round.id, 'live')
     navigate(`/round/${round.id}`)
   }
 
