@@ -191,6 +191,37 @@ export type RoundEvent =
   | RetractEvent
   | GameScopedEvent
 
+/**
+ * THE AMENDMENT KINDS — a change to the round's SETTINGS rather than to what
+ * happened on a hole (MAI-100).
+ *
+ * One list, because two things have to agree about it: `amendRound`, which
+ * folds them, and the scoring screen's undo, which must NOT.
+ *
+ * That second one is the reason this exists. `↩ Undo` sits in the scoring
+ * header beside the score entry, and it means "take back what I just did HERE".
+ * Retracting the log's tail regardless of kind made it silently revert a stake
+ * somebody had changed on the settings screen — a different surface, possibly
+ * minutes earlier, moving every hole's money — off a button the scorekeeper
+ * reads as "undo that last tap". Each surface undoes its own kind of action;
+ * settings are changed back where they were changed.
+ *
+ * The mechanism is unaffected: a `meta/retract` still reverts an amendment
+ * perfectly, and `game/removed` has `Restore` on the settings screen. What
+ * changed is which button reaches for it.
+ */
+export const AMENDMENT_TYPES = [
+  'game/configured',
+  'game/added',
+  'game/removed',
+  'player/handicap',
+] as const satisfies readonly RoundEvent['type'][]
+
+/** Is this a settings change rather than something that happened on a hole? */
+export function isAmendment(e: RoundEvent): boolean {
+  return (AMENDMENT_TYPES as readonly string[]).includes(e.type)
+}
+
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never
 
 /** Event payload without its envelope — what callers hand to EventStore.append. */

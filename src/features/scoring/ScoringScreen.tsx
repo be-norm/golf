@@ -14,6 +14,7 @@ import type {
   GameEventOffer,
   InputRequest,
 } from '../../engine/catalog'
+import { isAmendment } from '../../engine/core/events'
 import type { EventDraft } from '../../engine/core/events'
 import type { GameConfig, Round } from '../../engine/core/types'
 import { gameLabel } from '../../engine/label'
@@ -356,8 +357,21 @@ export function ScoringScreen() {
     })
   }
 
+  /**
+   * TAKE BACK WHAT I JUST DID **HERE**.
+   *
+   * Settings amendments are skipped, so this walks back to the last thing done
+   * on THIS screen — a score, a putt, an award, a press, a wolf pick. Undoing
+   * the log's tail regardless of kind meant a stake changed minutes ago on the
+   * settings screen was silently reverted by a button the scorekeeper reads as
+   * "undo that last tap", taking every hole's money with it (MAI-100 follow-up).
+   *
+   * Nothing is lost by it: a retract still reverts an amendment perfectly, and
+   * the way to reach one is the screen it was made on — edit it back, or use
+   * `Restore` for a removed game.
+   */
   const undo = () => {
-    const effective = effectiveEvents(view.events)
+    const effective = effectiveEvents(view.events).filter((e) => !isAmendment(e))
     const last = effective[effective.length - 1]
     if (!last || undoneRef.current.has(last.id)) return
     undoneRef.current.add(last.id)

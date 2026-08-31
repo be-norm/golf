@@ -299,13 +299,17 @@ function Editor({
               {impact.swing.map((s) => `${s.name} ${formatCentsSigned(s.cents)}`).join(' · ')}
             </p>
           )}
-          {/* A BET THAT HASN'T SETTLED STILL CHANGED. The snake is worth
+          {/* A BET THAT HASN'T SETTLED STILL HAS A POSITION. The snake is worth
               something to somebody all round and settles only at the end, so
-              editing its pot moves no money yet — and reporting only the swing
-              said "No change to the money" about the very edit just made. */}
-          {impact.riding.map((position) => (
+              editing its pot moves no money yet — reporting only the swing said
+              "No change to the money" about the very edit just made.
+              Shown whether or not the change MOVES it, because it can land in
+              the same place by arithmetic (25c doubled twice is the $1 it
+              already was) and a silent panel then reads as "that did nothing". */}
+          {impact.riding.map(({ position, changed }) => (
             <p key={position} className="mt-1 text-stone-300">
-              Now riding: {position}
+              Riding: {position}
+              {!changed && <span className="text-stone-500"> · unchanged</span>}
             </p>
           ))}
           {impact.swing.length === 0 && impact.riding.length === 0 && (

@@ -9,8 +9,60 @@ import { doubleNine } from '../../engine/core/tees'
 import { db } from '../../db/schema'
 import { eventStore } from '../../db/eventStore'
 import { routes } from '../../app/routes'
+import { deriveRound } from '../../engine/catalog'
 
 describe('ScoringScreen', () => {
+  /**
+   * UNDO TAKES BACK WHAT YOU DID **HERE**.
+   *
+   * `↩ Undo` sits beside the score entry and reads as "undo that last tap".
+   * Retracting the log's tail regardless of kind meant a stake changed minutes
+   * ago on the SETTINGS screen was silently reverted by it — a different
+   * surface, taking every hole's money with it. Each surface undoes its own kind
+   * of action; a settings change is changed back where it was made.
+   */
+  it('undoes the last SCORE, not a settings change made on another screen', async () => {
+    const round = makeRound({
+      players: makePlayers([{ name: 'Ben' }, { name: 'Alice' }]),
+      holes: 'front9',
+      games: [{ type: 'skins', config: { stakeCents: 100, carryover: true } }],
+    })
+    round.id = 'round-undo-scope'
+    await db.rounds.put(round)
+    await eventStore.append(round.id, [
+      { type: 'score/set', playerId: 'p-ben', hole: 1, gross: 4 },
+      { type: 'score/set', playerId: 'p-alice', hole: 1, gross: 5 },
+      // …and then, on the settings screen, the stake is corrected
+      {
+        type: 'game/configured',
+        gameId: round.games[0]!.gameId,
+        config: { stakeCents: 500, carryover: true },
+        handicap: round.games[0]!.handicap,
+      },
+    ])
+
+    render(
+      <RouterProvider
+        router={createMemoryRouter(routes, { initialEntries: [`/round/${round.id}`] })}
+      />,
+    )
+    fireEvent.click(await screen.findByRole('button', { name: 'undo' }))
+
+    await waitFor(async () => {
+      expect(await eventStore.list(round.id)).toHaveLength(4)
+    })
+    const events = await eventStore.list(round.id)
+    const retract = events[3] as { type: string; targetEventId: string }
+    // it reached past the amendment for Alice's score — the last thing done here
+    expect(retract.type).toBe('meta/retract')
+    expect(retract.targetEventId).toBe(events[1]!.id)
+    // …and the stake correction is untouched
+    expect(deriveRound(round, events).round.games[0]!.config).toEqual({
+      stakeCents: 500,
+      carryover: true,
+    })
+  })
+
   /**
    * THE DOCUMENT MEANS "AS TEED OFF", and finishing must not quietly rewrite it
    * (MAI-100/101).
