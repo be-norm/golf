@@ -36,8 +36,22 @@ export interface SettlementSwing {
  */
 export interface AmendmentImpact {
   swing: SettlementSwing[]
-  /** the live positions this would change, in the game's own words */
-  riding: string[]
+  /**
+   * WHERE THIS LEAVES THE LIVE BETS — every open position after the change, in
+   * the game's own words, marked when the change doesn't move it.
+   *
+   * DELIBERATELY NOT "the positions that CHANGED", which is what it was first.
+   * Filtering to changes made the panel fall through to its empty state on a
+   * real edit whenever the numbers happened to land in the same place — turn
+   * doubling on and drop a $1 snake to 25c after three bites and the holder owes
+   * 25c×2×2 = exactly the $1 they already owed, so nothing "changed" and the
+   * screen said "no money moves" about an edit that had just switched doubling
+   * on. True about what has happened, and wrong about what the group asked.
+   *
+   * Answering "what does this leave me with" instead is both harder to make
+   * misleading and the more useful question: the next bite goes to $2.
+   */
+  riding: { position: string; changed: boolean }[]
 }
 
 /**
@@ -98,9 +112,9 @@ export function amendmentImpact(
     }))
     .filter((s) => s.cents !== 0)
 
-  const riding = [...after.open]
-    .filter(([gameId, open]) => open !== undefined && open !== before.open.get(gameId))
-    .map(([, open]) => open!)
+  const riding = [...after.open].flatMap(([gameId, open]) =>
+    open === undefined ? [] : [{ position: open, changed: open !== before.open.get(gameId) }],
+  )
 
   return { swing, riding }
 }

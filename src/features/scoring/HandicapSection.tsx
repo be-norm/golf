@@ -147,9 +147,10 @@ export function HandicapSection({ view, readOnly }: { view: RoundView; readOnly:
           ) : (
             <p className="mt-1 text-stone-300">No money moves.</p>
           )}
-          {impact.riding.map((position) => (
+          {impact.riding.map(({ position, changed }) => (
             <p key={position} className="mt-1 text-stone-300">
-              Now riding: {position}
+              Riding: {position}
+              {!changed && <span className="text-stone-500"> · unchanged</span>}
             </p>
           ))}
         </div>

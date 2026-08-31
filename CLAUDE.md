@@ -41,6 +41,12 @@ built the way it was.
    `useRound` hands that to every screen — one amendment site, and no surface that can show a
    stale stake. Undo, sync and export all come free: a retract drops it out of
    `effectiveEvents`, and archives are already a `{round, events}` blob.
+   **But the SCORING screen's undo skips amendments** (`isAmendment`, core/events.ts).
+   `↩ Undo` sits beside the score entry and means "take back that last tap"; retracting
+   the log's tail regardless of kind let it silently revert a stake changed minutes
+   earlier on the settings screen, moving every hole's money. Each surface undoes its own
+   kind of action, and settings are changed back where they were changed — by editing
+   again, or by `Restore` for a removed game.
    **An amendment re-prices the WHOLE round** — "the stake was always $2", which is what a
    group means when they catch one late, and the only reading `derive(config, …)` can express.
    `eventHole` therefore answers null for it: null means "in every prefix", so hole 3's ledger
@@ -562,9 +568,13 @@ change, use a 6-digit code (`{{ .Token }}` + `verifyOtp`) rather than a link.
   would be ceremony — and pending-edits-plus-one-Save once anything is, with a single
   swing covering everyone changed. They no longer lock, because a change is an event now
   rather than a document rewrite. **A preview reports two things, not one**: money that
-  would MOVE, and `openBet` positions that would change. A bet that settles at the end —
-  the snake, a live carry — has a real position and zero settlement, so reporting only the
-  swing said "No change to the money" about the very edit just made.
+  would MOVE, and the `openBet` position each live bet is LEFT IN. A bet that settles at
+  the end — the snake, a live carry — has a real position and zero settlement, so
+  reporting only the swing said "No change to the money" about the very edit just made.
+  The position is stated whether or not the change moves it, marked `· unchanged` when it
+  doesn't: it can land in the same place by arithmetic — 25c doubled twice is the $1 it
+  already was — and a panel that goes quiet then reads as "that did nothing" about an edit
+  that has just switched doubling on.
   **Games can join and leave a round the same way** (MAI-103), through setup's own
   `GamePickerSheet` and the same editor — so a bet added on the 8th is configured
   exactly as it would have been at the first tee, and scores the holes behind it.

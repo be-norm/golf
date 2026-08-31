@@ -164,7 +164,55 @@ describe('GameSettingsSheet', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /increase Pot/i }))
     // Ann is carrying it at the new pot against three others — not "no change"
-    expect(await screen.findByText(/Now riding: Ann · -\$1\.25 x 3/)).toBeInTheDocument()
+    expect(await screen.findByText(/Riding: Ann · -\$1\.25 x 3/)).toBeInTheDocument()
+    expect(screen.queryByText(/Nothing settled yet/)).toBeNull()
+    expect(screen.queryByText(/unchanged/)).toBeNull()
+  })
+
+  /**
+   * THE POSITION IS REPORTED EVEN WHEN THE CHANGE DOESN'T MOVE IT, because it
+   * can land in the same place by arithmetic and a silent panel then reads as
+   * "that did nothing".
+   *
+   * The real case: a $1 flat snake with three bites already recorded, switched
+   * to 25c WITH doubling. The ladder becomes 25c → 50c → $1, so the holder owes
+   * exactly the $1 they already owed — the settlement is unchanged (Snake pays
+   * only at the end) and so is the position. Nothing to report by either
+   * measure, and yet doubling is now on and the next bite goes to $2.
+   */
+  it('states the position even when the change happens to leave it alone', async () => {
+    const roundId = await seed(snakeGames(), [
+      ...[1, 2, 3, 4, 5].flatMap((hole) =>
+        ['p-ann', 'p-bo', 'p-cal', 'p-dee'].map((playerId) => ({
+          type: 'score/set' as const,
+          playerId,
+          hole,
+          gross: 4,
+        })),
+      ),
+      ...[
+        [2, 'p-ann'],
+        [3, 'p-bo'],
+        [5, 'p-cal'],
+      ].map(([hole, playerId]) => ({
+        type: 'game/event' as const,
+        gameId: 'game-1',
+        kind: 'snake/bite',
+        data: { hole, playerId },
+      })),
+    ])
+    renderStart(roundId)
+    await openEditor()
+
+    // $1 → 25c, and doubling on: 25c, 50c, $1 — the holder owes the same $1
+    fireEvent.click(screen.getByRole('button', { name: /decrease Pot/i }))
+    fireEvent.click(screen.getByRole('button', { name: /decrease Pot/i }))
+    fireEvent.click(screen.getByRole('button', { name: /decrease Pot/i }))
+    fireEvent.click(screen.getByRole('switch', { name: /Doubling pot/i }))
+
+    expect(await screen.findByText(/Riding: Cal · -\$1 x 3/)).toBeInTheDocument()
+    // …said out loud, rather than the panel going quiet and reading as inert
+    expect(screen.getByText(/unchanged/)).toBeInTheDocument()
     expect(screen.queryByText(/Nothing settled yet/)).toBeNull()
   })
 
