@@ -273,10 +273,32 @@ export const vegasEngine: GameEngine<VegasConfig> = {
   },
   configSchema: vegasConfigSchema,
   configFields: [
-    { key: 'pointCents', kind: 'money', label: 'Per point', min: 5, max: 500, step: 5 },
-    { key: 'teams', kind: 'teams', label: 'Teams' },
-    { key: 'birdieFlip', kind: 'boolean', label: 'Birdie flip', hint: 'Gross birdie flips opponents' },
-    { key: 'eagleDouble', kind: 'boolean', label: 'Eagle doubles', hint: 'Eagle doubles the hole' },
+    // All editable: Vegas records no events, so every one of these is a clean
+    // re-derive of the whole card (MAI-100).
+    {
+      key: 'pointCents',
+      kind: 'money',
+      label: 'Per point',
+      min: 5,
+      max: 500,
+      step: 5,
+      midRound: 'editable',
+    },
+    { key: 'teams', kind: 'teams', label: 'Teams', midRound: 'editable' },
+    {
+      key: 'birdieFlip',
+      kind: 'boolean',
+      label: 'Birdie flip',
+      hint: 'Gross birdie flips opponents',
+      midRound: 'editable',
+    },
+    {
+      key: 'eagleDouble',
+      kind: 'boolean',
+      label: 'Eagle doubles',
+      hint: 'Eagle doubles the hole',
+      midRound: 'editable',
+    },
   ],
   defaultConfig: (players) => ({
     pointCents: 10,

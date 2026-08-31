@@ -125,10 +125,16 @@ describe('RoundStartScreen', () => {
     fireEvent.change(input, { target: { value: '10' } })
     fireEvent.blur(input) // commit is on blur, not per keystroke
 
+    // IT LANDS IN THE LOG, NOT THE DOCUMENT (MAI-102). The handicap is a
+    // `player/handicap` amendment now, so the round still reads as it teed off
+    // and the number the engine uses comes from the fold.
     await waitFor(async () => {
-      expect((await db.rounds.get(round.id))!.players[1]!.courseHandicap).toBe(10)
+      expect(await eventStore.list(round.id)).toMatchObject([
+        { type: 'player/handicap', playerId: 'p-bogey', courseHandicap: 10 },
+      ])
     })
     await waitFor(() => expect(strokeRow('Bogey')).toHaveTextContent('CH 10 · 8 strokes'))
+    expect((await db.rounds.get(round.id))!.players[1]!.courseHandicap).toBe(18)
     // the reported index is a record of what they said — editing CH leaves it be
     expect((await db.rounds.get(round.id))!.players[1]!.handicapIndex).toBe(
       round.players[1]!.handicapIndex,
@@ -137,9 +143,7 @@ describe('RoundStartScreen', () => {
     // a fat-fingered entry clamps instead of allocating triple-digit strokes
     fireEvent.change(input, { target: { value: '142' } })
     fireEvent.blur(input)
-    await waitFor(async () => {
-      expect((await db.rounds.get(round.id))!.players[1]!.courseHandicap).toBe(74)
-    })
+    await waitFor(() => expect(strokeRow('Bogey')).toHaveTextContent('CH 74'))
   })
 
   it('does not persist a half-typed or unchanged handicap', async () => {
@@ -193,17 +197,36 @@ describe('RoundStartScreen', () => {
     fireEvent.change(input, { target: { value: '2' } }) // first keystroke
     fireEvent.change(input, { target: { value: '22' } }) // second, before any commit
     expect(input).toHaveValue(22) // never snapped back to 14
-    expect((await db.rounds.get(round.id))!.players[1]!.courseHandicap).toBe(14) // not yet
+    expect(await eventStore.list(round.id)).toHaveLength(0) // not yet
 
     fireEvent.blur(input)
     await waitFor(async () => {
-      expect((await db.rounds.get(round.id))!.players[1]!.courseHandicap).toBe(22)
+      expect(await eventStore.list(round.id)).toMatchObject([
+        { type: 'player/handicap', playerId: 'p-bogey', courseHandicap: 22 },
+      ])
     })
   })
 
-  it('locks handicaps once a hole is scored', async () => {
+  /**
+   * HANDICAPS NO LONGER LOCK (MAI-102), and these two tests are what used to
+   * hold the opposite line.
+   *
+   * They were right while a handicap could only be changed by rewriting the
+   * round document — invariant #2's first-tee exception — because doing that
+   * under a live log silently re-derives every settled hole. The second of them
+   * existed because gating on `anyScored` let a putt or a wolf pick open the
+   * gap: the field rendered, the repo refused the write, and the round kept the
+   * old number while mis-allocating strokes for all 18 holes.
+   *
+   * A `player/handicap` amendment is none of those things — stated, previewed,
+   * undoable, carried by sync — so the field stays live, and the thing worth
+   * pinning now is the opposite: that a scored round still offers the edit, and
+   * says what it will cost before taking it.
+   */
+  it('keeps handicaps editable after scoring starts, under a stated price', async () => {
     const round = makeRound({
       players: makePlayers([{ name: 'Scratch', ch: 0 }, { name: 'Bogey', ch: 18 }]),
+      holes: 'front9',
       games: [
         {
           type: 'skins',
@@ -212,56 +235,33 @@ describe('RoundStartScreen', () => {
         },
       ],
     })
-    round.id = 'round-start-locked'
+    round.id = 'round-start-editable'
     await db.rounds.put(round)
+    // Scratch wins hole 1 on gross; Bogey's stroke is what decides it net
     await eventStore.append(round.id, [
+      { type: 'score/set', playerId: 'p-scratch', hole: 1, gross: 4 },
       { type: 'score/set', playerId: 'p-bogey', hole: 1, gross: 5 },
     ])
 
     renderStart(round.id)
+    const input = await screen.findByLabelText('Bogey course handicap')
+    expect(input).toBeEnabled()
+    expect(screen.queryByText(/Locked — scoring has started/)).toBeNull()
 
-    expect(await screen.findByText(/Locked — scoring has started/)).toBeInTheDocument()
-    expect(screen.queryByLabelText('Bogey course handicap')).not.toBeInTheDocument()
-  })
+    // …and once scored it is a PENDING edit with a Save, not a blur-commit,
+    // because this one re-prices a hole that has already been read out
+    fireEvent.change(input, { target: { value: '0' } })
+    fireEvent.blur(input)
+    expect(await screen.findByText(/Re-prices the round/i)).toBeInTheDocument()
+    expect(await screen.findByText(/Scratch \+\$1/)).toBeInTheDocument()
+    expect(await eventStore.list(round.id)).toHaveLength(2) // nothing written yet
 
-  /**
-   * MAI-90, review round 1. The repo refuses `setCourseHandicap` on a
-   * NON-EMPTY LOG, but this screen used to gate its fields on "anything
-   * scored" — so any non-score event opened a gap where the fields rendered,
-   * the typed number sat in local state looking accepted, the write was
-   * rejected, and the round quietly kept the old course handicap. That
-   * mis-allocates strokes for all 18 holes with nothing said.
-   *
-   * A putt tapped before the first score is an ordinary way to reach it, which
-   * is what turned a latent divergence into an everyday one. A Wolf pick or a
-   * CTP award does the same, and always could.
-   */
-  it('locks handicaps on ANY event, not just a score', async () => {
-    const round = makeRound({
-      players: makePlayers([{ name: 'Scratch', ch: 0 }, { name: 'Bogey', ch: 18 }]),
-      trackPutts: true,
-      games: [
-        {
-          type: 'skins',
-          config: { stakeCents: 100, carryover: true },
-          handicap: { mode: 'net', allowancePct: 100, reference: 'offLow' },
-        },
-      ],
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(async () => {
+      expect(await eventStore.list(round.id)).toHaveLength(3)
     })
-    round.id = 'round-start-locked-by-putts'
-    await db.rounds.put(round)
-    // no score anywhere — just a putt count on the first hole
-    await eventStore.append(round.id, [
-      { type: 'score/putts', playerId: 'p-bogey', hole: 1, putts: 2 },
-    ])
-
-    renderStart(round.id)
-
-    // the UI must agree with the write it would attempt
-    expect(await screen.findByText(/Locked — scoring has started/)).toBeInTheDocument()
-    expect(screen.queryByLabelText('Bogey course handicap')).not.toBeInTheDocument()
+    await waitFor(() => expect(strokeRow('Bogey')).toHaveTextContent('CH 0 · 0 strokes'))
   })
-
   it('shows no strokes for a gross game', async () => {
     const round = makeRound({
       players: makePlayers([{ name: 'Ann', ch: 5 }, { name: 'Bo', ch: 12 }]),

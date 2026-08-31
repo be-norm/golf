@@ -1,7 +1,9 @@
 import type { z } from 'zod'
+import { handicapSettingsSchema } from './core/events'
 import type { GameScopedEvent, RoundEvent } from './core/events'
 import { buildRoundContext, type RoundContext } from './core/context'
 import { effectiveEvents, gameEventsFor } from './core/replay'
+import { canonicalJson } from './core/setup'
 import type { Celebration } from './core/celebration'
 import type { Settlement } from './core/money'
 import type {
@@ -215,11 +217,43 @@ export interface GameDerivation {
 }
 
 /**
+ * What every config field carries, whatever its kind.
+ *
+ * A shared base rather than the key repeated across six union members — and the
+ * union still narrows on `kind` through the intersection, so `fieldPhrase`'s
+ * exhaustive switch (label.ts) keeps its `never` guard.
+ */
+interface FieldBase {
+  key: string
+  label: string
+  hint?: string
+  /**
+   * CAN THIS BE CHANGED ONCE THE ROUND IS UNDER WAY (MAI-100)?
+   *
+   * REQUIRED, not optional, so the next engine's author has to answer it rather
+   * than inheriting "editable" by silence — the failure this would otherwise
+   * have is a field that quietly rewrites recorded golf, discovered by a group
+   * whose money came out wrong.
+   *
+   * 'locked' means "not once anything is scored", NOT "never": these are still
+   * editable on the first tee, which is when a wrong wolf order is actually
+   * spotted. Lock a field when RECORDED EVENTS ARE INTERPRETED THROUGH IT —
+   * Wolf's `rotation` decides who the wolf was on each hole, so re-ordering it
+   * after picks exist pairs the new wolf with the old partner. A stake, a
+   * carryover, a team assignment: nothing recorded is read through those, so
+   * changing one is a clean re-derive and they stay editable.
+   *
+   * Enforced in `amendRound`, not merely by the editor hiding the control.
+   */
+  midRound: 'editable' | 'locked'
+}
+
+/**
  * Declarative config form fields — the setup wizard renders these generically,
  * so no game ever ships custom setup UI. 'teams' and 'rotation' are the
  * first-class participant-assignment field types (Vegas teams, Wolf order).
  */
-export type ConfigFieldSpec =
+export type ConfigFieldSpec = FieldBase & (
   /**
    * `min`/`max`/`step` are per-field because one range cannot serve every
    * money field: a Nassau unit moves in dollars, a Vegas point in nickels, and
@@ -227,11 +261,11 @@ export type ConfigFieldSpec =
    * of them — which put 400 taps between $1 and $5 (MAI-44). Optional, so a
    * field that doesn't care keeps the sane defaults.
    */
-  | { key: string; kind: 'money'; label: string; hint?: string; min?: number; max?: number; step?: number }
-  | { key: string; kind: 'boolean'; label: string; hint?: string }
-  | { key: string; kind: 'select'; label: string; options: { value: string; label: string }[] }
-  | { key: string; kind: 'teams'; label: string }
-  | { key: string; kind: 'rotation'; label: string }
+  | { kind: 'money'; min?: number; max?: number; step?: number }
+  | { kind: 'boolean' }
+  | { kind: 'select'; options: { value: string; label: string }[] }
+  | { kind: 'teams' }
+  | { kind: 'rotation' }
   /**
    * WHICH HOLES a bet runs on — a named rule, or a list the group picked at the
    * tee. The value is a preset's `value` (a string) OR an explicit `number[]`.
@@ -252,15 +286,13 @@ export type ConfigFieldSpec =
    * round, not the number painted on the marker (invariant #9).
    */
   | {
-      key: string
       kind: 'holes'
-      label: string
-      hint?: string
       /** named alternatives to an explicit list, in the engine's own words */
       presets: { value: string; label: string }[]
       /** the chip that reveals the grid, e.g. "Pick them" */
       customLabel: string
     }
+)
 
 /**
  * Whether a game can be the round's main event, a side bet alongside one, or
@@ -532,12 +564,213 @@ export function listEngines(): GameEngine[] {
   return [...registry.values()]
 }
 
-/** Replay a round: retraction pass → shared context → per-game derivations. */
+/**
+ * THE ROUND AS ITS LOG SAYS IT NOW — the document with every amendment folded
+ * on: a game's settings (`game/configured`) and a player's course handicap
+ * (`player/handicap`) alike (MAI-100).
+ *
+ * Settings live on the round document rather than in the log, and `deriveRound`
+ * reads them wholesale, so before this a stake set wrong at tee-off could only
+ * be fixed by abandoning the round. An amendment is an event instead, and this
+ * is where it lands: one fold, ahead of `buildRoundContext`, so every engine and
+ * every screen sees the same answer and no surface can show a stale stake.
+ *
+ * IT RE-PRICES THE WHOLE ROUND. An amendment is not "from here on" — it is
+ * "these were always the settings" — which is both what a group means when they
+ * catch a wrong stake on the ninth green and the only reading `derive(config,
+ * …)` can express. `eventHole` answers null for these kinds precisely so the
+ * ledger's prefix replay carries them into EVERY prefix and hole 3's row
+ * re-prices to agree with the settle screen.
+ *
+ * Three properties, each pinned by `amend.test.ts` because each is load-bearing
+ * somewhere that will not fail loudly:
+ *
+ * 1. AN AMENDMENT THE ENGINE REJECTS IS SKIPPED, and the game keeps deriving at
+ *    its previous settings. Letting one through would instead hit `deriveRound`'s
+ *    `configSchema` guard below and make the game INERT — a mistyped stake
+ *    silently deleting a live bet, which is the worst failure available here.
+ * 2. IDEMPOTENT. `buildHoleLedger` is handed this function's own output (the
+ *    screens pass `view.round`) and folds it again against the full log, so
+ *    folding an amended round must change nothing. It folds ONCE rather than
+ *    per prefix, deliberately — a prefix is a different log, and the locked
+ *    rule below asks a question about the log. See `deriveAmended`.
+ * 3. IDENTITY-STABLE. A round with no amendments — every round today — comes
+ *    back as the same object, so `useRound`'s memo and every downstream identity
+ *    comparison behave exactly as they did before this existed.
+ *
+ * Events must already be effective: a retracted amendment is simply not here,
+ * which is how undo works for free.
+ */
+export function amendRound(round: Round, effective: readonly RoundEvent[]): Round {
+  let games: GameConfig[] | undefined
+  let players: RoundPlayer[] | undefined
+  // Has anything been scored YET — walked in seq order, so it answers "at the
+  // moment this amendment was made", not "by the end of the round". A locked
+  // field is editable on the first tee, which is when a wrong wolf order is
+  // actually noticed.
+  let scored = false
+
+  for (const e of effective) {
+    if (e.type === 'score/set') {
+      scored = true
+      continue
+    }
+    if (e.type === 'player/handicap') {
+      // The number the engine consumes, replaced for the whole round — the
+      // index is left alone, because it records what the player reported
+      // (RoundPlayer.courseHandicap). A name that isn't in this round is inert,
+      // like every other amendment naming something absent.
+      const current = players ?? round.players
+      const idx = current.findIndex((p) => p.playerId === e.playerId)
+      if (idx === -1) continue
+      players = [...current]
+      players[idx] = { ...current[idx]!, courseHandicap: e.courseHandicap }
+      continue
+    }
+    if (e.type === 'game/added') {
+      const current = games ?? round.games
+      const idx = current.findIndex((g) => g.gameId === e.game.gameId)
+      // Never admit a game that cannot derive — the same rule an amendment
+      // follows, applied to a game arriving whole.
+      if (!acceptsConfig(e.game.type, e.game.config)) continue
+      // A different game under an id already in the round would re-interpret
+      // the first one's recorded events as the second's.
+      if (idx !== -1 && current[idx]!.type !== e.game.type) continue
+      games = [...current]
+      // PUT, not push: replacing in place keeps the fold idempotent (the ledger
+      // re-folds an already-amended round) and keeps `round.games` ORDER stable,
+      // which `roleOf`, `gameLabel` and `primaryGame` all read.
+      if (idx === -1) games.push(e.game)
+      else games[idx] = e.game
+      continue
+    }
+    if (e.type === 'game/removed') {
+      const current = games ?? round.games
+      if (!current.some((g) => g.gameId === e.gameId)) continue
+      games = current.filter((g) => g.gameId !== e.gameId)
+      continue
+    }
+    if (e.type !== 'game/configured') continue
+    const current = games ?? round.games
+    const idx = current.findIndex((g) => g.gameId === e.gameId)
+    // An amendment naming a game the round doesn't hold: a corrupt log, or one
+    // written against a round this device has a different copy of. Inert — it
+    // must not conjure a game, which is `game/added`'s job and carries a type.
+    if (idx === -1) continue
+    const game = current[idx]!
+    if (!acceptsConfig(game.type, e.config)) continue
+    /**
+     * AND THE HANDICAP HALF, which `acceptsConfig` does not cover.
+     *
+     * `handicapSettingsSchema` bounds `allowancePct` because it reaches
+     * `applyAllowance`, which has no guard of its own — an out-of-range value
+     * mis-allocates strokes for every hole of the round, silently. That bound
+     * runs on the local append and on import, but NOT on the sync path:
+     * `applyRemoteRound` bulk-puts pulled events with no validation at all, so
+     * a corrupt archive row would otherwise walk straight into stroke
+     * allocation. Same rule as the config: an amendment we cannot read is
+     * inert, and the game keeps the settings it had.
+     */
+    if (!handicapSettingsSchema.safeParse(e.handicap).success) continue
+    if (scored && changesLockedField(game, e.config)) continue
+    // Spread FIRST so a field added to `GameConfig` later reaches the amended
+    // round instead of being silently dropped by an enumerating rebuild — the
+    // rule the test harness's `makeRound` already follows.
+    const next: GameConfig = { ...game, config: e.config, handicap: e.handicap, role: e.role }
+    // Wholesale, like the rest of the payload: absent means "derive it"
+    // (GameConfig.role), so an amendment without one CLEARS a stamp rather than
+    // keeping the old one. Deleted rather than left undefined so an amended game
+    // is indistinguishable from one that never carried a role.
+    if (next.role === undefined) delete next.role
+    games = [...current]
+    games[idx] = next
+  }
+
+  if (!games && !players) return round
+  const amended: Round = { ...round, ...(games && { games }), ...(players && { players }) }
+  /**
+   * A ROUND COLLECTS A SHARED FACT BECAUSE A GAME IN IT READS ONE (MAI-90), and
+   * a game can now join mid-round — so the answer has to be re-asked rather than
+   * frozen at tee-off.
+   *
+   * ORed, never turned off: putts already recorded stay recorded, and a game
+   * removed after somebody entered them shouldn't retract the entry control from
+   * under a half-filled card. Dormant today — nothing declares `meta.reads` —
+   * but it is the difference between a future Dots added on the 8th collecting
+   * putts and silently collecting nothing, which is the exact hole CLAUDE.md
+   * flags on `Round.trackPutts`.
+   */
+  if (!amended.trackPutts && games?.some((g) => (getEngine(g.type)?.meta.reads?.length ?? 0) > 0)) {
+    amended.trackPutts = true
+  }
+  return amended
+}
+
+/**
+ * Would this engine accept this config at all? Unregistered types accept
+ * everything: such a game is inert in `deriveRound` either way, and dropping its
+ * amendment would lose a change made on a build that DOES ship the game — the
+ * same call `importSchema` makes about letting unknown types through.
+ */
+function acceptsConfig(type: string, config: unknown): boolean {
+  return getEngine(type)?.configSchema.safeParse(config).success ?? true
+}
+
+/**
+ * Does this amendment touch a field the engine declares `midRound: 'locked'`?
+ *
+ * Only Wolf's `rotation` today, and the rule is enforced HERE rather than by the
+ * editor hiding the control, because a rule the UI alone keeps is not a rule.
+ * Recorded `wolf/pick` events are attributed THROUGH the rotation — inside it
+ * the config decides who the wolf was, and the pick's own stamp is deliberately
+ * not allowed to override that — so re-ordering it once picks exist pairs the
+ * new wolf with the old partner: a partnership nobody formed, priced as if they
+ * had.
+ *
+ * The whole amendment is dropped rather than the offending key merged away.
+ * Merging would need per-key rules and leave the group looking at a card that
+ * accepted half of what they typed; "an amendment that isn't allowed does
+ * nothing" is one sentence, and the editor never sends one anyway.
+ */
+function changesLockedField(game: GameConfig, next: unknown): boolean {
+  const fields = getEngine(game.type)?.configFields ?? []
+  const before = (game.config ?? {}) as Record<string, unknown>
+  const after = (next ?? {}) as Record<string, unknown>
+  return fields.some(
+    (f) => f.midRound === 'locked' && canonicalJson(before[f.key]) !== canonicalJson(after[f.key]),
+  )
+}
+
+/** Replay a round: amendments → retraction pass → shared context → per-game derivations. */
 export function deriveRound(
   round: Round,
   events: readonly RoundEvent[],
-): { ctx: RoundContext; derivations: Map<Uuid, GameDerivation> } {
+): { round: Round; ctx: RoundContext; derivations: Map<Uuid, GameDerivation> } {
   const effective = effectiveEvents(events)
+  // Before anything else reads the round: `ctx.round` is the AMENDED round, and
+  // so is what `useRound` hands every screen (see amendRound).
+  return deriveAmended(amendRound(round, effective), effective)
+}
+
+/**
+ * The derivation proper, for a round whose amendments are ALREADY folded in.
+ *
+ * Split out for `buildHoleLedger`, and the reason is not tidiness. The ledger
+ * replays PREFIXES, and the locked-field rule asks a question about the log —
+ * "had anything been scored when this amendment was made?" — whose answer
+ * differs between a prefix and the whole thing. Re-folding per prefix therefore
+ * let hole 1's replay ACCEPT a rotation amendment the full log correctly
+ * refuses, on a round whose first hole is unscored: the same full-vs-prefix
+ * divergence `eventHole`'s note in ledger.ts warns about, and it would stop the
+ * rows summing to the total for any engine that settles before a score.
+ *
+ * So the fold happens ONCE, against the complete log, and every prefix derives
+ * against that one answer.
+ */
+export function deriveAmended(
+  round: Round,
+  effective: readonly RoundEvent[],
+): { round: Round; ctx: RoundContext; derivations: Map<Uuid, GameDerivation> } {
   const ctx = buildRoundContext(round, effective)
   const derivations = new Map<Uuid, GameDerivation>()
   for (const game of round.games) {
@@ -559,5 +792,9 @@ export function deriveRound(
     })
     derivations.set(game.gameId, engine.derive(game, gameEvents, ctx))
   }
-  return { ctx, derivations }
+  // The AMENDED round rides back out, so every consumer reads the settings the
+  // log says are in force. `useRound` spreads this over the stored row, which is
+  // what makes "no screen can show a stale stake" structural rather than a
+  // convention each screen has to remember.
+  return { round, ctx, derivations }
 }

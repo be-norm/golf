@@ -245,7 +245,9 @@ export const sixPointEngine: GameEngine<SixPointConfig> = {
     },
   },
   configSchema: sixPointConfigSchema,
-  configFields: [{ key: 'pointCents', kind: 'money', label: 'Per point', min: 5, step: 5 }],
+  configFields: [
+    { key: 'pointCents', kind: 'money', label: 'Per point', min: 5, step: 5, midRound: 'editable' },
+  ],
   defaultConfig: () => ({ pointCents: 25 }),
   defaultHandicap: (): HandicapSettings => ({ mode: 'net', allowancePct: 100, reference: 'offLow' }),
   validateSetup: (

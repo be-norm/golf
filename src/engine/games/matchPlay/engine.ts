@@ -293,8 +293,10 @@ export const matchPlayEngine: GameEngine<MatchPlayConfig> = {
   },
   configSchema: matchPlayConfigSchema,
   configFields: [
-    { key: 'stakeCents', kind: 'money', label: 'Stake', min: 100, step: 100 },
-    { key: 'teams', kind: 'teams', label: 'Teams (best ball · two sides)' },
+    { key: 'stakeCents', kind: 'money', label: 'Stake', min: 100, step: 100, midRound: 'editable' },
+    // Editable: this game records no events at all, so re-sorting the sides just
+    // re-derives every hole against the new ones (MAI-100).
+    { key: 'teams', kind: 'teams', label: 'Teams (best ball · two sides)', midRound: 'editable' },
   ],
   defaultConfig: (players) => ({
     stakeCents: 500,

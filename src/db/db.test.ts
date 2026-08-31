@@ -178,23 +178,35 @@ describe('RoundRepo', () => {
     expect(await repo.liveRound()).toBeDefined()
   })
 
-  it('adjusts a course handicap only while the event log is empty', async () => {
+  /**
+   * `setCourseHandicap` USED TO LIVE HERE, refusing on a non-empty log —
+   * invariant #2's first-tee exception, and the right rule while rewriting the
+   * document was the only way to change a handicap under a live round. It is a
+   * `player/handicap` amendment now (MAI-102), so the exception is retired and
+   * the behaviour it guarded is tested where the fold lives (amend.test.ts).
+   *
+   * What replaced it at THIS layer is `setStatus`, and it is a read-modify-write
+   * for a reason: the screens hold the AMENDED round, so the old
+   * `put({ ...round, status })` would have written every amendment back into the
+   * document — which is supposed to mean "as teed off".
+   */
+  it('moves a round between live and completed without touching the rest of it', async () => {
     const db = freshDb()
     const repo = new RoundRepo(db)
-    const store = new EventStore(db)
     const r = { ...roundRow(U1, 'live', '2026-01-01T00:00:00Z'), players: makePlayers([{ name: 'Bogey', ch: 18 }]) }
     await repo.put(r)
 
-    expect(await repo.setCourseHandicap(r.id, 'p-bogey', 10)).toBe(true)
-    expect((await repo.get(r.id))!.players[0]!.courseHandicap).toBe(10)
+    expect(await repo.setStatus(r.id, 'completed')).toBe(true)
+    const done = await repo.get(r.id)
+    expect(done!.status).toBe('completed')
+    // everything else is exactly as it was — this is a status write, not a save
+    expect(done!.players).toEqual(r.players)
+    expect(done!.games).toEqual(r.games)
 
-    // once a score exists the handicap is settled money — the write must lose,
-    // not silently re-derive every hole already played (CLAUDE.md invariant #2)
-    await store.append(r.id, [{ type: 'score/set', playerId: 'p-bogey', hole: 1, gross: 5 }])
-    expect(await repo.setCourseHandicap(r.id, 'p-bogey', 2)).toBe(false)
-    expect((await repo.get(r.id))!.players[0]!.courseHandicap).toBe(10)
+    expect(await repo.setStatus(r.id, 'live')).toBe(true)
+    expect((await repo.get(r.id))!.status).toBe('live')
 
-    expect(await repo.setCourseHandicap('no-such-round', 'p-bogey', 4)).toBe(false)
+    expect(await repo.setStatus('no-such-round', 'completed')).toBe(false)
   })
 
   it('hard-deletes a round and its event log in one transaction', async () => {

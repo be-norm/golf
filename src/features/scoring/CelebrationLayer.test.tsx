@@ -34,7 +34,10 @@ function skinsRound(): Round {
 }
 
 function viewOf(round: Round, events: RoundEvent[]): RoundView {
-  return { round, events: [...events], ...deriveRound(round, events) }
+  // `deriveRound` returns the AMENDED round and it wins, exactly as it does in
+  // `useRound` — spelling `round` twice here is now a type error rather than a
+  // silent disagreement between this fixture and the real hook.
+  return { storedRound: round, events: [...events], ...deriveRound(round, events) }
 }
 
 /** A wins hole 1 outright; everyone else ties it. */
@@ -340,6 +343,57 @@ describe('CelebrationLayer', () => {
    * there and it contributes nothing — this is the only place the second engine
    * on this channel is shown actually reaching the screen.
    */
+  /**
+   * A SETTINGS AMENDMENT DECIDES NOTHING NEW, however much money it moves
+   * (MAI-100). Flipping a game from gross to net re-derives every hole against
+   * handicap strokes, so a hole settled an hour ago can gain a winner it never
+   * had — and none of that is a thing that just happened on a green.
+   *
+   * The existing `eventHole` guard is what covers it: an amendment is
+   * round-level and answers null, exactly like completion. That is not an
+   * accident of the payload — it is the same null that makes the ledger
+   * re-price every prefix — so this pins the two halves together, and fails the
+   * day someone teaches `eventHole` to read a hole off an amendment.
+   */
+  it('says nothing when a settings change re-decides old holes', () => {
+    const round = makeRound({
+      // B is the only one carrying a handicap, so net is what gives them the
+      // stroke that decides the hole
+      players: makePlayers([
+        { name: 'A', ch: 0 },
+        { name: 'B', ch: 18 },
+        { name: 'C', ch: 0 },
+        { name: 'D', ch: 0 },
+      ]),
+      holes: 'front9',
+      games: [{ type: 'skins', config: { stakeCents: 100, carryover: true } }],
+    })
+    const log = new EventLog()
+    const idOf = new Map(round.players.map((p) => [p.name, p.playerId]))
+    // gross: A and B tie for low, so hole 1 is won by nobody and says nothing
+    for (const [name, gross] of [['A', 4], ['B', 4], ['C', 5], ['D', 5]] as const) {
+      log.append({ type: 'score/set', playerId: idOf.get(name)!, hole: 1, gross })
+    }
+    const { container, rerender } = render(<CelebrationLayer view={viewOf(round, log.events)} />)
+    expect(coins(container)).toBe(0)
+
+    log.append({
+      type: 'game/configured',
+      gameId: round.games[0]!.gameId,
+      config: { stakeCents: 100, carryover: true },
+      handicap: { mode: 'net', allowancePct: 100, reference: 'offLow' },
+    })
+    const after = viewOf(round, log.events)
+    // …net off the low hands B a stroke on hole 1 and they take it outright, so
+    // there really IS a celebration to suppress. Without this the test passes by
+    // having nothing to say, which is the way this file's guards fail silently.
+    expect(after.derivations.get('game-1')!.celebration!(1)).toMatchObject({
+      playerIds: [idOf.get('B')],
+    })
+    rerender(<CelebrationLayer view={after} />)
+    expect(coins(container)).toBe(0)
+  })
+
   it('plays a scene in place instead of throwing it at a row', () => {
     const players = makePlayers(P.map((name) => ({ name })))
     const round = makeRound({

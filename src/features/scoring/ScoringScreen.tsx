@@ -526,7 +526,10 @@ export function ScoringScreen() {
 
   const finish = async () => {
     await eventStore.append(round.id, [{ type: 'round/completed' }])
-    await roundRepo.put({ ...round, status: 'completed' })
+    // `setStatus`, not `put({ ...round })`: `round` here is the AMENDED round
+    // (settings amendments folded on by deriveRound), and writing it back would
+    // bake them into the document, which is supposed to mean "as teed off".
+    await roundRepo.setStatus(round.id, 'completed')
     // Push only owner-scoped (signed-in) rounds; guest rounds stay local until
     // claimed on sign-in. Re-read so the pushed snapshot matches what's stored
     // (put re-stamps updatedAt). The round carries its own owner.
@@ -856,12 +859,23 @@ export function ScoringScreen() {
 
       <Sheet open={standingsOpen} onClose={() => setStandingsOpen(false)}>
         <div className="space-y-5">
-          <Link
-            to={`/round/${round.id}/card`}
-            className="pixel-press font-display block border-felt-600 bg-felt-900/60 px-4 py-3 text-center text-[10px] uppercase"
-          >
-            View full card ▶
-          </Link>
+          <div className="grid grid-cols-2 gap-2.5">
+            <Link
+              to={`/round/${round.id}/card`}
+              className="pixel-press font-display block border-felt-600 bg-felt-900/60 px-4 py-3 text-center text-[10px] uppercase"
+            >
+              View full card ▶
+            </Link>
+            {/* This sheet is where the group is looking at the moment somebody
+                says "wait, wasn't the snake meant to be doubling?" — so the way
+                to fix it is here rather than only behind the ⓘ (MAI-100). */}
+            <Link
+              to={`/round/${round.id}/start`}
+              className="pixel-press font-display block border-stone-700 bg-stone-900/70 px-4 py-3 text-center text-[10px] uppercase text-stone-300"
+            >
+              Edit bets ▶
+            </Link>
+          </div>
           {/* When the bar collapses the side bets, this is where they expand —
               so the sheet groups them under a heading rather than leaving the
               bar's "▶" pointing at an undifferentiated list. Ungrouped, the

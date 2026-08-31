@@ -1,5 +1,5 @@
 import { useId } from 'react'
-import type { GameEngine } from '../../engine/catalog'
+import type { ConfigFieldSpec, GameEngine } from '../../engine/catalog'
 import type { HandicapSettings, Uuid } from '../../engine/core/types'
 import {
   ConfigField,
@@ -66,9 +66,30 @@ interface Props {
   problems: string[]
   /** Whether the settings are showing. Owned by SetupScreen — see `collapsed`. */
   open: boolean
+  /**
+   * Fields this round can no longer change, stated rather than hidden (MAI-100).
+   *
+   * Only the mid-round editor passes any: setup is before the first score, when
+   * everything is editable, so it passes nothing and is unchanged. A locked
+   * field renders as its current VALUE plus the reason, because a control that
+   * silently vanished would read as a field this game doesn't have — and the
+   * wolf order is exactly the thing a group goes looking for when they think it
+   * is wrong.
+   *
+   * The rule itself is the engine's (`ConfigFieldSpec.midRound`) and the
+   * enforcement is `amendRound`'s. This is presentation only: hiding a control
+   * has never been what stops a write.
+   */
+  lockedFields?: readonly string[]
   onToggle: () => void
   onChange: (draft: GameDraft) => void
-  onRemove: () => void
+  /**
+   * Optional, because removing a game is not offered everywhere the card is.
+   * Setup always passes one; the mid-round editor does so only once
+   * `game/removed` exists (MAI-103) — and a ✕ that did nothing would be worse
+   * than no ✕ at all.
+   */
+  onRemove?: () => void
   onRules: () => void
 }
 
@@ -94,6 +115,7 @@ export function GameConfigCard({
   draft,
   problems,
   open,
+  lockedFields,
   onToggle,
   onChange,
   onRemove,
@@ -176,13 +198,15 @@ export function GameConfigCard({
             <DisclosureArrow open={open} />
           </span>
         </button>
-        <button
-          aria-label={`remove ${label}`}
-          onClick={onRemove}
-          className="flex size-7 shrink-0 items-center justify-center bg-stone-800 text-sm font-bold text-stone-400"
-        >
-          ✕
-        </button>
+        {onRemove && (
+          <button
+            aria-label={`remove ${label}`}
+            onClick={onRemove}
+            className="flex size-7 shrink-0 items-center justify-center bg-stone-800 text-sm font-bold text-stone-400"
+          >
+            ✕
+          </button>
+        )}
       </div>
 
       {/* OUTSIDE the fold: what is wrong here is fixed by controls inside the
@@ -199,17 +223,27 @@ export function GameConfigCard({
         <div id={panelId}>
           <p className="px-4 pb-3 text-sm text-stone-400">{engine.meta.blurb}</p>
           <div className="space-y-4 border-t border-felt-800/60 px-4 py-4">
-            {engine.configFields.map((field) => (
-              <ConfigField
-                key={field.key}
-                field={field}
-                value={config[field.key]}
-                players={players}
-                holes={holes}
-                gameName={label}
-                onChange={(v) => setConfigValue(field.key, v)}
-              />
-            ))}
+            {engine.configFields.map((field) =>
+              lockedFields?.includes(field.key) ? (
+                  <LockedField
+                  key={field.key}
+                  field={field}
+                  players={players}
+                  holes={holes}
+                  value={config[field.key]}
+                />
+              ) : (
+                <ConfigField
+                  key={field.key}
+                  field={field}
+                  value={config[field.key]}
+                  players={players}
+                  holes={holes}
+                  gameName={label}
+                  onChange={(v) => setConfigValue(field.key, v)}
+                />
+              ),
+            )}
             {/* Nothing at all when strokes cannot decide the game — not the
                 control, and not a line explaining its absence either. See
                 `meta.grossOnly`. */}
@@ -231,5 +265,40 @@ export function GameConfigCard({
         </div>
       )}
     </div>
+  )
+}
+
+/**
+ * A setting this round can no longer change — shown, not hidden (MAI-100).
+ *
+ * IT RENDERS THE REAL `ConfigField` INSIDE A DISABLED `<fieldset>`, which is the
+ * whole trick. `ConfigField` is deliberately the ONE editor for these specs —
+ * the catalog already had two renderers of them and they drifted the moment they
+ * existed — so a hand-rolled read-only view would be a third, drifting the same
+ * way the first time a field kind is added. A disabled fieldset natively
+ * disables every control inside it and is announced as such, so nothing here has
+ * to know what a rotation or a hole grid looks like.
+ *
+ * `onChange` still gets a no-op rather than being made optional: the controls
+ * cannot fire it, and a prop that is sometimes absent invites a branch.
+ */
+function LockedField({
+  field,
+  players,
+  holes,
+  value,
+}: {
+  field: ConfigFieldSpec
+  players: FieldPlayer[]
+  holes: readonly number[]
+  value: unknown
+}) {
+  return (
+    <fieldset disabled className="min-w-0 opacity-60">
+      <ConfigField field={field} value={value} players={players} holes={holes} onChange={() => {}} />
+      <p className="mt-1.5 text-xs text-stone-500">
+        Set at the first tee — the round has been scored against it.
+      </p>
+    </fieldset>
   )
 }

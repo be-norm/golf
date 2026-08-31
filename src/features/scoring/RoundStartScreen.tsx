@@ -5,12 +5,17 @@ import { getEngine, type GameEngine } from '../../engine/catalog'
 import { gameLabel } from '../../engine/label'
 import { teedOffAway } from '../../engine/core/holes'
 import { formatCents } from '../../engine/core/money'
+import { effectiveEvents, isCompleted } from '../../engine/core/replay'
+import { newId } from '../../db/ids'
+import { eventStore } from '../../db/eventStore'
+import { removedGames } from '../../lib/roundSettings'
 import type { GameConfig, HandicapSettings } from '../../engine/core/types'
-import { roundRepo } from '../../db/repos'
 import { BigButton } from '../../components/BigButton'
 import { CourseBanner } from '../../components/CourseBanner'
-import { selectOnFocus } from '../../components/inputs'
 import { RulesSheet } from '../games/RulesSheet'
+import { GamePickerSheet } from '../setup/GamePickerSheet'
+import { GameSettingsSheet } from './GameSettingsSheet'
+import { HandicapSection } from './HandicapSection'
 import { useRound } from './useRound'
 
 const HOLES_LABEL: Record<string, string> = {
@@ -54,70 +59,45 @@ function configChips(engine: GameEngine, config: Record<string, unknown>): strin
   return chips
 }
 
-/** Fat-finger guard on a hand-typed course handicap. The upper bound sits above
- *  any real WHS course handicap — the max 54.0 index on a steep slope lands in
- *  the low 70s — so a legitimate value is never clipped, while "142" is still
- *  bounded (and visibly wrong for the user to correct). */
-const clampHandicap = (n: number) => Math.max(-10, Math.min(74, Math.round(n)))
-
 /**
- * One player's course handicap — the escape hatch before the first score, for a
- * wrong index, a course whose rating is off, or a stroke everyone just agreed to
- * give. `handicapIndex` is deliberately left alone: it records what the player
- * reported, while `courseHandicap` is what the engine consumes.
+ * First-tee summary, and the round's SETTINGS SCREEN thereafter.
  *
- * The typed text is LOCAL state, and it COMMITS ON BLUR, not per keystroke. A
- * controlled input reading straight from the round (a Dexie round-trip away)
- * snaps back to the stale value between keystrokes — type "22" over 14 and you
- * get 142 — so local state owns what's on screen. And committing per keystroke
- * would persist a half-typed value: clear the box to retype and it writes 0;
- * type "10" over "18" and the stroke rows below flash the CH-1 allocation. Blur
- * settles it once: an empty/NaN entry, or one that didn't change the number,
- * reverts and writes nothing.
- */
-function HandicapField({
-  name,
-  courseHandicap,
-  onCommit,
-}: {
-  name: string
-  courseHandicap: number
-  onCommit: (ch: number) => void
-}) {
-  const [text, setText] = useState(String(courseHandicap))
-  const commit = () => {
-    const raw = text.trim()
-    if (raw === '' || Number.isNaN(Number(raw))) return setText(String(courseHandicap))
-    const ch = clampHandicap(Number(raw))
-    setText(String(ch))
-    if (ch !== courseHandicap) onCommit(ch)
-  }
-  return (
-    <input
-      type="number"
-      inputMode="numeric"
-      min={-10}
-      max={74}
-      value={text}
-      onFocus={selectOnFocus}
-      aria-label={`${name} course handicap`}
-      onChange={(e) => setText(e.target.value)}
-      onBlur={commit}
-      className="min-h-11 w-20 border-2 border-stone-700 bg-stone-800 px-2 text-center text-lg text-stone-100 focus:border-felt-500 focus:outline-none"
-    />
-  )
-}
-
-/**
- * First-tee summary shown once after tee-off and re-openable from the scoring
- * screen. Its job: make the otherwise-invisible handicap allocation legible —
- * how many strokes each player gets, per game, before a single hole is scored.
+ * Its original job — make the otherwise-invisible handicap allocation legible,
+ * how many strokes each player gets per game before a hole is scored — is why
+ * it already lists every game with its config chips. That made it the obvious
+ * home for editing them once settings became amendable (MAI-100/101): the
+ * information was already here, and it is one tap from the scoring header.
  */
 export function RoundStartScreen() {
   const { roundId } = useParams()
   const navigate = useNavigate()
   const view = useRound(roundId)
   const [rulesFor, setRulesFor] = useState<string>()
+  const [editing, setEditing] = useState<string>()
+  // which section the picker is choosing into, or undefined when it is closed
+  const [picking, setPicking] = useState<'main' | 'side'>()
+  // the game the picker chose, with its defaults, on its way through the editor
+  const [adding, setAdding] = useState<{ game: GameConfig; section: 'main' | 'side' }>()
+  /**
+   * WAS THE LOG EMPTY WHEN WE ARRIVED — captured once, and deliberately not the
+   * same question as `logStarted` below.
+   *
+   * The flag-plant ceremony plays only on a round that hasn't started, and
+   * "hasn't started" has to be judged on ARRIVAL now that this screen can append
+   * events. Recomputing it per render meant saving a settings change made the
+   * banner vanish mid-visit, as though teeing off had just happened while you
+   * were looking at it.
+   *
+   * Captured on the first render that HAS a view, since `useRound` returns
+   * undefined while Dexie loads — seeding on mount would record nothing, the
+   * same trap `CelebrationLayer`'s seen-set has to avoid. STATE rather than a
+   * ref, as a render-phase adjustment: this is read during render, which is
+   * precisely what a ref may not be, and it is the shape `ScoringScreen`
+   * already uses for `derivedHole` (react.dev, "storing information from
+   * previous renders").
+   */
+  const [firstTee, setFirstTee] = useState<boolean>()
+  if (view && firstTee === undefined) setFirstTee(view.events.length === 0)
 
   if (view === undefined) return <main className="p-6 text-stone-400">Loading…</main>
   if (view === null)
@@ -137,19 +117,22 @@ export function RoundStartScreen() {
   const anyScored = round.players.some((p) =>
     ctx.holesPlayed.some((h) => ctx.gross.get(p.playerId)?.get(h) !== undefined),
   )
+  // Editing is refused on a settled round for the reason `GameSettingsSheet`
+  // spells out: nothing re-pushes a round because its log grew. Read off the
+  // EVENTS, not `round.status`, so a reopened round is editable again — the same
+  // gate the award grid takes.
+  const roundOver = isCompleted(round, effectiveEvents(view.events))
+  // The ceremony belongs to a round that hadn't started when we walked in.
+  const arrivedAtFirstTee = firstTee === true
   /**
-   * WHETHER THE HANDICAP EDIT IS STILL LIVE, and it has to be the same question
-   * `roundRepo.setCourseHandicap` asks: it refuses on a non-EMPTY LOG, not on
-   * "anything scored" (repos.ts). Gating the fields on `anyScored` let any
-   * non-score event open the gap — a Wolf pick, a CTP award, and now a putt —
-   * so the fields rendered, the field kept the typed number in local state, the
-   * write was rejected, and the round quietly kept the old course handicap,
-   * mis-allocating strokes for all 18 holes with nothing said.
+   * BETS THIS ROUND USED TO HOLD — recovered by folding the log up to each
+   * removal, which is where that game's settings last existed.
    *
-   * That is a wrong-money bug reached by tapping putts before the first score,
-   * which is an ordinary thing to do (MAI-90, review round 1).
+   * From the STORED round, not the amended one: a game the removal already
+   * dropped cannot be recovered by folding a prefix over a round that no longer
+   * holds it (see RoundView.storedRound).
    */
-  const logStarted = view.events.length > 0
+  const removed = removedGames(view.storedRound, view.events)
 
   const goToCard = () => navigate(`/round/${round.id}`, { replace: true })
 
@@ -167,12 +150,16 @@ export function RoundStartScreen() {
             not started. Coming BACK to this screen mid-round (the header link
             is live all the way until the first event) is not a first tee, and
             replaying the ceremony would say it was. */}
-        {!logStarted && (
+        {arrivedAtFirstTee && (
           <span className="mb-3 block">
             <CourseBanner intro="flag-plant" />
           </span>
         )}
-        <h1 className="font-display text-sm uppercase text-coin-400">★ First tee ★</h1>
+        {/* Coming back to this screen on the 12th is not a first tee, and saying
+            so was a small lie the screen told every time. */}
+        <h1 className="font-display text-sm uppercase text-coin-400">
+          {arrivedAtFirstTee ? '★ First tee ★' : 'Round settings'}
+        </h1>
         <p className="mt-2 text-xl font-bold">{round.courseSnapshot.name}</p>
         <p className="mt-1 text-sm text-stone-400">
           {tee ? `${tee.name} ${tee.rating}/${tee.slope} · ` : ''}
@@ -187,33 +174,12 @@ export function RoundStartScreen() {
         </p>
       </div>
 
-      {/* Handicaps belong to the round, not to one game — and they're only
-          honest to change while the card is blank, so they lock on first score. */}
+      {/* Handicaps belong to the round, not to one game — and they are editable
+          for as long as it is live now that a change is an event rather than a
+          document rewrite (MAI-102). Shown only when something actually
+          allocates strokes; a gross round has no use for them. */}
       {round.games.some((g) => g.handicap?.mode === 'net') && (
-        <section className="pixel border-stone-700 bg-stone-900/60 p-4">
-          <h2 className="font-display text-[10px] uppercase text-stone-400">Course handicaps</h2>
-          {/* Once scoring starts the per-game rows below already carry each CH,
-              so this collapses to the reason it can't be changed. */}
-          {!logStarted && (
-            <ul className="mt-2 space-y-1.5">
-              {round.players.map((p) => (
-                <li key={p.playerId} className="flex items-center justify-between gap-2">
-                  <span className="font-medium">{p.name}</span>
-                  <HandicapField
-                    name={p.name}
-                    courseHandicap={p.courseHandicap}
-                    onCommit={(ch) => void roundRepo.setCourseHandicap(round.id, p.playerId, ch)}
-                  />
-                </li>
-              ))}
-            </ul>
-          )}
-          <p className="mt-2 text-xs text-stone-500">
-            {logStarted
-              ? 'Locked — scoring has started.'
-              : 'Tap to adjust. These lock once the first score is in.'}
-          </p>
-        </section>
+        <HandicapSection view={view} readOnly={roundOver} />
       )}
 
       <section className="flex flex-col gap-4">
@@ -236,15 +202,30 @@ export function RoundStartScreen() {
 
           return (
             <div key={game.gameId} className="pixel border-felt-500 bg-felt-900/60 p-4">
-              <div className="flex items-baseline justify-between">
-                <h2 className="font-display text-sm uppercase text-felt-300">{label}</h2>
-                <button
-                  aria-label={`${label} rules`}
-                  onClick={() => setRulesFor(game.type)}
-                  className="font-display text-[10px] uppercase text-felt-400"
-                >
-                  Rules ▶
-                </button>
+              <div className="flex items-baseline justify-between gap-3">
+                <h2 className="font-display min-w-0 truncate text-sm uppercase text-felt-300">
+                  {label}
+                </h2>
+                <div className="flex shrink-0 items-baseline gap-3">
+                  {/* THE WAY OUT OF A BET SET UP WRONG (MAI-100). Offered on a
+                      settled round too, where it opens read-only and says to
+                      reopen — a control that simply vanished would leave the
+                      group hunting for a screen that no longer exists. */}
+                  <button
+                    aria-label={`${label} settings`}
+                    onClick={() => setEditing(game.gameId)}
+                    className="font-display text-[10px] uppercase text-coin-400"
+                  >
+                    Edit ▶
+                  </button>
+                  <button
+                    aria-label={`${label} rules`}
+                    onClick={() => setRulesFor(game.type)}
+                    className="font-display text-[10px] uppercase text-felt-400"
+                  >
+                    Rules ▶
+                  </button>
+                </div>
               </div>
 
               {chips.length > 0 && (
@@ -319,11 +300,95 @@ export function RoundStartScreen() {
         })}
       </section>
 
+      {/* Adding a bet mid-round, and putting one back. Both are hidden on a
+          settled round for the reason every other edit is: nothing re-pushes a
+          round because its log grew. */}
+      {!roundOver && (
+        <div className="flex justify-center gap-4">
+          <button
+            onClick={() => setPicking('main')}
+            className="font-display text-[10px] uppercase text-felt-400"
+          >
+            + Add a game
+          </button>
+          <button
+            onClick={() => setPicking('side')}
+            className="font-display text-[10px] uppercase text-felt-400"
+          >
+            + Add a side bet
+          </button>
+        </div>
+      )}
+
+      {/* REMOVED, NOT GONE. A removed bet's own events stay in the log, so
+          putting it back restores its presses, awards and bites with it — and
+          without this list the only way back is the header Undo, which reaches
+          the log's tail and nothing further. Restored under its ORIGINAL id,
+          which is what reunites it with those events. */}
+      {removed.length > 0 && !roundOver && (
+        <section className="pixel border-stone-800 bg-stone-900/40 p-4">
+          <h2 className="font-display text-[10px] uppercase text-stone-500">
+            Removed from this round
+          </h2>
+          <ul className="mt-2 space-y-1.5">
+            {removed.map((game) => (
+              <li key={game.gameId} className="flex items-center justify-between gap-3">
+                <span className="text-stone-400">{gameLabel(game, [...round.games, game])}</span>
+                <button
+                  onClick={() => void eventStore.append(round.id, [{ type: 'game/added', game }])}
+                  className="font-display text-[10px] uppercase text-felt-400"
+                >
+                  Restore ▶
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       <div className="mt-auto pb-2">
         <BigButton className="w-full" onClick={goToCard}>
           {anyScored ? 'Back to the card ⛳' : 'Start scoring ⛳'}
         </BigButton>
       </div>
+
+      <GameSettingsSheet
+        view={view}
+        gameId={editing}
+        adding={adding}
+        readOnly={roundOver}
+        onClose={() => {
+          setEditing(undefined)
+          setAdding(undefined)
+        }}
+        onRules={setRulesFor}
+      />
+
+      {/* The SETUP picker, reused unchanged — the list of games, their blurbs,
+          the player-count filtering and the grouping are all already right, and
+          a second one would drift the first time a game is added. */}
+      <GamePickerSheet
+        open={picking !== undefined}
+        section={picking ?? 'main'}
+        playerCount={round.players.length}
+        chosenCounts={round.games.reduce(
+          (counts, g) => counts.set(g.type, (counts.get(g.type) ?? 0) + 1),
+          new Map<string, number>(),
+        )}
+        onPick={(engine) => {
+          setAdding({
+            game: {
+              gameId: newId(),
+              type: engine.type,
+              handicap: engine.defaultHandicap(),
+              config: engine.defaultConfig(round.players),
+            },
+            section: picking ?? 'main',
+          })
+          setPicking(undefined)
+        }}
+        onClose={() => setPicking(undefined)}
+      />
 
       <RulesSheet type={rulesFor} onClose={() => setRulesFor(undefined)} />
     </main>

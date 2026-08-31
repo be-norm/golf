@@ -1,7 +1,14 @@
 import { useState } from 'react'
 import { Link } from 'react-router'
 import { useLiveQuery } from 'dexie-react-hooks'
+// `amendRound` asks the registry whether an engine accepts a config, and an
+// EMPTY registry accepts everything — so a screen that folds a round has to
+// have the engines loaded, exactly as `useRound` does.
+import '../../engine/games'
 import { roundRepo } from '../../db/repos'
+import { eventStore } from '../../db/eventStore'
+import { amendRound } from '../../engine/catalog'
+import { effectiveEvents } from '../../engine/core/replay'
 import { holesForRound } from '../../engine/core/holes'
 import { InstallHint } from '../../pwa/InstallHint'
 import { CourseBanner } from '../../components/CourseBanner'
@@ -15,7 +22,18 @@ const NAV_CHIP = 'pixel-press border-stone-700 bg-stone-900/70 px-3.5 py-2 text-
 export function HomeScreen() {
   const { activeUserId, isGuest, displayName } = useAuth()
   const [authOpen, setAuthOpen] = useState(false)
-  const liveRound = useLiveQuery(() => roundRepo.liveRound(activeUserId), [activeUserId])
+  /**
+   * The resume card counts the round's games, and a game can join or leave one
+   * mid-round now (MAI-103) — so the count has to come from the AMENDED round.
+   * Every other surface gets that free through `useRound`; this is the one place
+   * that reads the document directly, which is exactly why it would have kept
+   * saying "1 game" about a round holding two.
+   */
+  const liveRound = useLiveQuery(async () => {
+    const round = await roundRepo.liveRound(activeUserId)
+    if (!round) return round
+    return amendRound(round, effectiveEvents(await eventStore.list(round.id)))
+  }, [activeUserId])
   const recent = useLiveQuery(() => roundRepo.listRecent(activeUserId, 8), [activeUserId])
   const completed = recent?.filter((r) => r.status === 'completed') ?? []
 

@@ -679,9 +679,26 @@ export const nassauEngine: GameEngine<NassauConfig> = {
   },
   configSchema: nassauConfigSchema,
   configFields: [
-    { key: 'stakeCents', kind: 'money', label: 'Stake per bet', min: 100, step: 100 },
-    { key: 'autoPress', kind: 'boolean', label: 'Auto-press', hint: 'New press at 2 down' },
-    { key: 'teams', kind: 'teams', label: 'Teams (best ball · two sides)' },
+    {
+      key: 'stakeCents',
+      kind: 'money',
+      label: 'Stake per bet',
+      min: 100,
+      step: 100,
+      midRound: 'editable',
+    },
+    // Editable, including auto-press — switching it on mid-round spawns the
+    // presses the round WOULD have had at 2 down, which is what "we meant to be
+    // auto-pressing" means. A press event records the hole and segment it starts
+    // from, never a team, so nothing recorded is reinterpreted by any of these.
+    {
+      key: 'autoPress',
+      kind: 'boolean',
+      label: 'Auto-press',
+      hint: 'New press at 2 down',
+      midRound: 'editable',
+    },
+    { key: 'teams', kind: 'teams', label: 'Teams (best ball · two sides)', midRound: 'editable' },
   ],
   defaultConfig: (players) => ({
     stakeCents: 500,

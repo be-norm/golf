@@ -665,8 +665,35 @@ export const wolfEngine: GameEngine<WolfConfig> = {
   },
   configSchema: wolfConfigSchema,
   configFields: [
-    { key: 'pointCents', kind: 'money', label: 'Per hole', min: 25, step: 25, hint: "Each player's stake; lone doubles it, blind triples" },
-    { key: 'rotation', kind: 'rotation', label: 'Wolf order' },
+    {
+      key: 'pointCents',
+      kind: 'money',
+      label: 'Per hole',
+      min: 25,
+      step: 25,
+      hint: "Each player's stake; lone doubles it, blind triples",
+      midRound: 'editable',
+    },
+    /**
+     * THE CATALOG'S ONE LOCKED FIELD, and the reason the flag exists (MAI-100).
+     *
+     * Every recorded pick is attributed THROUGH this order. Inside the rotation
+     * the config alone decides who the wolf was on a hole — the pick's own
+     * `wolf` stamp is deliberately not allowed to override it (see `declared`
+     * above, and why) — so re-ordering after picks exist hands hole 3's "I'll
+     * take Cal" to whoever the new order puts on that tee. That is a
+     * partnership nobody formed, priced as if they had, and it is silent: the
+     * money simply comes out different.
+     *
+     * A stake, by contrast, changes what the same golf was WORTH, which is the
+     * whole point of amending one. This changes what the golf WAS.
+     *
+     * Locked means "not once anything is scored", not "never": on the first tee
+     * — which is when a mis-entered order is actually spotted — it is fully
+     * editable, and `amendRound` is what enforces the boundary rather than the
+     * editor merely declining to draw the control.
+     */
+    { key: 'rotation', kind: 'rotation', label: 'Wolf order', midRound: 'locked' },
   ],
   defaultConfig: (players) => ({
     pointCents: 100,

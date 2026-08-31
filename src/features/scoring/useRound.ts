@@ -8,7 +8,25 @@ import { eventStore } from '../../db/eventStore'
 import { roundRepo } from '../../db/repos'
 
 export interface RoundView {
+  /**
+   * The round AS ITS LOG SAYS IT IS — the document with every amendment folded
+   * on (`amendRound`). This is what every screen should read: it is why no
+   * surface can show a stale stake.
+   */
   round: Round
+  /**
+   * The document, untouched — "as teed off".
+   *
+   * Almost nothing wants this. It exists for the one question the amended round
+   * cannot answer: what a `game/removed` took OUT. Folding a prefix over the
+   * amended round can't recover a game the amendment already dropped, so the
+   * settings screen's Restore list has to start from the document (MAI-103).
+   *
+   * NEVER WRITE IT BACK expecting it to carry amendments, and never write the
+   * amended one back at all — `roundRepo.setStatus` exists so `finish` and
+   * `reopen` don't have to.
+   */
+  storedRound: Round
   events: RoundEvent[]
   ctx: ReturnType<typeof deriveRound>['ctx']
   derivations: ReturnType<typeof deriveRound>['derivations']
@@ -26,6 +44,8 @@ export function useRound(roundId: string | undefined): RoundView | undefined | n
 
   return useMemo(() => {
     if (!data) return data
-    return { ...data, ...deriveRound(data.round, data.events) }
+    // `deriveRound`'s round wins by spread order — that is what makes
+    // `view.round` the amended one everywhere, with no call site to remember.
+    return { storedRound: data.round, ...data, ...deriveRound(data.round, data.events) }
   }, [data])
 }

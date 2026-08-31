@@ -37,6 +37,24 @@ export interface FuzzGame {
    * appended — the same interleaving a scorekeeper produces.
    */
   events?: (hole: number, idx: number) => FuzzEvent[]
+  /**
+   * A MID-ROUND SETTINGS CHANGE (MAI-100): at walk position `at`, this game's
+   * settings become `config` — for the whole round, retroactively, which is what
+   * an amendment means.
+   *
+   * It is here rather than inside `events` because it is not a `game/event`: it
+   * is round-level, it re-prices holes already settled, and it is exactly the
+   * kind of thing the four properties in `replay.test.ts` exist to hold. Without
+   * it, zero-sum, replay determinism, retraction equivalence and the rotation
+   * pair would all run over amendments precisely zero times.
+   *
+   * `config` MUST be one its engine accepts. `amendRound` silently drops an
+   * amendment the engine rejects — correctly, so a mistyped stake can't zero a
+   * live bet — which means a bad fuzz config would be inert on every run with
+   * the whole path uncovered and the suite green. `replay.test.ts` asserts the
+   * amendments LAND rather than merely being dealt, for that reason.
+   */
+  amend?: { at: number; config: unknown }
 }
 
 export interface GameFuzz {
@@ -58,11 +76,30 @@ export interface GameFuzz {
   arbitrary(): fc.Arbitrary<(ids: readonly Uuid[]) => FuzzGame>
 }
 
+/**
+ * WHERE AN AMENDMENT LANDS, or nowhere.
+ *
+ * `fc.option` rather than a sentinel integer so fast-check shrinks to `nil` —
+ * an un-amended round — and a surviving counterexample is therefore known not
+ * to be about amendments at all.
+ */
+const amendAt = () => fc.option(fc.integer({ min: 0, max: 17 }), { nil: undefined })
+
 const skinsFuzz: GameFuzz = {
   type: 'skins',
   eligible: (n) => n >= 2,
   arbitrary: () =>
-    fc.boolean().map((carryover) => () => ({ config: { stakeCents: 100, carryover } })),
+    // The stake is what an amendment usually changes, and changing it is the
+    // sharpest test of "re-prices the whole round": every settled hole's money
+    // moves at once, and zero-sum has to survive it.
+    fc
+      .tuple(fc.boolean(), amendAt())
+      .map(([carryover, at]) => () => ({
+        config: { stakeCents: 100, carryover },
+        ...(at !== undefined && {
+          amend: { at, config: { stakeCents: 300, carryover: !carryover } },
+        }),
+      })),
 }
 
 const nassauFuzz: GameFuzz = {
@@ -98,21 +135,29 @@ const matchPlayFuzz: GameFuzz = {
     // and the boolean only chooses WHICH side is the lone one. That is worth
     // dealing anyway: side A and side B take different paths through the
     // settlement, so a multiplier applied to the wrong one shows up here.
-    fc.boolean().map((lopsided) => (ids: readonly Uuid[]) => ({
-      config: {
-        stakeCents: 500,
-        teams:
-          ids.length === 4
-            ? lopsided
-              ? { a: [ids[0]!, ids[1]!, ids[2]!], b: [ids[3]!] }
-              : { a: [ids[0]!, ids[1]!], b: [ids[2]!, ids[3]!] }
-            : ids.length === 3
-              ? lopsided
-                ? { a: [ids[0]!], b: [ids[1]!, ids[2]!] }
-                : { a: [ids[0]!, ids[1]!], b: [ids[2]!] }
-              : null,
-      },
-    })),
+    //
+    // ITS AMENDMENT CHANGES THE SIDES, which no other entry does — "Rob's on
+    // the wrong team", noticed on the 6th. Teams are safe to amend precisely
+    // because this game records no events for them to reinterpret, and this is
+    // what proves the settlement survives a mid-round reshuffle.
+    fc.tuple(fc.boolean(), amendAt()).map(([lopsided, at]) => (ids: readonly Uuid[]) => {
+      const sides = (flip: boolean) =>
+        ids.length === 4
+          ? flip
+            ? { a: [ids[0]!, ids[1]!, ids[2]!], b: [ids[3]!] }
+            : { a: [ids[0]!, ids[1]!], b: [ids[2]!, ids[3]!] }
+          : ids.length === 3
+            ? flip
+              ? { a: [ids[0]!], b: [ids[1]!, ids[2]!] }
+              : { a: [ids[0]!, ids[1]!], b: [ids[2]!] }
+            : null
+      return {
+        config: { stakeCents: 500, teams: sides(lopsided) },
+        ...(at !== undefined && {
+          amend: { at, config: { stakeCents: 800, teams: sides(!lopsided) } },
+        }),
+      }
+    }),
 }
 
 const sixPointFuzz: GameFuzz = {
@@ -269,9 +314,21 @@ const snakeFuzz: GameFuzz = {
   eligible: (n) => n >= 2,
   arbitrary: () =>
     fc
-      .tuple(fc.boolean(), fc.array(fc.integer({ min: 0, max: 5 }), { minLength: 18, maxLength: 18 }))
-      .map(([doubling, seeds]) => (ids: readonly Uuid[]) => ({
+      .tuple(
+        fc.boolean(),
+        fc.array(fc.integer({ min: 0, max: 5 }), { minLength: 18, maxLength: 18 }),
+        // The amendment that motivated the whole feature, dealt: the pot and
+        // the doubling rule, changed mid-round. Sharper than Skins' because
+        // doubling re-prices a CHAIN — every bite after the first is worth a
+        // different multiple of a different stake — so an amendment applied at
+        // the wrong point in the walk shows up as money that doesn't balance.
+        amendAt(),
+      )
+      .map(([doubling, seeds, at]) => (ids: readonly Uuid[]) => ({
         config: { potCents: 100, doubling },
+        ...(at !== undefined && {
+          amend: { at, config: { potCents: 250, doubling: !doubling } },
+        }),
         events: (hole: number, idx: number) => {
           const seed = seeds[idx]!
           if (seed === 4) return []
@@ -443,10 +500,15 @@ export function arbitraryRoundAndEvents(extra: readonly GameFuzz[] = []) {
         players.forEach((p, pi) => appendPutts(log, putts[holeIdx]![pi]!, p.playerId, hole))
         // each game's own events land after that hole's scores, in log order
         entries.forEach((e, gi) => {
-          if (!e.game.events) return
           const gameId = round.games[gi]!.gameId
-          for (const ev of e.game.events(hole, holeIdx)) {
+          for (const ev of e.game.events?.(hole, holeIdx) ?? []) {
             log.append({ type: 'game/event', gameId, kind: ev.kind, data: ev.data })
+          }
+          // …and a settings amendment lands here too, after the hole the group
+          // was standing on when they noticed. It re-prices every hole BEHIND
+          // this one, which is what the properties above then have to survive.
+          if (e.game.amend?.at === holeIdx) {
+            log.append({ type: 'game/configured', gameId, config: e.game.amend.config, handicap })
           }
         })
       })
@@ -568,12 +630,18 @@ export function arbitraryRotationPair(extra: readonly GameFuzz[] = []) {
           // the identical three-putt on the identical hole OF THE ROUND
           players.forEach((p, pi) => appendPutts(log, putts[holeIdx]![pi]!, p.playerId, hole))
           entries.forEach((e, gi) => {
-            if (!e.game.events) return
             const gameId = wrapped.games[gi]!.gameId
             // the SAME seed at the same position, addressed to whichever hole
             // number that position carries on this card
-            for (const ev of e.game.events(hole, holeIdx)) {
+            for (const ev of e.game.events?.(hole, holeIdx) ?? []) {
               log.append({ type: 'game/event', gameId, kind: ev.kind, data: ev.data })
+            }
+            // Amendments are safe to deal to BOTH cards unchanged: they name no
+            // hole numbers, so the same position carries the same settings
+            // change on the wrapped card and the renumbered one. A config that
+            // named holes would not be (see longDriveFuzz).
+            if (e.game.amend?.at === holeIdx) {
+              log.append({ type: 'game/configured', gameId, config: e.game.amend.config, handicap })
             }
           })
         })

@@ -458,32 +458,23 @@ export class RoundRepo {
   }
 
   /**
-   * Set one player's course handicap. Read-modify-write inside a transaction so
-   * two quick edits can't clobber each other through a stale in-memory round.
+   * Finish or reopen a round — the ONE way `status` moves.
    *
-   * Handicaps live on the round doc, not the event log, so changing one silently
-   * re-derives every settlement — which is only honest on a round that has
-   * nothing derived yet. That's enforced HERE, in the same transaction, not just
-   * by the UI hiding the control: an empty log is the invariant (CLAUDE.md #2),
-   * and a write racing the first score must lose. Returns whether it applied.
+   * Both callers used to spell this `put({ ...round, status })` with the round
+   * they were rendering, which became wrong twice over once settings amendments
+   * landed (MAI-100). `view.round` is now the AMENDED round — the document with
+   * every `game/configured` folded on — so writing it back would quietly bake
+   * amendments into the document and stop it meaning "as teed off". And it was
+   * already a stale-write: whatever the screen held in memory, however old, won.
+   *
+   * Read-modify-write in a transaction fixes both. Returns whether it applied,
+   * so a caller can tell a missing round from a successful no-op.
    */
-  async setCourseHandicap(
-    roundId: string,
-    playerId: string,
-    courseHandicap: number,
-  ): Promise<boolean> {
-    return this.db.transaction('rw', this.db.rounds, this.db.round_events, async () => {
+  async setStatus(roundId: string, status: Round['status']): Promise<boolean> {
+    return this.db.transaction('rw', this.db.rounds, async () => {
       const round = await this.db.rounds.get(roundId)
       if (!round) return false
-      const scored = await this.db.round_events.where('roundId').equals(roundId).count()
-      if (scored > 0) return false
-      await this.db.rounds.put({
-        ...round,
-        players: round.players.map((p) =>
-          p.playerId === playerId ? { ...p, courseHandicap } : p,
-        ),
-        updatedAt: new Date().toISOString(),
-      })
+      await this.db.rounds.put({ ...round, status, updatedAt: new Date().toISOString() })
       return true
     })
   }
