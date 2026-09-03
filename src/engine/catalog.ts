@@ -124,21 +124,33 @@ export interface GameDerivation {
   summaryParts?: { label: string; value: string }[]
   /**
    * A LIVE BET THE MONEY CANNOT SHOW YET — who holds it and what it is worth,
-   * e.g. "Ben · $4" for the snake.
+   * e.g. "Ben · $4" for the snake, "3 CTPs riding · $3".
    *
-   * The pinned bar folds side bets into one row when there are two or more
-   * (`shouldGroupSideBets`, MAI-50), and that row is an aggregate of MONEY.
-   * A bet that settles only at the end contributes zero to it, so the group
-   * gets "no money yet" and no way to see who is carrying the snake — the one
-   * thing they actually want off the bar. This is what survives the fold: the
-   * screen gives it the game's own label and renders it as its own row.
+   * A settlement is what MOVED. A bet that settles only at the end contributes
+   * zero to it, so any surface reporting money alone says "no money yet" about
+   * a snake somebody is visibly carrying. This is the position that money
+   * cannot state.
    *
    * Declare it only while the position is NOT yet money. Once the settlement
-   * moves, the aggregate says it, and a second row would say it twice.
+   * moves, the money says it, and this would say it twice.
+   *
+   * TWO CONSUMERS: the standings SHEET, which states the position above the
+   * player cards, and the settings-change preview (`src/lib/roundSettings.ts`,
+   * MAI-102), which reports both what a change moves AND the position each live
+   * bet is left in — otherwise editing a doubling snake reads as "no change to
+   * the money" about the very edit just made.
+   *
+   * It was introduced for a pinned-bar row (MAI-99) and moved to the sheet when
+   * MAI-106 cut the bar to one game. That move is why the sheet reads it at all:
+   * the snake states its own position in `detailLines`, but Closest to the Pin
+   * and Long Drive declare neither that nor a recap while carrying, so their
+   * "$4 riding on the next par 3" existed ONLY on the bar and would have been
+   * lost. The sheet skips it when a `detailLines` value already says the same
+   * string, so the snake does not say it twice.
    *
    * A VALUE, not a label — `gameLabel` supplies the name, so two instances of
-   * one game stay told apart. Rendered raw like the rest of the bar, so no
-   * glyph tokens (`glyphs.test.ts` enforces it).
+   * one game stay told apart. Rendered raw, so no glyph tokens
+   * (`glyphs.test.ts` enforces it).
    */
   openBet?: string
   /**

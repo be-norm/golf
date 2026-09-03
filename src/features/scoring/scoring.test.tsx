@@ -612,12 +612,20 @@ describe('ScoringScreen', () => {
  * game pays for one.
  */
 /**
- * MAI-50 folds side bets into one row when there are two or more, and that row
- * is an aggregate of MONEY. A bet that settles only at the end contributes zero
- * to it, so a group playing Snake got "no money yet" and no way to see who was
- * carrying it — the one thing they wanted off the bar.
+ * WHO IS CARRYING THE SNAKE — a live position that no money row can state.
+ *
+ * MAI-99 put this on the pinned bar, beside a side-bets money aggregate that
+ * read "no money yet" because a bet settling at the end contributes zero to it.
+ * MAI-106 took both off the bar: the bar recaps the primary game and the sheet
+ * accounts. So the question is the same and the surface moved — the group opens
+ * the sheet and the snake still says who has it and what it is worth.
+ *
+ * The rule that `openBet` is declared only while the position is NOT yet money
+ * is the ENGINE's, and it is pinned there (ctp.test.ts, longDrive.test.ts,
+ * snake). The screen-level version of that assertion went with the bar row it
+ * was written against; this keeps the half that is still about a screen.
  */
-describe('ScoringScreen — a live bet the money aggregate cannot show', () => {
+describe('ScoringScreen — a live bet the money cannot show', () => {
   async function collapsedRound(id: string) {
     const round = makeRound({
       players: makePlayers([{ name: 'Ann' }, { name: 'Bob' }]),
@@ -647,26 +655,66 @@ describe('ScoringScreen — a live bet the money aggregate cannot show', () => {
     return round
   }
 
-  it('gives the snake its own bar row while the aggregate says no money yet', async () => {
-    await collapsedRound('round-open-bet')
+  /**
+   * THE AWARD GAMES' CARRY HAD NO OTHER HOME, and taking it off the bar nearly
+   * lost it outright.
+   *
+   * The snake survives the move by luck: its own `detailLines` repeat its
+   * position, so the sheet stated it either way. Closest to the Pin and Long
+   * Drive declare NO detailLines and no per-hole recap while carrying — their
+   * player cards read "$0 · 0 CTPs" while $4 rides on the next par 3 — so the
+   * pinned bar was the only surface that ever said so. Reading `openBet` in the
+   * sheet is what makes this true by contract for every award game rather than
+   * by accident for one.
+   */
+  it("states an award game's carry in the sheet, where the money reads zero", async () => {
+    const user = userEvent.setup()
+    const round = makeRound({
+      players: makePlayers([{ name: 'Ann' }, { name: 'Bob' }]),
+      holes: 'front9',
+      games: [
+        { type: 'skins', config: { stakeCents: 100, carryover: true } },
+        { type: 'ctp', config: { stakeCents: 200, carryover: true } },
+      ],
+    })
+    round.id = 'round-carry-sheet'
+    await db.rounds.put(round)
+    // holes 1-5 played; hole 4 is the par 3 and nobody claimed it, so it carries
+    await eventStore.append(
+      round.id,
+      [1, 2, 3, 4, 5].flatMap((hole) => [
+        { type: 'score/set' as const, playerId: 'p-ann', hole, gross: 4 },
+        { type: 'score/set' as const, playerId: 'p-bob', hole, gross: 5 },
+      ]),
+    )
+    render(
+      <RouterProvider
+        router={createMemoryRouter(routes, { initialEntries: [`/round/${round.id}`] })}
+      />,
+    )
 
-    // one main game + two side bets, so the bar collapses (MAI-50)
-    expect(await screen.findByText('Side bets')).toBeInTheDocument()
-    expect(screen.getByText('no money yet')).toBeInTheDocument()
-    // …and the snake still says who has it and what it is worth
-    expect(screen.getByText('Snake')).toBeInTheDocument()
-    expect(screen.getByText('Bob · -$5')).toBeInTheDocument()
+    await user.click(await screen.findByRole('button', { name: /standings/ }))
+
+    expect(await screen.findByText('2 CTPs riding · $4')).toBeInTheDocument()
+    // …while the settlement genuinely has nothing to say about it yet
+    expect(screen.getAllByText('0 CTPs').length).toBe(2)
   })
 
-  it('drops that row once the money actually moves', async () => {
-    const round = await collapsedRound('round-open-bet-done')
-    await screen.findByText('Bob · -$5')
+  it('keeps the live position off the bar and states it in the sheet', async () => {
+    await collapsedRound('round-open-bet')
 
-    await eventStore.append(round.id, [{ type: 'round/completed' }])
+    // the bar is the primary game and a count of the rest — nothing else
+    const bar = await screen.findByRole('button', { name: /standings/ })
+    expect(bar).toHaveTextContent('Skins')
+    expect(bar).toHaveTextContent('2 more bets')
+    expect(bar).not.toHaveTextContent('Bob · -$5')
 
-    // the aggregate now carries it, so a second row would say it twice
-    await waitFor(() => expect(screen.queryByText('Bob · -$5')).not.toBeInTheDocument())
-    expect(screen.getByText(/Ann \+\$5/)).toBeInTheDocument()
+    await userEvent.click(bar)
+
+    // …and the sheet says who is carrying it and what it is worth
+    const sheet = await screen.findByText('holds the snake')
+    expect(sheet).toBeInTheDocument()
+    expect(screen.getByText('Bob · -$5')).toBeInTheDocument()
   })
 })
 
@@ -1520,12 +1568,17 @@ describe('ScoringScreen — input chips', () => {
 })
 
 /**
- * MAI-50. The pinned bar is the strip at the bottom of the scoring screen, and
- * it used to render one row per game — five games, five rows, over a phone
- * keyboard. (It was a `fixed` strip when this was written; MAI-104 put it in
- * flow so it reserves its own height. Density is the same problem either way.)
+ * MAI-50. Density for a round of many games — five games once meant five rows
+ * over a phone keyboard.
+ *
+ * The BAR half of this ticket is superseded: MAI-104 put the bar in flow so it
+ * reserves its own height, and MAI-106 reduced it to one game plus a count, so
+ * there is no longer a bar row per game to collapse. What survives, and what
+ * these tests now cover, is the SHEET half — side bets grouped under their own
+ * heading when there are enough of them to be worth grouping. The share card
+ * half is untouched and lives in summaryCard's own tests.
  */
-describe('ScoringScreen — pinned bar density', () => {
+describe('ScoringScreen — density: grouping in the standings sheet', () => {
   /** A nassau main event plus `sideCount` skins side bets. */
   async function roundWith(id: string, sideCount: number) {
     const round = makeRound({
@@ -1553,33 +1606,34 @@ describe('ScoringScreen — pinned bar density', () => {
     render(<RouterProvider router={router} />)
   }
 
-  it('collapses two or more side bets into one aggregated row', async () => {
+  it('groups two or more side bets under one heading in the sheet', async () => {
     show(await roundWith('round-bar-collapse', 3))
+    await userEvent.click(await screen.findByRole('button', { name: /standings/ }))
 
-    // one row for the main game, one for all the side bets
+    // the side bets sit under their own heading. Not asserting the main game
+    // here: "Nassau" is in the DOM twice now (bar recap + sheet panel), so a
+    // bare getByText would throw on the ambiguity rather than test anything.
     expect(await screen.findByText('Side bets')).toBeInTheDocument()
-    // the aggregate is money across every side bet, not any one game's recap
-    expect(screen.getByText(/Ann \+\$/)).toBeInTheDocument()
-    // And no side bet keeps a row of its own. Matched as a PATTERN: the three
-    // instances differ by stake, so `gameLabel` renders them "Skins ($1)",
-    // "Skins ($1.01)", "Skins ($1.02)" and the bare string "Skins" is never in
-    // the DOM either way — an assertion that would pass with the collapse
-    // deleted.
-    expect(screen.queryAllByText(/^Skins \(/)).toHaveLength(0)
+    // every side bet still gets its own panel UNDER that heading — grouping is
+    // a heading, not a merge. Matched as a PATTERN because the three instances
+    // differ by stake, so `gameLabel` renders them "Skins ($1)", "Skins
+    // ($1.01)", "Skins ($1.02)" and the bare string "Skins" is never in the DOM.
+    expect(screen.getAllByText(/^Skins \(/)).toHaveLength(3)
   })
 
   /**
    * Nassau + one Skins is the most common two-game round there is, and
    * collapsing there would trade the bar's latest-hole recap for no row saved.
    */
-  it('leaves a lone side bet its own row', async () => {
+  it('does not raise a heading over a lone side bet', async () => {
     show(await roundWith('round-bar-lone', 1))
+    await userEvent.click(await screen.findByRole('button', { name: /standings/ }))
 
     expect(await screen.findByText('Skins')).toBeInTheDocument()
     expect(screen.queryByText('Side bets')).not.toBeInTheDocument()
   })
 
-  it('shows a side-bets-only round expanded, with nothing to collapse under', async () => {
+  it('has nothing to group in a round of only side bets', async () => {
     const round = makeRound({
       players: makePlayers([{ name: 'Ann' }, { name: 'Bob' }]),
       holes: 'front9',
@@ -1653,16 +1707,16 @@ describe('ScoringScreen — pinned bar density', () => {
 })
 
 /**
- * MAI-104. The bar covered the award grid, and no gesture reached under it.
+ * MAI-104 / MAI-106. The bar covered the award grid and no gesture reached
+ * under it: `<main>` carried a constant `pb-40` (190px) to hold content clear
+ * of a `fixed` bar whose real height was 229px with four bets running, so
+ * `scrollHeight - innerHeight` was 0 and the last rows were unreachable.
  *
- * `<main>` carried a constant `pb-40` (190px) to hold content clear of a
- * `fixed` bar whose real height was 229px on a phone with Nassau + Snake + CTP
- * + Long Drive. The document ended where the padding ended, so
- * `scrollHeight - innerHeight` was 0 and the last rows of the award grid were
- * unreachable — a Closest to the Pin could not be recorded on the hole it
- * happened.
+ * MAI-106 then cut the bar to ONE state — the primary game plus a count —
+ * because the fold in between was a summary of summaries: more than the recap,
+ * still not the accounting, so the reader opened the sheet anyway.
  */
-describe('ScoringScreen — pinned bar reserve and fold', () => {
+describe('ScoringScreen — the pinned bar', () => {
   /** A nassau main event plus `sideCount` skins side bets. */
   async function roundWith(id: string, sideCount: number) {
     const round = makeRound({
@@ -1690,6 +1744,8 @@ describe('ScoringScreen — pinned bar reserve and fold', () => {
     return render(<RouterProvider router={router} />)
   }
 
+  const bar = () => screen.findByRole('button', { name: /standings/ })
+
   /**
    * THE RESERVE, as far as jsdom can see it.
    *
@@ -1712,45 +1768,93 @@ describe('ScoringScreen — pinned bar reserve and fold', () => {
    */
   it('puts the bar in flow, with no reserve left behind on main', async () => {
     show(await roundWith('round-bar-reserve', 3))
-    await screen.findByText('Side bets')
+    const el = await bar()
 
-    const bar = document.querySelector('[data-summary-bar]')
-    expect(bar).not.toBeNull()
+    const strip = el.closest('[data-summary-bar]')!
     // in flow — it reserves its own height by existing
-    expect(bar!.className).not.toMatch(/\bfixed\b/)
+    expect(strip.className).not.toMatch(/\bfixed\b/)
     // …and nothing on main pretends to reserve it a second time
-    expect(bar!.closest('main')!.className).not.toMatch(/\bpb-/)
-  })
-
-  it('folds a multi-row bar down to the primary game, and counts what it hid', async () => {
-    const user = userEvent.setup()
-    show(await roundWith('round-bar-fold', 3))
-    await screen.findByText('Side bets')
-
-    await user.click(screen.getByRole('button', { name: 'collapse summary' }))
-
-    // the main event stays; the aggregate row is folded away and counted
-    expect(screen.getByText('Nassau')).toBeInTheDocument()
-    expect(screen.queryByText('Side bets')).not.toBeInTheDocument()
-    expect(screen.getByText('+1')).toBeInTheDocument()
-
-    // and it opens again
-    await user.click(screen.getByRole('button', { name: 'expand summary — 1 more' }))
-    expect(await screen.findByText('Side bets')).toBeInTheDocument()
+    expect(strip.closest('main')!.className).not.toMatch(/\bpb-/)
   })
 
   /**
-   * FOLDS TO THE PRIMARY GAME, WHICH IS NOT ALWAYS THE FIRST ROW.
-   *
-   * `barRows[0]` is `round.games` order; `primaryGame` prefers the first main
-   * game that ALLOCATES STROKES. Here they differ — a gross Nassau sits ahead of
-   * a net Match Play — and folding to the first row would leave the bar saying
-   * this round is about Nassau while the scorecard, the stroke dots and the
-   * share card all say Match Play. One default primary game, shared by every
-   * surface; the bar does not get to be a fourth answer.
+   * ONE STATE: the primary game, and how many more the sheet holds. No fold, no
+   * aggregate row, no per-bet "riding" rows — those are the accounting, and the
+   * accounting is one tap away.
    */
-  it('folds to the primary game rather than to the first row', async () => {
+  it('shows the primary game and a count of the rest', async () => {
+    show(await roundWith('round-bar-one-state', 3))
+    const el = await bar()
+
+    expect(el).toHaveTextContent('Nassau')
+    expect(el).toHaveTextContent('3 more bets')
+    // the things MAI-50/MAI-99 used to put here
+    expect(el).not.toHaveTextContent('Side bets')
+    expect(el).not.toHaveTextContent(/Skins/)
+  })
+
+  /**
+   * THE COUNT IS OF GAMES, NOT ROWS — and this is a round that tells them apart.
+   *
+   * Holes 1-5 are played and hole 4 is a par 3 nobody claimed, so the CTP
+   * carries; the snake was bitten on 1. That is TWO live positions. The old bar
+   * drew one main row + a "Side bets" money aggregate + one riding row EACH, so
+   * a row count would say "3 more" for three bets. Verified rather than
+   * asserted from the mental model: the derivation really does return two
+   * `openBet`s here, which is the only reason this round discriminates.
+   *
+   * The count is pinned against the SHEET, not a literal, because the number's
+   * whole meaning is "how many more bets the sheet will show you" — one panel
+   * per game, each with its own rules button.
+   */
+  it('counts games, not the rows the bar used to draw', async () => {
     const user = userEvent.setup()
+    const round = makeRound({
+      players: makePlayers([{ name: 'Ann' }, { name: 'Bob' }]),
+      holes: 'front9',
+      games: [
+        { type: 'nassau', config: { stakeCents: 500, teams: null, autoPress: false } },
+        { type: 'snake', config: { potCents: 500, doubling: false } },
+        { type: 'ctp', config: { stakeCents: 200, carryover: true } },
+      ],
+    })
+    round.id = 'round-bar-count'
+    await db.rounds.put(round)
+    await eventStore.append(round.id, [
+      ...[1, 2, 3, 4, 5].flatMap((hole) => [
+        { type: 'score/set' as const, playerId: 'p-ann', hole, gross: 4 },
+        { type: 'score/set' as const, playerId: 'p-bob', hole, gross: 5 },
+      ]),
+      {
+        type: 'game/event',
+        gameId: round.games[1]!.gameId,
+        kind: 'snake/bite',
+        data: { hole: 1, playerId: 'p-bob' },
+      },
+    ])
+    show(round)
+
+    // both side bets are carrying a live position, so the old row model would
+    // have drawn four rows and said "3 more"
+    const el = await bar()
+    expect(el).toHaveTextContent('2 more bets')
+
+    // …and 2 is exactly what the sheet goes on to show, beyond the bar's game
+    await user.click(el)
+    const panels = await screen.findAllByRole('button', { name: /rules/i })
+    expect(panels).toHaveLength(3)
+  })
+
+  /**
+   * THE BAR SHOWS THE PRIMARY GAME, WHICH IS NOT ALWAYS `games[0]`.
+   *
+   * `primaryGame` prefers the first main game that ALLOCATES STROKES. Here a
+   * gross Nassau sits ahead of a net Match Play, so showing `games[0]` would
+   * leave the bar saying this round is about Nassau while the scorecard, the
+   * stroke dots and the share card all say Match Play. One default primary
+   * game, shared by every surface; the bar does not get to be a fourth answer.
+   */
+  it('shows the primary game rather than the first game', async () => {
     const round = makeRound({
       players: makePlayers([{ name: 'Ann' }, { name: 'Bob' }]),
       holes: 'front9',
@@ -1758,10 +1862,9 @@ describe('ScoringScreen — pinned bar reserve and fold', () => {
         { type: 'nassau', config: { stakeCents: 500, teams: null, autoPress: false } },
         { type: 'matchPlay', config: { stakeCents: 500, teams: null } },
         { type: 'skins', config: { stakeCents: 100, carryover: true } },
-        { type: 'skins', config: { stakeCents: 200, carryover: true } },
       ],
     })
-    round.id = 'round-bar-fold-primary'
+    round.id = 'round-bar-primary'
     round.games[0]!.handicap = { mode: 'gross', reference: 'offLow', allowancePct: 100 }
     round.games[1]!.handicap = { mode: 'net', reference: 'offLow', allowancePct: 100 }
     await db.rounds.put(round)
@@ -1770,87 +1873,34 @@ describe('ScoringScreen — pinned bar reserve and fold', () => {
       { type: 'score/set', playerId: 'p-bob', hole: 1, gross: 5 },
     ])
     show(round)
-    await screen.findByText('Side bets')
+    const el = await bar()
 
-    await user.click(screen.getByRole('button', { name: 'collapse summary' }))
-
-    expect(screen.getByText('Match Play')).toBeInTheDocument()
-    expect(screen.queryByText('Nassau')).not.toBeInTheDocument()
-    expect(screen.queryByText('Side bets')).not.toBeInTheDocument()
-    expect(screen.getByText('+2')).toBeInTheDocument()
+    expect(el).toHaveTextContent('Match Play')
+    expect(el).not.toHaveTextContent('Nassau')
+    expect(el).toHaveTextContent('2 more bets')
   })
 
-  /**
-   * THE FOLD IS A 44px TOUCH TARGET IN BOTH STATES.
-   *
-   * jsdom has no layout, so this pins the DECLARATION rather than the rendered
-   * box — measured in a real browser it is 44x44 expanded and 47x44 folded,
-   * up from 34x39. The floor is what makes both states safe: padding tuned to
-   * the folded state (`+3` beside the arrow) leaves the expanded one — arrow
-   * alone, the tap that collapses — well under, and would drift again the day
-   * the label changes.
-   *
-   * Asserted as ARBITRARY PX on purpose. Tailwind's numeric scale is rem-based
-   * against this app's 19px root, so the tempting `size-11` is 52px, not 44 —
-   * the same trap CLAUDE.md calls out for `size-16`. A future tidy-up to the
-   * scale would silently change the number, and this is what fails when it does.
-   */
-  it('gives the fold a 44px touch target in both states', async () => {
+  /** Nothing more to show, so the bar says nothing about more. */
+  it('says nothing about more bets in a one-game round', async () => {
+    show(await roundWith('round-bar-single', 0))
+    const el = await bar()
+
+    expect(el).toHaveTextContent('Nassau')
+    expect(el).not.toHaveTextContent(/more bet/)
+  })
+
+  /** The whole bar is the target — there is no second control on it now. */
+  it('opens the standings sheet when tapped', async () => {
     const user = userEvent.setup()
-    show(await roundWith('round-bar-touch', 3))
-    await screen.findByText('Side bets')
+    show(await roundWith('round-bar-tap', 3))
 
-    const expanded = screen.getByRole('button', { name: 'collapse summary' })
-    expect(expanded.className).toContain('min-h-[44px]')
-    expect(expanded.className).toContain('min-w-[44px]')
+    await user.click(await bar())
 
-    await user.click(expanded)
-
-    const folded = screen.getByRole('button', { name: /expand summary/ })
-    expect(folded.className).toContain('min-h-[44px]')
-    expect(folded.className).toContain('min-w-[44px]')
+    expect(await screen.findByText('View full card ▶')).toBeInTheDocument()
   })
 
-  /** Folding one row to one row saves nothing, so it is not offered. */
-  it('offers no fold on a one-row bar', async () => {
-    show(await roundWith('round-bar-onerow', 0))
-    await screen.findByText('Nassau')
-
-    expect(screen.queryByRole('button', { name: /summary/ })).not.toBeInTheDocument()
-  })
-
-  /**
-   * The toggle is a SIBLING of the button that opens the standings sheet, not a
-   * child of it. Nested, the browsers that tolerate invalid markup fire both
-   * handlers — so asking for room would throw the sheet open over the bar.
-   */
-  it('does not open the standings sheet when the bar is folded', async () => {
-    const user = userEvent.setup()
-    show(await roundWith('round-bar-nosheet', 3))
-    await screen.findByText('Side bets')
-
-    await user.click(screen.getByRole('button', { name: 'collapse summary' }))
-
-    expect(screen.queryByText('View full card ▶')).not.toBeInTheDocument()
-  })
-
-  /** A display preference, so it is device-wide and outlives the round view. */
-  it('remembers the fold across leaving and re-entering the round', async () => {
-    const user = userEvent.setup()
-    const round = await roundWith('round-bar-persist', 3)
-    const first = show(round)
-    await screen.findByText('Side bets')
-    await user.click(screen.getByRole('button', { name: 'collapse summary' }))
-    first.unmount()
-
-    show(round)
-
-    expect(await screen.findByText('Nassau')).toBeInTheDocument()
-    expect(screen.queryByText('Side bets')).not.toBeInTheDocument()
-  })
-
-  /** With every hole scored the bar is the Finish button — there are no rows. */
-  it('offers no fold once the bar is the Finish button', async () => {
+  /** With every hole scored the bar is the Finish button, not a recap. */
+  it('becomes the Finish button once every hole is scored', async () => {
     const round = await roundWith('round-bar-finished', 3)
     await eventStore.append(
       round.id,
@@ -1862,6 +1912,6 @@ describe('ScoringScreen — pinned bar reserve and fold', () => {
     show(round)
 
     expect(await screen.findByRole('button', { name: /Finish round/ })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /summary/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /standings/ })).not.toBeInTheDocument()
   })
 })

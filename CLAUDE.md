@@ -329,19 +329,35 @@ change, use a 6-digit code (`{{ .Token }}` + `verifyOtp`) rather than a link.
   aggregate (that's the standings sheet). New games follow this by default.
   Match-play games (Nassau) are the documented exception: their bar shows live
   bet status because the stakes are the running match, not a single hole.
-  The **collapsed side-bets row** is the second exception (MAI-50): with a main
-  game and 2+ side bets the bar folds them into one aggregate ("SIDE BETS ·
-  Ben +$7 · Rob −$4"), which IS a running total, because nothing else compresses
-  N games into one line — the per-hole detail is one tap away in the sheet.
-  Collapsing happens only when it saves a row (`shouldGroupSideBets`): a lone
-  side bet keeps its own row and its recap, and a round of only side bets shows
-  them expanded. **That aggregate is MONEY, so a bet that is not money yet
-  cannot be in it** — the snake is worth $4 to somebody and settles at the end,
-  and a collapsed round read "no money yet" while saying nothing about who was
-  carrying it. `GameDerivation.openBet` is what survives the fold: a live
-  position the screen renders as its own row under the aggregate, dropped the
-  moment the money moves and the aggregate can say it instead. Skins' carry and
-  Rabbit are the same shape.
+  **The bar shows ONE game — the primary one — and a count of the rest**
+  (MAI-106): "3 more bets ▶", and tapping anywhere opens the sheet. It reached
+  that by subtraction. It began as a row per game; MAI-50 folded the side bets
+  into one money aggregate to save rows; MAI-99 added a "riding" row back per
+  bet, because a carry is not money yet and the aggregate could only say "no
+  money yet" about the snake somebody was carrying; MAI-104 then gave the pile a
+  fold. Each step was locally right, and the sum was three levels of detail
+  where the middle one — more than the recap, still not the accounting — was a
+  stop on the way rather than a destination, and was what made the bar tall
+  enough to bury the award grid. Deleting it is this rule applied to the bar
+  itself: **the bar recaps, the sheet accounts.**
+  The count is of GAMES, not rendered rows, because its meaning is "how many
+  more bets the sheet will show you" and the sheet draws one panel per game —
+  a row count says four for three bets the moment two of them carry a position.
+  Only games with a derivation count; an inert config draws no panel.
+  `shouldGroupSideBets` survives with its two remaining callers: the standings
+  SHEET still groups side bets under a heading, and the share card still
+  partitions its panels.
+  **`GameDerivation.openBet` moved to the SHEET rather than dying with the bar
+  row**, and that was not tidiness — it is the only thing that says "$4 is riding
+  on the next par 3" while every player card in the block reads `$0 · 0 CTPs`.
+  The snake survived the move by luck (its own `detailLines` repeat the position);
+  Closest to the Pin and Long Drive declare neither detailLines nor a recap while
+  carrying, so the bar was their only surface and taking it away lost the fact
+  outright. The sheet skips the line when a `detailLines` value already holds the
+  same string — compared by VALUE, not keyed off "has any detailLines", so a game
+  whose ledger is about something else still gets its position shown. Its other
+  consumer is the settings-change preview (`src/lib/roundSettings.ts`, MAI-102).
+  Skins' carry and Rabbit are the same shape.
   **The sheet accounts, but it leads with what just happened** (MAI-84): each
   game's block is recap → player cards → notes, because opening it to a column
   of running money buries the hole you are standing on. Universal, since
@@ -349,11 +365,10 @@ change, use a 6-digit code (`{{ .Token }}` + `verifyOtp`) rather than a link.
   `holeSummary(currentHole)` and NOT `latestHoleSummary` — walking back to 3
   must recap 3; the latest DECIDED hole is the bar's job, and on the frontier
   (where the sheet is almost always opened) they are the same hole.
-- **The bar RESERVES ITS OWN SPACE, and it can be folded away** (MAI-104). It is
-  `sticky bottom-0` as the last IN-FLOW child of the scoring column, never `fixed`
-  over it. `main` used to carry a constant `pb-40` (190px) to hold content clear,
-  while the bar's real height was whatever its rows came to — 229px with Nassau +
-  Snake + CTP + Long Drive, 273px in the reported screenshot. The document ended
+- **The bar RESERVES ITS OWN SPACE** (MAI-104). It is `sticky bottom-0` as the last
+  IN-FLOW child of the scoring column, never `fixed` over it. `main` used to carry a
+  constant `pb-40` (190px) to hold content clear, while the bar's real height was
+  whatever its rows came to — 273px in the reported screenshot. The document ended
   where the padding ended, so `scrollHeight - innerHeight` was 0 and the last 82px
   of the award grid was UNREACHABLE BY ANY GESTURE: a Closest to the Pin could not
   be recorded on the hole it happened. Re-tuning the constant fixes today's round
@@ -368,21 +383,6 @@ change, use a 6-digit code (`{{ .Token }}` + `verifyOtp`) rather than a link.
   added after the bar** — `mt-auto` is what pins it on a short page, and it works
   only because the sheets render null when closed and `CelebrationLayer`'s overlay
   is `fixed inset-0`.
-  **The fold folds to the PRIMARY GAME**, keeping `primaryGame(round)`'s row and
-  counting the rest (`+3`) — not `barRows[0]`, which differs when a gross main game
-  precedes a net one and would make the bar a fourth surface answering "which game
-  is this round about" its own way. It hides the `openBet` rows MAI-50/MAI-99 put
-  there, which is not a regression of either: the user asked for the room, the count
-  says something is hidden, and the sheet still accounts in full — the bar's own
-  doctrine. The toggle carries a 44px FLOOR (`min-h-[44px] min-w-[44px]`) rather
-  than tuned padding: padding sized to the folded state (`+3` beside the arrow)
-  left the expanded one — arrow alone, the tap that COLLAPSES — at 34x39, and
-  would drift again the day the label changed. Arbitrary px, because Tailwind's
-  scale is rem-based against the 19px root and `size-11` is 52px, not 44 — the
-  `size-16` trap again. The choice is a DISPLAY PREFERENCE (`localStorage`, device-wide,
-  guarded so a browser with storage blocked degrades to expanded rather than taking
-  the scoring screen down), and it must never reach the event log or the `Round`
-  row, where it would sync one viewer's taste in bar height into a synced archive.
   jsdom has no layout, so the reserve is pinned by a PAIR of class assertions — the
   bar is not `fixed` AND `main` carries no bottom padding. Either alone catches the
   bug that motivated the change; the pair is there for the HALF-FIX, which is the

@@ -8,7 +8,7 @@ import {
   statesPlayerCount,
   type FieldPlayer,
 } from './ConfigField'
-import { DisclosureArrow } from '../../components/DisclosureArrow'
+import { DisclosureArrow } from './DisclosureArrow'
 import { HandicapControls } from './HandicapControls'
 import type { GameDraft } from './GameConfigCard'
 
