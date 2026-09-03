@@ -210,7 +210,8 @@ built the way it was.
   `src/lib/` — app-layer helpers shared across features (`date.ts` is the fixed, locale-independent
   `18 Jul 2026` format shared by the share card and course versions; the round lists still use
   `toLocaleDateString`, so this is not yet app-wide. `gameRoles.ts` is the one primary-game /
-  role-partition rule — see UI conventions). `src/lib/**` is inside the engine-purity denylist
+  role-partition rule, `standings.ts` the one where-everyone-stands rule — see UI
+  conventions). `src/lib/**` is inside the engine-purity denylist
   (`eslint.config.js`) and its tests are inside the `app` vitest project: both lists enumerate
   directories, so a new top-level directory has to be added to each or it is silently unguarded
   and its tests silently never run.
@@ -358,6 +359,19 @@ change, use a 6-digit code (`{{ .Token }}` + `verifyOtp`) rather than a link.
   whose ledger is about something else still gets its position shown. Its other
   consumer is the settings-change preview (`src/lib/roundSettings.ts`, MAI-102).
   Skins' carry and Rabbit are the same shape.
+  **The sheet opens with WHERE EVERYONE STANDS** (MAI-107): one `Total` section
+  combining every bet, above the per-bet breakdown, because "am I up or down"
+  is the first question anyone opening it has and the breakdown could only
+  answer it by mental arithmetic. It comes from `src/lib/standings.ts`, shared
+  with the settle screen and the share card for `gameRoles.ts`'s reason — the
+  number read on the 7th green and the number settled on at the end must be one
+  number, and the way that stops being true is two files computing it. Every
+  player including the ones on zero (being square is a position, and a roster
+  that grows and shrinks as money moves is harder to read); the settle screen's
+  payout list is the opposite and rightly so, since a payment of nothing is not
+  a payment. Shown only when more than one bet has a derivation — with one, the
+  total IS the player cards immediately below, the same do-not-say-it-twice rule
+  the bar's count follows.
   **The sheet accounts, but it leads with what just happened** (MAI-84): each
   game's block is recap → player cards → notes, because opening it to a column
   of running money buries the hole you are standing on. Universal, since

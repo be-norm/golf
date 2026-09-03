@@ -11,6 +11,8 @@ import {
 import type { Round, Uuid } from '../../engine/core/types'
 import { formatDate } from '../../lib/date'
 import { partitionByRole, shouldGroupSideBets, strokeGame } from '../../lib/gameRoles'
+import { roundStandings, type StandingRow } from '../../lib/standings'
+export type { StandingRow } from '../../lib/standings'
 import { holeLoop, ordinal } from '../scoring/holeLoop'
 
 /**
@@ -36,14 +38,6 @@ export interface SummaryCard {
   cards: ScorecardHalf[]
   /** why some scores are underlined — omitted when no game allocates strokes */
   strokeNote?: string
-}
-
-export interface StandingRow {
-  playerId: Uuid
-  name: string
-  cents: number
-  /** exactly one player, and only when they're actually up */
-  leader: boolean
 }
 
 export interface CollectorRow {
@@ -312,14 +306,7 @@ export function buildSummaryCard(
     [...derivations.values()].map((d) => d.settlement),
   )
 
-  const standings: StandingRow[] = [...round.players]
-    .sort((a, b) => (combined[b.playerId] ?? 0) - (combined[a.playerId] ?? 0))
-    .map((p, i) => ({
-      playerId: p.playerId,
-      name: p.name,
-      cents: combined[p.playerId] ?? 0,
-      leader: i === 0 && (combined[p.playerId] ?? 0) > 0,
-    }))
+  const standings: StandingRow[] = roundStandings(round.players, derivations.values())
 
   const settle: CollectorRow[] = collectorsFrom(minimalTransfers(combined)).map((c) => ({
     playerId: c.toPlayerId,
