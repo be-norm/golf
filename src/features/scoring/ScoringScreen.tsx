@@ -959,7 +959,16 @@ export function ScoringScreen() {
                   aria-label={
                     folded ? `expand summary — ${barRows.length - 1} more` : 'collapse summary'
                   }
-                  className="pixel-press font-display shrink-0 self-start border-stone-700 bg-stone-900 px-2.5 py-2 text-[10px] uppercase text-stone-400"
+                  // 44px FLOOR, not more padding. This is the newest control on
+                  // the screen and it is tapped one-handed, outdoors, mid-round;
+                  // padding sized to the folded state (`+3` beside the arrow)
+                  // leaves the expanded state — arrow alone, the tap that
+                  // COLLAPSES — at 34x39, and it would shrink again the day the
+                  // label changes. A floor holds whatever is inside it.
+                  // Arbitrary px on purpose: Tailwind's scale is rem-based
+                  // against this app's 19px root, so `size-11` is 52px, not 44 —
+                  // the same trap `size-16` is called out for in CLAUDE.md.
+                  className="pixel-press font-display inline-flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center self-start border-stone-700 bg-stone-900 px-1 text-[10px] uppercase text-stone-400"
                 >
                   {folded && <span className="mr-1.5 tabular-nums">+{barRows.length - 1}</span>}
                   <DisclosureArrow open={!folded} />

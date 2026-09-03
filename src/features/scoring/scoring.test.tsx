@@ -1780,6 +1780,37 @@ describe('ScoringScreen — pinned bar reserve and fold', () => {
     expect(screen.getByText('+2')).toBeInTheDocument()
   })
 
+  /**
+   * THE FOLD IS A 44px TOUCH TARGET IN BOTH STATES.
+   *
+   * jsdom has no layout, so this pins the DECLARATION rather than the rendered
+   * box — measured in a real browser it is 44x44 expanded and 47x44 folded,
+   * up from 34x39. The floor is what makes both states safe: padding tuned to
+   * the folded state (`+3` beside the arrow) leaves the expanded one — arrow
+   * alone, the tap that collapses — well under, and would drift again the day
+   * the label changes.
+   *
+   * Asserted as ARBITRARY PX on purpose. Tailwind's numeric scale is rem-based
+   * against this app's 19px root, so the tempting `size-11` is 52px, not 44 —
+   * the same trap CLAUDE.md calls out for `size-16`. A future tidy-up to the
+   * scale would silently change the number, and this is what fails when it does.
+   */
+  it('gives the fold a 44px touch target in both states', async () => {
+    const user = userEvent.setup()
+    show(await roundWith('round-bar-touch', 3))
+    await screen.findByText('Side bets')
+
+    const expanded = screen.getByRole('button', { name: 'collapse summary' })
+    expect(expanded.className).toContain('min-h-[44px]')
+    expect(expanded.className).toContain('min-w-[44px]')
+
+    await user.click(expanded)
+
+    const folded = screen.getByRole('button', { name: /expand summary/ })
+    expect(folded.className).toContain('min-h-[44px]')
+    expect(folded.className).toContain('min-w-[44px]')
+  })
+
   /** Folding one row to one row saves nothing, so it is not offered. */
   it('offers no fold on a one-row bar', async () => {
     show(await roundWith('round-bar-onerow', 0))

@@ -374,7 +374,12 @@ change, use a 6-digit code (`{{ .Token }}` + `verifyOtp`) rather than a link.
   is this round about" its own way. It hides the `openBet` rows MAI-50/MAI-99 put
   there, which is not a regression of either: the user asked for the room, the count
   says something is hidden, and the sheet still accounts in full — the bar's own
-  doctrine. The choice is a DISPLAY PREFERENCE (`localStorage`, device-wide,
+  doctrine. The toggle carries a 44px FLOOR (`min-h-[44px] min-w-[44px]`) rather
+  than tuned padding: padding sized to the folded state (`+3` beside the arrow)
+  left the expanded one — arrow alone, the tap that COLLAPSES — at 34x39, and
+  would drift again the day the label changed. Arbitrary px, because Tailwind's
+  scale is rem-based against the 19px root and `size-11` is 52px, not 44 — the
+  `size-16` trap again. The choice is a DISPLAY PREFERENCE (`localStorage`, device-wide,
   guarded so a browser with storage blocked degrades to expanded rather than taking
   the scoring screen down), and it must never reach the event log or the `Round`
   row, where it would sync one viewer's taste in bar height into a synced archive.
