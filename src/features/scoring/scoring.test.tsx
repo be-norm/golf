@@ -1899,6 +1899,48 @@ describe('ScoringScreen — the pinned bar', () => {
     expect(await screen.findByText('View full card ▶')).toBeInTheDocument()
   })
 
+  /**
+   * THE SHEET LEADS WITH WHERE EVERYONE STANDS.
+   *
+   * It used to open straight into a per-bet breakdown, so the first question
+   * anyone opening it has — am I up or down? — could only be answered by adding
+   * the games up in your head. The section is shared with the settle screen and
+   * the share card (`src/lib/standings.ts`), so the number read on the 7th green
+   * is the number settled on at the end.
+   */
+  it('leads the sheet with a combined total, before the per-bet breakdown', async () => {
+    const user = userEvent.setup()
+    show(await roundWith('round-sheet-total', 3))
+
+    await user.click(await bar())
+
+    const total = await screen.findByRole('heading', { name: 'Total' })
+    // three skins at $1, $1.01 and $1.02, all won by Ann on hole 1; the nassau
+    // has not settled, so it contributes nothing yet
+    const section = total.closest('section')!
+    expect(within(section).getByText('Ann')).toBeInTheDocument()
+    expect(within(section).getByText('+$3.03')).toBeInTheDocument()
+    expect(within(section).getByText('-$3.03')).toBeInTheDocument()
+
+    // …and it comes BEFORE the first game's block, which is the whole point
+    const firstGame = screen.getByRole('heading', { name: 'Nassau' })
+    expect(total.compareDocumentPosition(firstGame) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  /**
+   * With one bet the total IS the player cards in the block immediately below —
+   * the same rule the bar's count follows. Do not say it twice.
+   */
+  it('omits the total when there is only one bet to total', async () => {
+    const user = userEvent.setup()
+    show(await roundWith('round-sheet-total-single', 0))
+
+    await user.click(await bar())
+
+    expect(await screen.findByText('View full card ▶')).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Total' })).not.toBeInTheDocument()
+  })
+
   /** With every hole scored the bar is the Finish button, not a recap. */
   it('becomes the Finish button once every hole is scored', async () => {
     const round = await roundWith('round-bar-finished', 3)

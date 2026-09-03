@@ -18,6 +18,7 @@ import type { EventDraft } from '../../engine/core/events'
 import type { GameConfig } from '../../engine/core/types'
 import { gameLabel } from '../../engine/label'
 import { partitionByRole, primaryGame, shouldGroupSideBets, strokeGame } from '../../lib/gameRoles'
+import { roundStandings } from '../../lib/standings'
 import { ActionsSheet } from './ActionsSheet'
 import { AwardGrid } from './AwardGrid'
 import { Sheet } from '../../components/Sheet'
@@ -279,6 +280,17 @@ export function ScoringScreen() {
   // Only games with a derivation, because an engine that rejected its config
   // draws no panel and must not be counted (deriveRound).
   const otherGames = Math.max(0, shownGames.length - 1)
+  // WHERE EVERYONE STANDS, across every bet — the first question anyone opening
+  // the sheet has, and until now the one it could not answer: it went straight
+  // into a per-bet breakdown, so "am I up or down" meant adding the games up in
+  // your head. Shared with the settle screen and the share card
+  // (`src/lib/standings.ts`) so the number read on the 7th green is the number
+  // settled on at the end.
+  //
+  // Only worth a section when there is more than one bet to total. With one,
+  // the totals ARE the player cards in the block immediately below, and the
+  // same rule as the bar's count applies — do not say it twice.
+  const totals = shownGames.length > 1 ? roundStandings(round.players, derivations.values()) : []
 
   // Walking to another tee puts the picker away. Its key is hole-scoped, so an
   // Adjust left open on 5 would still be open on the way back to 5 — a stale
@@ -919,6 +931,34 @@ export function ScoringScreen() {
               Edit bets ▶
             </Link>
           </div>
+          {totals.length > 0 && (
+            <section className="pixel border-felt-600 bg-felt-900/50 p-4">
+              <h2 className="font-display mb-3 text-[10px] uppercase text-coin-400">Total</h2>
+              <ul className="space-y-2">
+                {totals.map((t) => (
+                  <motion.li
+                    layout
+                    key={t.playerId}
+                    className="flex items-baseline justify-between gap-3"
+                  >
+                    <span className="min-w-0 truncate text-lg font-medium">{t.name}</span>
+                    {/* a long name yields; the amount never breaks mid-token */}
+                    <span
+                      className={`font-display shrink-0 whitespace-nowrap text-sm ${
+                        t.cents > 0
+                          ? 'text-felt-300'
+                          : t.cents < 0
+                            ? 'text-flag-500'
+                            : 'text-stone-400'
+                      }`}
+                    >
+                      {formatCentsSigned(t.cents)}
+                    </span>
+                  </motion.li>
+                ))}
+              </ul>
+            </section>
+          )}
           {/* When the bar collapses the side bets, this is where they expand —
               so the sheet groups them under a heading rather than leaving the
               bar's "▶" pointing at an undifferentiated list. Ungrouped, the
