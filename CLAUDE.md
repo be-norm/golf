@@ -349,6 +349,40 @@ change, use a 6-digit code (`{{ .Token }}` + `verifyOtp`) rather than a link.
   `holeSummary(currentHole)` and NOT `latestHoleSummary` — walking back to 3
   must recap 3; the latest DECIDED hole is the bar's job, and on the frontier
   (where the sheet is almost always opened) they are the same hole.
+- **The bar RESERVES ITS OWN SPACE, and it can be folded away** (MAI-104). It is
+  `sticky bottom-0` as the last IN-FLOW child of the scoring column, never `fixed`
+  over it. `main` used to carry a constant `pb-40` (190px) to hold content clear,
+  while the bar's real height was whatever its rows came to — 229px with Nassau +
+  Snake + CTP + Long Drive, 273px in the reported screenshot. The document ended
+  where the padding ended, so `scrollHeight - innerHeight` was 0 and the last 82px
+  of the award grid was UNREACHABLE BY ANY GESTURE: a Closest to the Pin could not
+  be recorded on the hole it happened. Re-tuning the constant fixes today's round
+  and breaks on the next game that adds a row; in flow the bar reserves exactly its
+  own height BY EXISTING, and there is no second number to keep in sync. Two
+  consequences, both measured: `main` cancels `RoutedColumn`'s
+  `pb-[env(safe-area-inset-bottom)]` with a negative margin, because a sticky
+  element cannot be pushed past its containing block and the inset would otherwise
+  hold the bar one inset above the screen edge; and the bar is column-width rather
+  than full-bleed on a desktop window, accepted because the alternative is a 100vw
+  pseudo-element plus `overflow-x: clip` on an ancestor. **Nothing in flow may be
+  added after the bar** — `mt-auto` is what pins it on a short page, and it works
+  only because the sheets render null when closed and `CelebrationLayer`'s overlay
+  is `fixed inset-0`.
+  **The fold folds to the PRIMARY GAME**, keeping `primaryGame(round)`'s row and
+  counting the rest (`+3`) — not `barRows[0]`, which differs when a gross main game
+  precedes a net one and would make the bar a fourth surface answering "which game
+  is this round about" its own way. It hides the `openBet` rows MAI-50/MAI-99 put
+  there, which is not a regression of either: the user asked for the room, the count
+  says something is hidden, and the sheet still accounts in full — the bar's own
+  doctrine. The choice is a DISPLAY PREFERENCE (`localStorage`, device-wide,
+  guarded so a browser with storage blocked degrades to expanded rather than taking
+  the scoring screen down), and it must never reach the event log or the `Round`
+  row, where it would sync one viewer's taste in bar height into a synced archive.
+  jsdom has no layout, so the reserve is pinned by a PAIR of class assertions — the
+  bar is not `fixed` AND `main` carries no bottom padding. Either alone catches the
+  bug that motivated the change; the pair is there for the HALF-FIX, which is the
+  likelier future mistake — sticky with the reserve left behind, or the reserve
+  dropped while the bar stays fixed. The two facts are only correct together.
 - **One default primary game, shared by every surface** (`src/lib/gameRoles.ts`).
   `primaryGame(round)` = first NET main game → first main game → `games[0]`;
   `strokeGame(round)` is that game only when it allocates strokes. Three

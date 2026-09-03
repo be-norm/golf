@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router'
 import { motion, AnimatePresence } from 'motion/react'
 import { eventStore } from '../../db/eventStore'
@@ -18,7 +18,7 @@ import { isAmendment } from '../../engine/core/events'
 import type { EventDraft } from '../../engine/core/events'
 import type { GameConfig, Round } from '../../engine/core/types'
 import { gameLabel } from '../../engine/label'
-import { partitionByRole, shouldGroupSideBets, strokeGame } from '../../lib/gameRoles'
+import { partitionByRole, primaryGame, shouldGroupSideBets, strokeGame } from '../../lib/gameRoles'
 import { ActionsSheet } from './ActionsSheet'
 import { AwardGrid } from './AwardGrid'
 import { Sheet } from '../../components/Sheet'
@@ -26,9 +26,11 @@ import { GameSummary, SummaryParts, type SummaryPart } from '../../components/Ga
 import { DetailLines } from '../../components/DetailLines'
 import { GlyphText } from '../../components/GlyphText'
 import { BigButton } from '../../components/BigButton'
+import { DisclosureArrow } from '../../components/DisclosureArrow'
 import { enqueuePushRound } from '../../remote/outbox'
 import { LOCAL_USER } from '../../db/ids'
 import { RulesSheet } from '../games/RulesSheet'
+import { readBarCollapsed, writeBarCollapsed } from './barCollapse'
 import { useRound } from './useRound'
 import { holeLoop, ordinal } from './holeLoop'
 import { MAX_PUTTS, ScoreRow } from './ScoreRow'
@@ -55,6 +57,9 @@ export function ScoringScreen() {
   const [standingsOpen, setStandingsOpen] = useState(false)
   const [rulesFor, setRulesFor] = useState<string>()
   const [actionsOpen, setActionsOpen] = useState(false)
+  // The pinned bar's fold. Seeded from the device-wide preference and never
+  // re-read: nothing else writes that key, so there is nothing to subscribe to.
+  const [barCollapsed, setBarCollapsed] = useState(readBarCollapsed)
   // which answered input has its picker open — `${gameId}:${input.id}`
   const [adjustingId, setAdjustingId] = useState<string>()
   // What was last SENT per input, so "this answer is already in effect" steps
@@ -206,7 +211,8 @@ export function ScoringScreen() {
   const dotsGame = strokeGame(round)
 
   // A round with a main game and several side bets used to put one row per game
-  // in a fixed bottom strip. Main games keep their rows; the side bets collapse
+  // in the pinned bottom strip (a `fixed` one when MAI-50 was written; MAI-104
+  // put it in flow). Main games keep their rows; the side bets collapse
   // into a single aggregate that expands in the standings sheet (MAI-50).
   // Roles come from the WHOLE round — an inert game is still a game the group
   // agreed to play, and its category still decides whether an "either" game is
@@ -264,6 +270,97 @@ export function ScoringScreen() {
   const anyScored = round.players.some((p) =>
     ctx.holesPlayed.some((h) => ctx.gross.get(p.playerId)?.get(h) !== undefined),
   )
+
+  // ── The pinned bar's rows ──────────────────────────────────────────────────
+  //
+  // Built as a LIST rather than three inline conditionals, because the fold has
+  // to count them. "+3" must promise three rows that are actually under there:
+  // a game whose engine rejected its config gets no derivation and no row
+  // (deriveRound), so counting games would offer to expand into nothing.
+  const barRows: { gameId: string | undefined; node: ReactNode }[] = [
+    ...barGames.flatMap((g) => {
+      const d = derivations.get(g.gameId)
+      if (!d) return []
+      return [
+        {
+          gameId: g.gameId,
+          node: (
+            <div key={g.gameId} className="flex items-baseline justify-between gap-3 py-0.5">
+              <span className="font-display text-[10px] uppercase text-felt-300">
+                {gameLabel(g, round.games)}
+              </span>
+              <GameSummary derivation={d} />
+            </div>
+          ),
+        },
+      ]
+    }),
+    ...(collapseSide
+      ? [
+          {
+            gameId: undefined,
+            node: (
+              <div key="side-bets" className="flex items-baseline justify-between gap-3 py-0.5">
+                <span className="font-display text-[10px] uppercase text-felt-300">Side bets</span>
+                <span className="inline-flex items-baseline gap-2">
+                  <SummaryParts parts={sideBetParts} />
+                  <span className="font-display text-[10px] text-felt-400">▶</span>
+                </span>
+              </div>
+            ),
+          },
+        ]
+      : []),
+    // A live bet the aggregate above CANNOT represent, because that row is
+    // money and this one is not money yet — the snake is worth $4 to somebody
+    // and settles at the end. Without it a collapsed round reads "no money yet"
+    // and says nothing about who is carrying it, which is the one thing the
+    // group wants off the bar. Only while collapsed: an uncollapsed game
+    // already has its own row.
+    ...(collapseSide
+      ? openBets.map(({ game, openBet }) => ({
+          gameId: game.gameId,
+          node: (
+            <div key={game.gameId} className="flex items-baseline justify-between gap-3 py-0.5">
+              <span className="font-display text-[10px] uppercase text-felt-300">
+                {gameLabel(game, round.games)}
+              </span>
+              <SummaryParts parts={[{ label: '', value: openBet }]} />
+            </div>
+          ),
+        }))
+      : []),
+  ]
+
+  // A one-row bar folds to itself, so it is offered no control. `folded` goes
+  // through `foldable` so a stored preference can never hide the only row there
+  // is. No `!allScored` term: an all-scored bar is the Finish button, and that
+  // is the ternary below rather than a condition here — a guard no test can
+  // reach is a guard that reads as load-bearing while pinning nothing.
+  const foldable = barRows.length > 1
+  const folded = foldable && barCollapsed
+  // FOLD TO THE PRIMARY GAME'S ROW, not to barRows[0]. They differ: barRows[0]
+  // is `round.games` order, while `primaryGame` prefers the first main game
+  // that ALLOCATES STROKES — for [nassau (gross), matchPlay (net), skins,
+  // skins] the bar would fold to Nassau while the scorecard, the stroke dots
+  // and the share card all say Match Play. That would make the bar a fourth
+  // surface answering "which game is this round about" its own way, which is
+  // the exact drift the one-default-primary-game rule exists to stop.
+  // Index 0 is the fallback for a primary game that drew no row (inert config).
+  // The `main` guard is load-bearing, not defensive: the "Side bets" row carries
+  // `gameId: undefined` on purpose, so matching on a bare `primaryGame(round)?.gameId`
+  // would find THAT row whenever there is no primary game — folding to the
+  // aggregate and hiding the main event, the exact outcome the paragraph above
+  // exists to prevent. Unreachable today (no primary game means no games means
+  // no rows), which is why it has to be structural rather than remembered.
+  const primary = primaryGame(round)
+  const keptRow = (primary && barRows.find((r) => r.gameId === primary.gameId)) ?? barRows[0]
+  const visibleRows = folded && keptRow ? [keptRow] : barRows
+  const toggleBar = () => {
+    const next = !barCollapsed
+    setBarCollapsed(next)
+    writeBarCollapsed(next)
+  }
 
   // Walking to another tee puts the picker away. Its key is hole-scoped, so an
   // Adjust left open on 5 would still be open on the way back to 5 — a stale
@@ -557,7 +654,12 @@ export function ScoringScreen() {
   }
 
   return (
-    <main className="flex min-h-dvh select-none flex-col pb-40">
+    // The negative bottom margin cancels `RoutedColumn`'s
+    // `pb-[env(safe-area-inset-bottom)]`. A sticky element cannot be pushed past
+    // its containing block, so on a notched phone that inset would hold the bar
+    // one inset above the screen edge at max scroll — a strip of felt under a
+    // bar that is supposed to be flush with the bottom of the display.
+    <main className="mb-[calc(env(safe-area-inset-bottom)*-1)] flex min-h-dvh select-none flex-col">
       <header className="flex items-center justify-between py-4">
         <div className="flex items-center gap-3">
           <Link to="/" className="px-1 text-stone-400" aria-label="home">
@@ -812,10 +914,29 @@ export function ScoringScreen() {
       />
 
       {/* Celebrations launch from the bar, because the bar is where the result
-          is stated — the coins carry the eye from the sentence to the player. */}
+          is stated — the coins carry the eye from the sentence to the player.
+
+          STICKY AND IN FLOW, which is the whole of MAI-104: the bar reserves
+          exactly its own height BY EXISTING. `main` used to carry a constant
+          `pb-40` to hold content clear of a `fixed` bar, and the two numbers had
+          no relationship — the bar outgrew the reserve, `scrollHeight` stopped
+          past the padding, and the last rows of the award grid became
+          unreachable by any gesture. There is no second number to keep in sync
+          now, and nothing to update when a game adds a row.
+
+          `mt-auto` keeps it at the bottom of a short page (a young round), and
+          works only because everything JSX-after it is out of flow: the sheets
+          render null when closed, and CelebrationLayer's overlay is
+          `fixed inset-0`. An in-flow sibling added below would push the bar off
+          the bottom of the screen.
+
+          `-mx-4` pulls it back out of `RoutedColumn`'s `px-4` to the column's
+          border box — the full viewport on any phone, and a column-width strip
+          on a desktop window, which is the accepted trade for not needing a
+          100vw pseudo-element and `overflow-x: clip` on an ancestor. */}
       <div
         data-summary-bar
-        className="fixed inset-x-0 bottom-0 z-30 border-t-4 border-felt-600 bg-stone-950/95 px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 backdrop-blur"
+        className="sticky bottom-0 z-30 -mx-4 mt-auto border-t-4 border-felt-600 bg-stone-950/95 px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 backdrop-blur"
       >
         <div className="mx-auto max-w-md">
           {allScored ? (
@@ -823,50 +944,28 @@ export function ScoringScreen() {
               🏁 Finish round
             </BigButton>
           ) : (
-            <button className="w-full text-left" onClick={() => setStandingsOpen(true)}>
-              {barGames.map((g) => {
-                const d = derivations.get(g.gameId)
-                if (!d) return null
-                return (
-                  <div key={g.gameId} className="flex items-baseline justify-between gap-3 py-0.5">
-                    <span className="font-display text-[10px] uppercase text-felt-300">
-                      {gameLabel(g, round.games)}
-                    </span>
-                    <GameSummary derivation={d} />
-                  </div>
-                )
-              })}
-              {collapseSide && (
-                <div className="flex items-baseline justify-between gap-3 py-0.5">
-                  <span className="font-display text-[10px] uppercase text-felt-300">
-                    Side bets
-                  </span>
-                  <span className="inline-flex items-baseline gap-2">
-                    <SummaryParts parts={sideBetParts} />
-                    <span className="font-display text-[10px] text-felt-400">▶</span>
-                  </span>
-                </div>
+            <div className="flex items-start gap-2">
+              <button className="min-w-0 flex-1 text-left" onClick={() => setStandingsOpen(true)}>
+                {visibleRows.map((r) => r.node)}
+              </button>
+              {/* A SIBLING of the sheet button, never nested inside it: a button
+                  within a button is invalid HTML, and the browsers that tolerate
+                  it fire both handlers — so folding would also throw the
+                  standings sheet open over the bar it just made room under. */}
+              {foldable && (
+                <button
+                  onClick={toggleBar}
+                  aria-expanded={!folded}
+                  aria-label={
+                    folded ? `expand summary — ${barRows.length - 1} more` : 'collapse summary'
+                  }
+                  className="pixel-press font-display shrink-0 self-start border-stone-700 bg-stone-900 px-2.5 py-2 text-[10px] uppercase text-stone-400"
+                >
+                  {folded && <span className="mr-1.5 tabular-nums">+{barRows.length - 1}</span>}
+                  <DisclosureArrow open={!folded} />
+                </button>
               )}
-              {/* A live bet the aggregate above CANNOT represent, because that
-                  row is money and this one is not money yet — the snake is
-                  worth $4 to somebody and settles at the end. Without it a
-                  collapsed round reads "no money yet" and says nothing about
-                  who is carrying it, which is the one thing the group wants off
-                  the bar. Only while collapsed: an uncollapsed game already has
-                  its own row. */}
-              {collapseSide &&
-                openBets.map(({ game, openBet }) => (
-                  <div
-                    key={game.gameId}
-                    className="flex items-baseline justify-between gap-3 py-0.5"
-                  >
-                    <span className="font-display text-[10px] uppercase text-felt-300">
-                      {gameLabel(game, round.games)}
-                    </span>
-                    <SummaryParts parts={[{ label: '', value: openBet }]} />
-                  </div>
-                ))}
-            </button>
+            </div>
           )}
         </div>
       </div>

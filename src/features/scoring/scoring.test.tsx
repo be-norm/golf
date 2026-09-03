@@ -490,7 +490,8 @@ describe('ScoringScreen', () => {
       ],
     })
     round.id = 'round-two-nassaus'
-    for (const g of round.games) g.handicap = { mode: 'gross', reference: 'offLow', allowancePct: 100 }
+    for (const g of round.games)
+      g.handicap = { mode: 'gross', reference: 'offLow', allowancePct: 100 }
     await db.rounds.put(round)
     await eventStore.append(round.id, [
       { type: 'score/set', playerId: 'p-ann', hole: 1, gross: 4 },
@@ -633,7 +634,12 @@ describe('ScoringScreen — a live bet the money aggregate cannot show', () => {
     await eventStore.append(id, [
       { type: 'score/set', playerId: 'p-ann', hole: 1, gross: 4 },
       { type: 'score/set', playerId: 'p-bob', hole: 1, gross: 5 },
-      { type: 'game/event', gameId: round.games[1]!.gameId, kind: 'snake/bite', data: { hole: 1, playerId: 'p-bob' } },
+      {
+        type: 'game/event',
+        gameId: round.games[1]!.gameId,
+        kind: 'snake/bite',
+        data: { hole: 1, playerId: 'p-bob' },
+      },
     ])
     render(
       <RouterProvider router={createMemoryRouter(routes, { initialEntries: [`/round/${id}`] })} />,
@@ -691,7 +697,6 @@ describe('ScoringScreen — putts', () => {
     expect(screen.queryByLabelText(/putts/)).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /putts/ })).not.toBeInTheDocument()
   })
-
 
   it('records a count, and one tap is one event', async () => {
     const round = await puttsRound('round-putts-on', true)
@@ -1150,7 +1155,9 @@ describe('ScoringScreen — input chips', () => {
     })
     round.id = id
     await db.rounds.put(round)
-    render(<RouterProvider router={createMemoryRouter(routes, { initialEntries: [`/round/${id}`] })} />)
+    render(
+      <RouterProvider router={createMemoryRouter(routes, { initialEntries: [`/round/${id}`] })} />,
+    )
     return round
   }
 
@@ -1351,8 +1358,14 @@ describe('ScoringScreen — input chips', () => {
       players: makePlayers([{ name: 'Ann' }, { name: 'Bob' }, { name: 'Cal' }, { name: 'Dee' }]),
       holes: 'front9',
       games: [
-        { type: 'wolf', config: { pointCents: 100, rotation: ['p-ann', 'p-bob', 'p-cal', 'p-dee'] } },
-        { type: 'wolf', config: { pointCents: 500, rotation: ['p-ann', 'p-bob', 'p-cal', 'p-dee'] } },
+        {
+          type: 'wolf',
+          config: { pointCents: 100, rotation: ['p-ann', 'p-bob', 'p-cal', 'p-dee'] },
+        },
+        {
+          type: 'wolf',
+          config: { pointCents: 500, rotation: ['p-ann', 'p-bob', 'p-cal', 'p-dee'] },
+        },
       ],
     })
     round.id = 'round-two-wolves'
@@ -1387,13 +1400,21 @@ describe('ScoringScreen — input chips', () => {
       players: makePlayers([{ name: 'Ann' }, { name: 'Bob' }, { name: 'Cal' }, { name: 'Dee' }]),
       holes: 'front9',
       games: [
-        { type: 'wolf', config: { pointCents: 100, rotation: ['p-ann', 'p-bob', 'p-cal', 'p-dee'] } },
+        {
+          type: 'wolf',
+          config: { pointCents: 100, rotation: ['p-ann', 'p-bob', 'p-cal', 'p-dee'] },
+        },
       ],
     })
     round.id = 'round-completed-teams'
     await db.rounds.put(round)
     await eventStore.append(round.id, [
-      { type: 'game/event', gameId: round.games[0]!.gameId, kind: 'wolf/pick', data: { hole: 1, choice: 'p-bob', wolf: 'p-ann' } },
+      {
+        type: 'game/event',
+        gameId: round.games[0]!.gameId,
+        kind: 'wolf/pick',
+        data: { hole: 1, choice: 'p-bob', wolf: 'p-ann' },
+      },
       { type: 'score/set', playerId: 'p-ann', hole: 1, gross: 4 },
       { type: 'score/set', playerId: 'p-bob', hole: 1, gross: 4 },
       { type: 'score/set', playerId: 'p-cal', hole: 1, gross: 5 },
@@ -1429,7 +1450,10 @@ describe('ScoringScreen — input chips', () => {
       players: makePlayers([{ name: 'Ann' }, { name: 'Bob' }, { name: 'Cal' }, { name: 'Dee' }]),
       holes: 'front9',
       games: [
-        { type: 'wolf', config: { pointCents: 100, rotation: ['p-ann', 'p-bob', 'p-cal', 'p-dee'] } },
+        {
+          type: 'wolf',
+          config: { pointCents: 100, rotation: ['p-ann', 'p-bob', 'p-cal', 'p-dee'] },
+        },
       ],
     })
     round.id = 'round-completed-unpicked'
@@ -1491,16 +1515,15 @@ describe('ScoringScreen — input chips', () => {
     const recap = await screen.findByText(/win with Ann's/)
     const firstCard = screen.getAllByText('+$1')[0]!
     // the recap precedes the first player card in document order
-    expect(
-      recap.compareDocumentPosition(firstCard) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy()
+    expect(recap.compareDocumentPosition(firstCard) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 })
 
 /**
- * MAI-50. The pinned bar is a fixed strip at the bottom of the scoring screen,
- * and it used to render one row per game — five games, five rows, over a phone
- * keyboard.
+ * MAI-50. The pinned bar is the strip at the bottom of the scoring screen, and
+ * it used to render one row per game — five games, five rows, over a phone
+ * keyboard. (It was a `fixed` strip when this was written; MAI-104 put it in
+ * flow so it reserves its own height. Density is the same problem either way.)
  */
 describe('ScoringScreen — pinned bar density', () => {
   /** A nassau main event plus `sideCount` skins side bets. */
@@ -1581,7 +1604,10 @@ describe('ScoringScreen — pinned bar density', () => {
    */
   it('does not let a net side bet capture the stroke dots', async () => {
     const round = makeRound({
-      players: makePlayers([{ name: 'Ann', ch: 0 }, { name: 'Bob', ch: 18 }]),
+      players: makePlayers([
+        { name: 'Ann', ch: 0 },
+        { name: 'Bob', ch: 18 },
+      ]),
       holes: 'front9',
       games: [
         { type: 'nassau', config: { stakeCents: 500, teams: null, autoPress: false } },
@@ -1609,7 +1635,10 @@ describe('ScoringScreen — pinned bar density', () => {
   /** The positive control for the test above: the query DOES find strokes. */
   it('shows the dots when the main game is the net one', async () => {
     const round = makeRound({
-      players: makePlayers([{ name: 'Ann', ch: 0 }, { name: 'Bob', ch: 18 }]),
+      players: makePlayers([
+        { name: 'Ann', ch: 0 },
+        { name: 'Bob', ch: 18 },
+      ]),
       holes: 'front9',
       games: [{ type: 'nassau', config: { stakeCents: 500, teams: null, autoPress: false } }],
     })
@@ -1620,5 +1649,188 @@ describe('ScoringScreen — pinned bar density', () => {
 
     await screen.findByText('Bob')
     expect(screen.getByLabelText(/\d+ strokes/)).toBeInTheDocument()
+  })
+})
+
+/**
+ * MAI-104. The bar covered the award grid, and no gesture reached under it.
+ *
+ * `<main>` carried a constant `pb-40` (190px) to hold content clear of a
+ * `fixed` bar whose real height was 229px on a phone with Nassau + Snake + CTP
+ * + Long Drive. The document ended where the padding ended, so
+ * `scrollHeight - innerHeight` was 0 and the last rows of the award grid were
+ * unreachable — a Closest to the Pin could not be recorded on the hole it
+ * happened.
+ */
+describe('ScoringScreen — pinned bar reserve and fold', () => {
+  /** A nassau main event plus `sideCount` skins side bets. */
+  async function roundWith(id: string, sideCount: number) {
+    const round = makeRound({
+      players: makePlayers([{ name: 'Ann' }, { name: 'Bob' }]),
+      holes: 'front9',
+      games: [
+        { type: 'nassau', config: { stakeCents: 500, teams: null, autoPress: false } },
+        ...Array.from({ length: sideCount }, (_, i) => ({
+          type: 'skins',
+          config: { stakeCents: 100 + i, carryover: true },
+        })),
+      ],
+    })
+    round.id = id
+    await db.rounds.put(round)
+    await eventStore.append(round.id, [
+      { type: 'score/set', playerId: 'p-ann', hole: 1, gross: 4 },
+      { type: 'score/set', playerId: 'p-bob', hole: 1, gross: 5 },
+    ])
+    return round
+  }
+
+  const show = (round: { id: string }) => {
+    const router = createMemoryRouter(routes, { initialEntries: [`/round/${round.id}`] })
+    return render(<RouterProvider router={router} />)
+  }
+
+  /**
+   * THE RESERVE, as far as jsdom can see it.
+   *
+   * jsdom has no layout, so there is no honest assertion of the form "the award
+   * button is visible". This is a structural proxy, and it is deliberately a
+   * PAIR — though not because either half is weak against the SHIPPED bug.
+   * Both catch that one: the old bar's className carried `fixed` and the old
+   * `main` carried `pb-40`. What the pair guards is the HALF-FIX, which is the
+   * likelier future mistake — going sticky while leaving the reserve behind
+   * (padding on `main` now lands BELOW the bar and lifts it off the screen
+   * edge), or dropping the reserve while the bar stays fixed (straight back to
+   * content under an overlay). The two facts are only correct together.
+   *
+   * What it does NOT catch is the original failure mode itself — a reserve of
+   * the wrong SIZE. Nothing in jsdom can, which is exactly why the mechanism
+   * changed instead of the number. If the mobile-Safari fallback is ever
+   * adopted (keep the bar `fixed`, add a measured spacer with a ResizeObserver),
+   * this test is wrong by construction and should be DELETED with the reasoning
+   * moved to the spacer, not weakened until it passes.
+   */
+  it('puts the bar in flow, with no reserve left behind on main', async () => {
+    show(await roundWith('round-bar-reserve', 3))
+    await screen.findByText('Side bets')
+
+    const bar = document.querySelector('[data-summary-bar]')
+    expect(bar).not.toBeNull()
+    // in flow — it reserves its own height by existing
+    expect(bar!.className).not.toMatch(/\bfixed\b/)
+    // …and nothing on main pretends to reserve it a second time
+    expect(bar!.closest('main')!.className).not.toMatch(/\bpb-/)
+  })
+
+  it('folds a multi-row bar down to the primary game, and counts what it hid', async () => {
+    const user = userEvent.setup()
+    show(await roundWith('round-bar-fold', 3))
+    await screen.findByText('Side bets')
+
+    await user.click(screen.getByRole('button', { name: 'collapse summary' }))
+
+    // the main event stays; the aggregate row is folded away and counted
+    expect(screen.getByText('Nassau')).toBeInTheDocument()
+    expect(screen.queryByText('Side bets')).not.toBeInTheDocument()
+    expect(screen.getByText('+1')).toBeInTheDocument()
+
+    // and it opens again
+    await user.click(screen.getByRole('button', { name: 'expand summary — 1 more' }))
+    expect(await screen.findByText('Side bets')).toBeInTheDocument()
+  })
+
+  /**
+   * FOLDS TO THE PRIMARY GAME, WHICH IS NOT ALWAYS THE FIRST ROW.
+   *
+   * `barRows[0]` is `round.games` order; `primaryGame` prefers the first main
+   * game that ALLOCATES STROKES. Here they differ — a gross Nassau sits ahead of
+   * a net Match Play — and folding to the first row would leave the bar saying
+   * this round is about Nassau while the scorecard, the stroke dots and the
+   * share card all say Match Play. One default primary game, shared by every
+   * surface; the bar does not get to be a fourth answer.
+   */
+  it('folds to the primary game rather than to the first row', async () => {
+    const user = userEvent.setup()
+    const round = makeRound({
+      players: makePlayers([{ name: 'Ann' }, { name: 'Bob' }]),
+      holes: 'front9',
+      games: [
+        { type: 'nassau', config: { stakeCents: 500, teams: null, autoPress: false } },
+        { type: 'matchPlay', config: { stakeCents: 500, teams: null } },
+        { type: 'skins', config: { stakeCents: 100, carryover: true } },
+        { type: 'skins', config: { stakeCents: 200, carryover: true } },
+      ],
+    })
+    round.id = 'round-bar-fold-primary'
+    round.games[0]!.handicap = { mode: 'gross', reference: 'offLow', allowancePct: 100 }
+    round.games[1]!.handicap = { mode: 'net', reference: 'offLow', allowancePct: 100 }
+    await db.rounds.put(round)
+    await eventStore.append(round.id, [
+      { type: 'score/set', playerId: 'p-ann', hole: 1, gross: 4 },
+      { type: 'score/set', playerId: 'p-bob', hole: 1, gross: 5 },
+    ])
+    show(round)
+    await screen.findByText('Side bets')
+
+    await user.click(screen.getByRole('button', { name: 'collapse summary' }))
+
+    expect(screen.getByText('Match Play')).toBeInTheDocument()
+    expect(screen.queryByText('Nassau')).not.toBeInTheDocument()
+    expect(screen.queryByText('Side bets')).not.toBeInTheDocument()
+    expect(screen.getByText('+2')).toBeInTheDocument()
+  })
+
+  /** Folding one row to one row saves nothing, so it is not offered. */
+  it('offers no fold on a one-row bar', async () => {
+    show(await roundWith('round-bar-onerow', 0))
+    await screen.findByText('Nassau')
+
+    expect(screen.queryByRole('button', { name: /summary/ })).not.toBeInTheDocument()
+  })
+
+  /**
+   * The toggle is a SIBLING of the button that opens the standings sheet, not a
+   * child of it. Nested, the browsers that tolerate invalid markup fire both
+   * handlers — so asking for room would throw the sheet open over the bar.
+   */
+  it('does not open the standings sheet when the bar is folded', async () => {
+    const user = userEvent.setup()
+    show(await roundWith('round-bar-nosheet', 3))
+    await screen.findByText('Side bets')
+
+    await user.click(screen.getByRole('button', { name: 'collapse summary' }))
+
+    expect(screen.queryByText('View full card ▶')).not.toBeInTheDocument()
+  })
+
+  /** A display preference, so it is device-wide and outlives the round view. */
+  it('remembers the fold across leaving and re-entering the round', async () => {
+    const user = userEvent.setup()
+    const round = await roundWith('round-bar-persist', 3)
+    const first = show(round)
+    await screen.findByText('Side bets')
+    await user.click(screen.getByRole('button', { name: 'collapse summary' }))
+    first.unmount()
+
+    show(round)
+
+    expect(await screen.findByText('Nassau')).toBeInTheDocument()
+    expect(screen.queryByText('Side bets')).not.toBeInTheDocument()
+  })
+
+  /** With every hole scored the bar is the Finish button — there are no rows. */
+  it('offers no fold once the bar is the Finish button', async () => {
+    const round = await roundWith('round-bar-finished', 3)
+    await eventStore.append(
+      round.id,
+      [2, 3, 4, 5, 6, 7, 8, 9].flatMap((hole) => [
+        { type: 'score/set' as const, playerId: 'p-ann', hole, gross: 4 },
+        { type: 'score/set' as const, playerId: 'p-bob', hole, gross: 5 },
+      ]),
+    )
+    show(round)
+
+    expect(await screen.findByRole('button', { name: /Finish round/ })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /summary/ })).not.toBeInTheDocument()
   })
 })
