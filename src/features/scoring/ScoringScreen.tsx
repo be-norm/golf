@@ -1,36 +1,33 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router'
 import { motion, AnimatePresence } from 'motion/react'
 import { eventStore } from '../../db/eventStore'
 import { roundRepo } from '../../db/repos'
 import { effectiveEvents, isCompleted } from '../../engine/core/replay'
-import { combineSettlements, formatCentsSigned } from '../../engine/core/money'
+import { formatCentsSigned } from '../../engine/core/money'
 import { getEngine } from '../../engine/catalog'
 import type {
   Award,
   GameAction,
   GameActionCopy,
-  GameDerivation,
   GameEventOffer,
   InputRequest,
 } from '../../engine/catalog'
 import { isAmendment } from '../../engine/core/events'
 import type { EventDraft } from '../../engine/core/events'
-import type { GameConfig, Round } from '../../engine/core/types'
+import type { GameConfig } from '../../engine/core/types'
 import { gameLabel } from '../../engine/label'
 import { partitionByRole, primaryGame, shouldGroupSideBets, strokeGame } from '../../lib/gameRoles'
 import { ActionsSheet } from './ActionsSheet'
 import { AwardGrid } from './AwardGrid'
 import { Sheet } from '../../components/Sheet'
-import { GameSummary, SummaryParts, type SummaryPart } from '../../components/GameSummary'
+import { GameSummary } from '../../components/GameSummary'
 import { DetailLines } from '../../components/DetailLines'
 import { GlyphText } from '../../components/GlyphText'
 import { BigButton } from '../../components/BigButton'
-import { DisclosureArrow } from '../../components/DisclosureArrow'
 import { enqueuePushRound } from '../../remote/outbox'
 import { LOCAL_USER } from '../../db/ids'
 import { RulesSheet } from '../games/RulesSheet'
-import { readBarCollapsed, writeBarCollapsed } from './barCollapse'
 import { useRound } from './useRound'
 import { holeLoop, ordinal } from './holeLoop'
 import { MAX_PUTTS, ScoreRow } from './ScoreRow'
@@ -57,9 +54,6 @@ export function ScoringScreen() {
   const [standingsOpen, setStandingsOpen] = useState(false)
   const [rulesFor, setRulesFor] = useState<string>()
   const [actionsOpen, setActionsOpen] = useState(false)
-  // The pinned bar's fold. Seeded from the device-wide preference and never
-  // re-read: nothing else writes that key, so there is nothing to subscribe to.
-  const [barCollapsed, setBarCollapsed] = useState(readBarCollapsed)
   // which answered input has its picker open — `${gameId}:${input.id}`
   const [adjustingId, setAdjustingId] = useState<string>()
   // What was last SENT per input, so "this answer is already in effect" steps
@@ -79,9 +73,9 @@ export function ScoringScreen() {
   // the next tap fell back to the derived count and stepped from a number the
   // user had already stepped away from (−, −, + from 1 ended with the log
   // saying 2). Carries its own playerId/hole so the release never parses a key.
-  const sentPuttsRef = useRef<
-    Map<string, { value: number | null; id: string | undefined }>
-  >(new Map())
+  const sentPuttsRef = useRef<Map<string, { value: number | null; id: string | undefined }>>(
+    new Map(),
+  )
   // Release a key only once the derivation actually CONTAINS its event — the
   // control on screen now reflects the tap, so a further tap is a further
   // intent rather than a stale duplicate. An effect rather than a render-phase
@@ -226,20 +220,6 @@ export function ScoringScreen() {
   const mainGames = shown(main)
   const sideGames = shown(side)
   const collapseSide = shouldGroupSideBets({ main: mainGames.length, side: sideGames.length })
-  const barGames = collapseSide ? mainGames : shown(round.games)
-  const sideBetParts = collapseSide
-    ? sideBetSummary(
-        round.players,
-        sideGames.flatMap((g) => derivations.get(g.gameId) ?? []),
-      )
-    : []
-  // Side bets whose position is live but not yet money — see `openBet`. Only
-  // ever rendered while the bar is collapsing side bets into a money aggregate
-  // that cannot hold them.
-  const openBets = sideGames.flatMap((game) => {
-    const openBet = derivations.get(game.gameId)?.openBet
-    return openBet ? [{ game, openBet }] : []
-  })
   const holeInputs = inputs.filter((i) => i.hole === currentHole)
 
   // Deliberately NOT a useMemo: `currentHole` is derived below the early
@@ -271,96 +251,34 @@ export function ScoringScreen() {
     ctx.holesPlayed.some((h) => ctx.gross.get(p.playerId)?.get(h) !== undefined),
   )
 
-  // ── The pinned bar's rows ──────────────────────────────────────────────────
+  // ── The pinned bar ────────────────────────────────────────────────────────
   //
-  // Built as a LIST rather than three inline conditionals, because the fold has
-  // to count them. "+3" must promise three rows that are actually under there:
-  // a game whose engine rejected its config gets no derivation and no row
-  // (deriveRound), so counting games would offer to expand into nothing.
-  const barRows: { gameId: string | undefined; node: ReactNode }[] = [
-    ...barGames.flatMap((g) => {
-      const d = derivations.get(g.gameId)
-      if (!d) return []
-      return [
-        {
-          gameId: g.gameId,
-          node: (
-            <div key={g.gameId} className="flex items-baseline justify-between gap-3 py-0.5">
-              <span className="font-display text-[10px] uppercase text-felt-300">
-                {gameLabel(g, round.games)}
-              </span>
-              <GameSummary derivation={d} />
-            </div>
-          ),
-        },
-      ]
-    }),
-    ...(collapseSide
-      ? [
-          {
-            gameId: undefined,
-            node: (
-              <div key="side-bets" className="flex items-baseline justify-between gap-3 py-0.5">
-                <span className="font-display text-[10px] uppercase text-felt-300">Side bets</span>
-                <span className="inline-flex items-baseline gap-2">
-                  <SummaryParts parts={sideBetParts} />
-                  <span className="font-display text-[10px] text-felt-400">▶</span>
-                </span>
-              </div>
-            ),
-          },
-        ]
-      : []),
-    // A live bet the aggregate above CANNOT represent, because that row is
-    // money and this one is not money yet — the snake is worth $4 to somebody
-    // and settles at the end. Without it a collapsed round reads "no money yet"
-    // and says nothing about who is carrying it, which is the one thing the
-    // group wants off the bar. Only while collapsed: an uncollapsed game
-    // already has its own row.
-    ...(collapseSide
-      ? openBets.map(({ game, openBet }) => ({
-          gameId: game.gameId,
-          node: (
-            <div key={game.gameId} className="flex items-baseline justify-between gap-3 py-0.5">
-              <span className="font-display text-[10px] uppercase text-felt-300">
-                {gameLabel(game, round.games)}
-              </span>
-              <SummaryParts parts={[{ label: '', value: openBet }]} />
-            </div>
-          ),
-        }))
-      : []),
-  ]
-
-  // A one-row bar folds to itself, so it is offered no control. `folded` goes
-  // through `foldable` so a stored preference can never hide the only row there
-  // is. No `!allScored` term: an all-scored bar is the Finish button, and that
-  // is the ternary below rather than a condition here — a guard no test can
-  // reach is a guard that reads as load-bearing while pinning nothing.
-  const foldable = barRows.length > 1
-  const folded = foldable && barCollapsed
-  // FOLD TO THE PRIMARY GAME'S ROW, not to barRows[0]. They differ: barRows[0]
-  // is `round.games` order, while `primaryGame` prefers the first main game
-  // that ALLOCATES STROKES — for [nassau (gross), matchPlay (net), skins,
-  // skins] the bar would fold to Nassau while the scorecard, the stroke dots
-  // and the share card all say Match Play. That would make the bar a fourth
-  // surface answering "which game is this round about" its own way, which is
-  // the exact drift the one-default-primary-game rule exists to stop.
-  // Index 0 is the fallback for a primary game that drew no row (inert config).
-  // The `main` guard is load-bearing, not defensive: the "Side bets" row carries
-  // `gameId: undefined` on purpose, so matching on a bare `primaryGame(round)?.gameId`
-  // would find THAT row whenever there is no primary game — folding to the
-  // aggregate and hiding the main event, the exact outcome the paragraph above
-  // exists to prevent. Unreachable today (no primary game means no games means
-  // no rows), which is why it has to be structural rather than remembered.
+  // ONE STATE (MAI-106). The bar shows the round's primary game and nothing
+  // else; everything else is one tap away in the standings sheet. It used to
+  // have a fold between those two, and that middle state was a summary of
+  // summaries — more than the recap, still not the accounting, so the reader
+  // opened the sheet anyway. It is also what made the bar tall enough to bury
+  // the award grid (MAI-104). The rule it now obeys is the one at the top of
+  // the UI conventions: the bar recaps, the sheet accounts.
+  const shownGames = shown(round.games)
+  // The SAME primary game every other surface uses (src/lib/gameRoles.ts) —
+  // the scorecard's underlines, the stroke dots, the share card. Falls through
+  // to games[0] for a round of nothing but side bets, so that round shows its
+  // first bet and needs no special case here. `find` re-checks against the
+  // games that actually DREW, since primaryGame doesn't know about derivations,
+  // and every candidate is a real game — no row carries an absent id now that
+  // the side-bets aggregate is gone — so an absent primary simply finds nothing
+  // and takes the fallback.
   const primary = primaryGame(round)
-  const keptRow = (primary && barRows.find((r) => r.gameId === primary.gameId)) ?? barRows[0]
-  const visibleRows = folded && keptRow ? [keptRow] : barRows
-  const toggleBar = () => {
-    const next = !barCollapsed
-    setBarCollapsed(next)
-    writeBarCollapsed(next)
-  }
+  const barGame = shownGames.find((g) => g.gameId === primary?.gameId) ?? shownGames[0]
+  const barDerivation = barGame && derivations.get(barGame.gameId)
+  // GAMES, not rows. The number means "how many more bets the sheet will show
+  // you", so it has to count what the sheet renders — one panel per game.
+  // Counting rows over-promises: side bets with live positions used to draw an
+  // aggregate row PLUS one row each, which would say four for three bets.
+  // Only games with a derivation, because an engine that rejected its config
+  // draws no panel and must not be counted (deriveRound).
+  const otherGames = Math.max(0, shownGames.length - 1)
 
   // Walking to another tee puts the picker away. Its key is hole-scoped, so an
   // Adjust left open on 5 would still be open on the way back to 5 — a stale
@@ -944,37 +862,40 @@ export function ScoringScreen() {
               🏁 Finish round
             </BigButton>
           ) : (
-            <div className="flex items-start gap-2">
-              <button className="min-w-0 flex-1 text-left" onClick={() => setStandingsOpen(true)}>
-                {visibleRows.map((r) => r.node)}
-              </button>
-              {/* A SIBLING of the sheet button, never nested inside it: a button
-                  within a button is invalid HTML, and the browsers that tolerate
-                  it fire both handlers — so folding would also throw the
-                  standings sheet open over the bar it just made room under. */}
-              {foldable && (
-                <button
-                  onClick={toggleBar}
-                  aria-expanded={!folded}
-                  aria-label={
-                    folded ? `expand summary — ${barRows.length - 1} more` : 'collapse summary'
-                  }
-                  // 44px FLOOR, not more padding. This is the newest control on
-                  // the screen and it is tapped one-handed, outdoors, mid-round;
-                  // padding sized to the folded state (`+3` beside the arrow)
-                  // leaves the expanded state — arrow alone, the tap that
-                  // COLLAPSES — at 34x39, and it would shrink again the day the
-                  // label changes. A floor holds whatever is inside it.
-                  // Arbitrary px on purpose: Tailwind's scale is rem-based
-                  // against this app's 19px root, so `size-11` is 52px, not 44 —
-                  // the same trap `size-16` is called out for in CLAUDE.md.
-                  className="pixel-press font-display inline-flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center self-start border-stone-700 bg-stone-900 px-1 text-[10px] uppercase text-stone-400"
-                >
-                  {folded && <span className="mr-1.5 tabular-nums">+{barRows.length - 1}</span>}
-                  <DisclosureArrow open={!folded} />
-                </button>
+            /* ONE button over the whole bar (MAI-106). It was briefly a pair —
+               a summary button beside a fold toggle — which is why the nesting
+               hazard was worth a comment; with one state there is one target,
+               and the whole strip is a 44px-plus tap. */
+            <button
+              className="w-full text-left"
+              onClick={() => setStandingsOpen(true)}
+              aria-label={
+                otherGames > 0
+                  ? `standings — ${otherGames} more ${otherGames === 1 ? 'bet' : 'bets'}`
+                  : 'standings'
+              }
+            >
+              {barGame && barDerivation && (
+                <div className="flex items-baseline justify-between gap-3 py-0.5">
+                  <span className="font-display text-[10px] uppercase text-felt-300">
+                    {gameLabel(barGame, round.games)}
+                  </span>
+                  <GameSummary derivation={barDerivation} />
+                </div>
               )}
-            </div>
+              {/* The only thing on the bar that is not the recap: how much more
+                  the sheet holds. Not a control — the whole bar opens the sheet
+                  — so it is a plain line, and it says nothing at all when there
+                  is nothing more to show. */}
+              {otherGames > 0 && (
+                <div className="font-display flex items-baseline justify-end gap-1.5 pt-1 text-[10px] uppercase text-felt-400">
+                  <span className="tabular-nums">
+                    {otherGames} more {otherGames === 1 ? 'bet' : 'bets'}
+                  </span>
+                  <span aria-hidden="true">▶</span>
+                </div>
+              )}
+            </button>
           )}
         </div>
       </div>
@@ -1051,6 +972,32 @@ export function ScoringScreen() {
                     <GlyphText text={s} />
                   </p>
                 ))}
+                {/* THE LIVE POSITION, which the money below cannot state
+                    (MAI-106). A bet settling at the end contributes zero to the
+                    settlement, so a carrying CTP shows "$0 · 0 CTPs" on every
+                    player card while $3 rides on the next par 3 — and this is
+                    now the only surface that says so. It used to be a pinned-bar
+                    row; the bar was cut to the primary game, and the snake kept
+                    its position only because its own `holeSummary` happens to
+                    state it. Reading `openBet` here means every award game gets
+                    the same treatment by contract rather than by luck.
+
+                    Above the player cards, because it is what just happened
+                    rather than a total — the same reason `holeSummary` leads
+                    (MAI-84).
+
+                    Skipped when the ledger above already carries the same
+                    string, which is not a proxy but the literal thing to avoid:
+                    of the three engines declaring `openBet` (ctp, longDrive,
+                    snake) only the snake also has `detailLines`, and it repeats
+                    its position verbatim there. Compared by VALUE rather than
+                    keyed off "has any detailLines", so a future game with a
+                    ledger about something else still gets its position shown. */}
+                {d.openBet && !d.detailLines?.some((l) => l.value === d.openBet) && (
+                  <p className="font-display mb-2 text-[10px] uppercase text-felt-400">
+                    {d.openBet}
+                  </p>
+                )}
                 {/* Name and money share the top line; the per-bet status gets
                     its own beneath. Squeezing all three into one row wrapped a
                     long name onto two lines and — worse — broke "-$5" between
@@ -1080,9 +1027,7 @@ export function ScoringScreen() {
                           {formatCentsSigned(line.amountCents)}
                         </span>
                       </div>
-                      {line.detail && (
-                        <p className="mt-1 text-stone-400">{line.detail}</p>
-                      )}
+                      {line.detail && <p className="mt-1 text-stone-400">{line.detail}</p>}
                     </motion.li>
                   ))}
                 </ul>
@@ -1134,41 +1079,6 @@ export function ScoringScreen() {
       <CelebrationLayer view={view} />
     </main>
   )
-}
-
-/**
- * The collapsed side-bets line: who is up and who is down across every side
- * bet at once.
- *
- * This is a RUNNING AGGREGATE, which is the documented exception rather than
- * the rule — a game's own bar row recaps the latest decided hole (see
- * core/summary.ts). Nothing else compresses N games into one line, and the
- * per-hole detail is one tap away in the standings sheet.
- *
- * Extremes only: the biggest winner and the biggest loser. Ties keep
- * `round.players` order, so the row cannot reshuffle between re-derives while
- * two players sit level.
- */
-function sideBetSummary(
-  players: readonly Round['players'][number][],
-  derivations: readonly GameDerivation[],
-): SummaryPart[] {
-  const combined = combineSettlements(
-    players.map((p) => p.playerId),
-    derivations.map((d) => d.settlement),
-  )
-  const moved = players
-    .map((p) => ({ name: p.name, cents: combined[p.playerId] ?? 0 }))
-    .filter((p) => p.cents !== 0)
-  // Same wording the per-game convention uses before a hole is decided, rather
-  // than a row of "+$0"s that looks like a result.
-  if (moved.length === 0) return [{ label: '', value: 'no money yet' }]
-  const top = moved.reduce((a, b) => (b.cents > a.cents ? b : a))
-  const bottom = moved.reduce((a, b) => (b.cents < a.cents ? b : a))
-  const parts = [{ label: '', value: `${top.name} ${formatCentsSigned(top.cents)}` }]
-  // Zero-sum means a non-empty list always has both ends, but never assume it.
-  if (bottom !== top) parts.push({ label: '', value: `${bottom.name} ${formatCentsSigned(bottom.cents)}` })
-  return parts
 }
 
 function HoleArrow({
